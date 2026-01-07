@@ -27,6 +27,10 @@
 #include "pism/util/Context.hh"
 #include <vector>
 
+#if Pism_USE_CUDA_SIA
+#include "pism/stressbalance/timestepping_cuda.hh"
+#endif
+
 namespace pism {
 
 CFLData::CFLData() {
@@ -52,6 +56,35 @@ CFLData max_timestep_cfl_3d(const array::Scalar &ice_thickness,
   Config::ConstPtr config = grid->ctx()->config();
 
   double dt_max = config->get_number("time_stepping.maximum_time_step", "seconds");
+
+#if Pism_USE_CUDA_SIA
+  if (stressbalance::cuda::vec_is_cuda(ice_thickness) &&
+      stressbalance::cuda::vec_is_cuda(cell_type) &&
+      stressbalance::cuda::vec_is_cuda(u3) &&
+      stressbalance::cuda::vec_is_cuda(v3) &&
+      stressbalance::cuda::vec_is_cuda(w3)) {
+    double u_max_local = 0.0;
+    double v_max_local = 0.0;
+    double w_max_local = 0.0;
+    double dt_min_local = dt_max;
+
+    stressbalance::cuda::max_timestep_cfl_3d_local(
+        ice_thickness, cell_type, u3, v3, w3,
+        grid->xs(), grid->ys(), grid->xm(), grid->ym(),
+        static_cast<int>(grid->Mz()), grid->z().data(),
+        1.0 / grid->dx(), 1.0 / grid->dy(), dt_max,
+        &u_max_local, &v_max_local, &w_max_local, &dt_min_local);
+
+    CFLData result;
+    std::vector<double> data = {u_max_local, v_max_local, w_max_local}, tmp(3, 0.0);
+    GlobalMax(grid->com, data.data(), tmp.data(), 3);
+    result.u_max = tmp[0];
+    result.v_max = tmp[1];
+    result.w_max = tmp[2];
+    result.dt_max = MaxTimestep(GlobalMin(grid->com, dt_min_local));
+    return result;
+  }
+#endif
 
   array::AccessScope list{&ice_thickness, &u3, &v3, &w3, &cell_type};
 
@@ -129,6 +162,30 @@ CFLData max_timestep_cfl_2d(const array::Scalar &ice_thickness,
   const double
     dx = grid->dx(),
     dy = grid->dy();
+
+#if Pism_USE_CUDA_SIA
+  if (stressbalance::cuda::vec_is_cuda(cell_type) &&
+      stressbalance::cuda::vec_is_cuda(velocity)) {
+    double u_max_local = 0.0;
+    double v_max_local = 0.0;
+    double dt_min_local = dt_max;
+
+    stressbalance::cuda::max_timestep_cfl_2d_local(
+        cell_type, velocity,
+        grid->xs(), grid->ys(), grid->xm(), grid->ym(),
+        dx, dy, dt_max,
+        &u_max_local, &v_max_local, &dt_min_local);
+
+    CFLData result;
+    std::vector<double> data = {u_max_local, v_max_local}, tmp(2, 0.0);
+    GlobalMax(grid->com, data.data(), tmp.data(), 2);
+    result.u_max = tmp[0];
+    result.v_max = tmp[1];
+    result.w_max = 0.0;
+    result.dt_max = MaxTimestep(GlobalMin(grid->com, dt_min_local));
+    return result;
+  }
+#endif
 
   array::AccessScope list{&velocity, &cell_type};
 

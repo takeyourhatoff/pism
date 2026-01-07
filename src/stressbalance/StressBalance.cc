@@ -31,6 +31,10 @@
 #include "pism/geometry/Geometry.hh"
 #include "pism/util/Context.hh"
 
+#if Pism_USE_CUDA_SIA
+#include "pism/stressbalance/StressBalance_cuda.hh"
+#endif
+
 namespace pism {
 namespace stressbalance {
 
@@ -282,6 +286,24 @@ void StressBalance::compute_vertical_velocity(const array::CellType1 &mask,
 
   const bool use_upstream_fd = m_config->get_string("stress_balance.vertical_velocity_approximation") == "upstream";
 
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(u) && cuda::vec_is_cuda(v) &&
+      cuda::vec_is_cuda(result) &&
+      (!basal_melt_rate || cuda::vec_is_cuda(*basal_melt_rate))) {
+    const auto &z = m_grid->z();
+    const int xs = m_grid->xs();
+    const int ys = m_grid->ys();
+    const int xm = m_grid->xm();
+    const int ym = m_grid->ym();
+    const int Mz = static_cast<int>(m_grid->Mz());
+    cuda::compute_vertical_velocity(mask, u, v, basal_melt_rate, result,
+                                    xs, ys, xm, ym, Mz, z.data(),
+                                    m_grid->dx(), m_grid->dy(),
+                                    use_upstream_fd ? 1 : 0);
+    return;
+  }
+#endif
+
   array::AccessScope list{&u, &v, &mask, &result};
 
   if (basal_melt_rate) {
@@ -518,6 +540,56 @@ void StressBalance::compute_volumetric_strain_heating(const Inputs &inputs) {
     n = flow_law.exponent(),
     exponent = 0.5 * (1.0 / n + 1.0),
     e_to_a_power = pow(enhancement_factor,-1.0/n);
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(*enthalpy) &&
+      cuda::vec_is_cuda(thickness) && cuda::vec_is_cuda(u) &&
+      cuda::vec_is_cuda(v) && cuda::vec_is_cuda(m_strain_heating)) {
+    int flow_law_mode = -1;
+    const std::string flow_name = flow_law.name();
+    if (flow_name == "Paterson-Budd") {
+      flow_law_mode = 0;
+    } else if (flow_name == "Paterson-Budd (cold case)") {
+      flow_law_mode = 1;
+    } else if (flow_name == "Paterson-Budd (warm case)") {
+      flow_law_mode = 2;
+    }
+
+    if (flow_law_mode >= 0) {
+      const auto &z = m_grid->z();
+      const int xs = m_grid->xs();
+      const int ys = m_grid->ys();
+      const int xm = m_grid->xm();
+      const int ym = m_grid->ym();
+      const int Mz = static_cast<int>(m_grid->Mz());
+
+      const double A_cold = m_config->get_number("flow_law.Paterson_Budd.A_cold");
+      const double A_warm = m_config->get_number("flow_law.Paterson_Budd.A_warm");
+      const double Q_cold = m_config->get_number("flow_law.Paterson_Budd.Q_cold");
+      const double Q_warm = m_config->get_number("flow_law.Paterson_Budd.Q_warm");
+      const double T_crit = m_config->get_number("flow_law.Paterson_Budd.T_critical");
+      const double gas_const = m_config->get_number("constants.ideal_gas_constant");
+      const double T_melting = m_config->get_number("constants.fresh_water.melting_point_temperature");
+      const double beta = m_config->get_number("constants.ice.beta_Clausius_Clapeyron");
+      const double c_i = m_config->get_number("constants.ice.specific_heat_capacity");
+      const double T_0 = m_config->get_number("enthalpy_converter.T_reference");
+      const double rho_i = m_config->get_number("constants.ice.density");
+      const double g = m_config->get_number("constants.standard_gravity");
+      const double p_air = m_config->get_number("surface.pressure");
+
+      cuda::compute_volumetric_strain_heating(mask, u, v, thickness, *enthalpy,
+                                              m_strain_heating,
+                                              xs, ys, xm, ym, Mz, z.data(),
+                                              m_grid->dx(), m_grid->dy(),
+                                              exponent, e_to_a_power,
+                                              flow_law_mode,
+                                              A_cold, A_warm, Q_cold, Q_warm, T_crit,
+                                              gas_const, n, T_melting, beta, c_i, T_0,
+                                              rho_i, g, p_air);
+      return;
+    }
+  }
+#endif
 
   array::AccessScope list{&mask, enthalpy, &m_strain_heating, &thickness, &u, &v};
 
