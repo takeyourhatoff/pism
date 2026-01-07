@@ -130,6 +130,12 @@ if(Pism_BUILD_EXTRA_EXECS)
   pism_test (Verification:SSAFEM_linear_flow ssa/ssafem_test_linear.sh)
 
   pism_test (Verification:SSAFEM_plug_flow ssa/ssafem_test_plug.sh)
+
+  if (Pism_USE_CUDA_SIA)
+    pism_test (SIA_CUDA_smallgrid sia_cuda_smallgrid.sh)
+    set_property(TEST "SIA_CUDA_smallgrid:sia_cuda_smallgrid.sh" PROPERTY
+      SKIP_REGULAR_EXPRESSION "No CUDA device detected")
+  endif ()
 endif()
 
 if(Pism_BUILD_PYTHON_BINDINGS)

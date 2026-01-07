@@ -285,6 +285,9 @@ int main(int argc, char *argv[]) {
     std::string usage = "\n"
       "usage of SIAFD_TEST:\n"
       "  run siafd_test -Mx <number> -My <number> -Mz <number> -o foo.nc\n"
+      "  optional: -steps <number> (repeat SIA update for timing)\n"
+      "  optional: -no_report (skip error reporting)\n"
+      "  optional: -no_full_update (skip 3D velocity/strain heating for benchmarking)\n"
       "\n";
 
     bool stop = show_usage_check_req_opts(*ctx->log(), "siafd_test", {}, usage);
@@ -293,6 +296,14 @@ int main(int argc, char *argv[]) {
       return 0;
     }
 
+    const bool no_output = options::Bool("-no_output", "skip writing output files");
+    const bool no_report = options::Bool("-no_report", "skip error reporting");
+    const bool no_full_update =
+        options::Bool("-no_full_update", "skip 3D velocity and strain heating (benchmarking)");
+    int steps = options::Integer("-steps", "number of SIA update steps", 1);
+    if (steps < 1) {
+      steps = 1;
+    }
     auto output_file = config->get_string("output.file");
 
     grid::Parameters P(*config);
@@ -355,7 +366,12 @@ int main(int argc, char *argv[]) {
     // Initialize the SIA solver:
     stress_balance.init();
 
-    bool full_update = true;
+    bool full_update = !no_full_update;
+    bool report_errors = !no_report;
+    if (!full_update && report_errors) {
+      ctx->log()->message(1, "Skipping error report because -no_full_update was set.\n");
+      report_errors = false;
+    }
 
     stressbalance::Inputs inputs;
     inputs.geometry              = &geometry;
@@ -363,7 +379,9 @@ int main(int argc, char *argv[]) {
     inputs.enthalpy              = &enthalpy;
     inputs.age                   = &age;
 
-    stress_balance.update(inputs, full_update);
+    for (int step = 0; step < steps; ++step) {
+      stress_balance.update(inputs, full_update);
+    }
 
     // Report errors relative to the exact solution:
     const array::Array3D
@@ -373,24 +391,30 @@ int main(int argc, char *argv[]) {
 
     const array::Array3D &sigma = stress_balance.volumetric_strain_heating();
 
-    reportErrors(*grid, ctx->unit_system(),
-                 geometry.ice_thickness, u3, v3, w3, sigma);
+    if (report_errors) {
+      reportErrors(*grid, ctx->unit_system(),
+                   geometry.ice_thickness, u3, v3, w3, sigma);
+    }
 
-    // Write results to an output file:
-    File file(grid->com, output_file, io::PISM_NETCDF3, io::PISM_READWRITE_MOVE);
-    io::define_time(file, *ctx);
-    io::append_time(file, *ctx->config(), ctx->time()->current());
+    if (!no_output) {
+      // Write results to an output file:
+      File file(grid->com, output_file,
+                string_to_backend(config->get_string("output.format")),
+                io::PISM_READWRITE_MOVE);
+      io::define_time(file, *ctx);
+      io::append_time(file, *ctx->config(), ctx->time()->current());
 
-    geometry.ice_surface_elevation.write(file);
-    geometry.ice_thickness.write(file);
-    geometry.cell_type.write(file);
-    geometry.bed_elevation.write(file);
+      geometry.ice_surface_elevation.write(file);
+      geometry.ice_thickness.write(file);
+      geometry.cell_type.write(file);
+      geometry.bed_elevation.write(file);
 
-    sia->diffusivity().write(file);
-    u3.write(file);
-    v3.write(file);
-    w3.write(file);
-    sigma.write(file);
+      sia->diffusivity().write(file);
+      u3.write(file);
+      v3.write(file);
+      w3.write(file);
+      sigma.write(file);
+    }
   }
   catch (...) {
     handle_fatal_errors(com);
