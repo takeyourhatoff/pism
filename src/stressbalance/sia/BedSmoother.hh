@@ -92,9 +92,12 @@ public:
   void smoothed_thk(const array::Scalar &usurf,
                     const array::Scalar &thk,
                     const array::CellType2 &mask,
-                    array::Scalar &thksmooth) const;
+                    array::Scalar &thksmooth,
+                    bool update_ghosts = true) const;
 
-  void theta(const array::Scalar &usurf, array::Scalar &result) const;
+  void theta(const array::Scalar &usurf,
+             array::Scalar &result,
+             bool update_ghosts = true) const;
 
   const array::Scalar& smoothed_bed() const;
 protected:
@@ -119,6 +122,8 @@ protected:
   std::shared_ptr<petsc::Vec> m_topgsmoothp0;
   //! maximum elevation at (i,j) of local topography (nearby patch)
   std::shared_ptr<petsc::Vec> m_maxtlp0, m_C2p0, m_C3p0, m_C4p0;
+  mutable bool m_topg_ghosts_valid = false;
+  mutable bool m_coeff_ghosts_valid = false;
 
   void preprocess_bed(const array::Scalar &topg,
                       unsigned int Nx_in, unsigned int Ny_in);
@@ -131,4 +136,3 @@ protected:
 } // end of namespace pism
 
 #endif  // __BedSmoother_hh
-

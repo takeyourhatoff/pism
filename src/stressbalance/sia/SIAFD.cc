@@ -21,6 +21,11 @@
 
 #include "pism/stressbalance/sia/BedSmoother.hh"
 #include "pism/stressbalance/sia/SIAFD.hh"
+#include "pism/stressbalance/sia/SIAFD_stencils.hh"
+#include "pism/pism_config.hh"
+#if Pism_USE_CUDA_SIA
+#include "pism/stressbalance/sia/SIAFD_cuda.hh"
+#endif
 #include "pism/geometry/Geometry.hh"
 #include "pism/rheology/FlowLawFactory.hh"
 #include "pism/rheology/grain_size_vostok.hh"
@@ -32,6 +37,7 @@
 #include "pism/util/array/CellType.hh"
 #include "pism/util/array/Scalar.hh"
 #include "pism/util/error_handling.hh"
+#include "pism/util/petscwrappers/Vec.hh"
 #include "pism/util/pism_utilities.hh"
 #include "pism/util/array/Vector.hh"
 
@@ -49,7 +55,8 @@ SIAFD::SIAFD(std::shared_ptr<const Grid> g)
       m_delta_0(m_grid, "delta_0", array::WITH_GHOSTS, m_grid->z()),
       m_delta_1(m_grid, "delta_1", array::WITH_GHOSTS, m_grid->z()),
       m_work_3d_0(m_grid, "work_3d_0", array::WITH_GHOSTS, m_grid->z()),
-      m_work_3d_1(m_grid, "work_3d_1", array::WITH_GHOSTS, m_grid->z()) {
+      m_work_3d_1(m_grid, "work_3d_1", array::WITH_GHOSTS, m_grid->z()),
+      m_I_valid(false) {
   // bed smoother
   m_bed_smoother = new BedSmoother(m_grid);
 
@@ -122,6 +129,8 @@ void SIAFD::init() {
 //! \brief Do the update; if full_update == false skip the update of 3D velocities and strain
 //! heating.
 void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, bool full_update) {
+  m_I_valid = false;
+  m_geometry_ghosts_valid = false;
 
   // Check if the smoothed bed computed by BedSmoother is out of date and
   // recompute if necessary.
@@ -146,6 +155,8 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
     compute_3d_horizontal_velocity(*inputs.geometry, m_h_x, m_h_y, sliding_velocity, m_u, m_v);
     profiling().end("sia.3d_velocity");
   }
+
+  m_geometry_ghosts_valid = false;
 }
 
 
@@ -187,6 +198,7 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
 */
 void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered1 &h_x,
                                      array::Staggered1 &h_y) {
+  ensure_geometry_ghosts(*inputs.geometry);
 
   const std::string method = m_config->get_string("stress_balance.sia.surface_gradient_method");
 
@@ -211,6 +223,30 @@ void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered1 &h_
   }
 }
 
+void SIAFD::ensure_geometry_ghosts(const Geometry &geometry) {
+#if Pism_USE_CUDA_SIA
+  if (m_geometry_ghosts_valid) {
+    return;
+  }
+
+  if (!(cuda::vec_is_cuda(geometry.ice_surface_elevation) ||
+        cuda::vec_is_cuda(geometry.ice_thickness) ||
+        cuda::vec_is_cuda(geometry.bed_elevation) ||
+        cuda::vec_is_cuda(geometry.cell_type))) {
+    return;
+  }
+
+  const_cast<array::Scalar2 &>(geometry.ice_surface_elevation).update_ghosts();
+  const_cast<array::Scalar2 &>(geometry.ice_thickness).update_ghosts();
+  const_cast<array::Scalar2 &>(geometry.bed_elevation).update_ghosts();
+  const_cast<array::CellType2 &>(geometry.cell_type).update_ghosts();
+
+  m_geometry_ghosts_valid = true;
+#else
+  (void)geometry;
+#endif
+}
+
 //! \brief Compute the ice surface gradient using the eta-transformation.
 void SIAFD::surface_gradient_eta(const array::Scalar2 &ice_thickness,
                                  const array::Scalar2 &bed_elevation, array::Staggered1 &h_x,
@@ -222,63 +258,61 @@ void SIAFD::surface_gradient_eta(const array::Scalar2 &ice_thickness,
 
   array::Scalar2 &eta = m_work_2d_0;
 
-  // compute eta = H^{8/3}, which is more regular, on reg grid
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
 
-  array::AccessScope list{ &eta, &ice_thickness, &h_x, &h_y, &bed_elevation };
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(eta) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y) &&
+      cuda::vec_is_cuda(ice_thickness) && cuda::vec_is_cuda(bed_elevation)) {
+    if (!m_geometry_ghosts_valid) {
+      const_cast<array::Scalar2 &>(ice_thickness).update_ghosts();
+      const_cast<array::Scalar2 &>(bed_elevation).update_ghosts();
+      m_geometry_ghosts_valid = true;
+    }
+    cuda::surface_gradient_eta(ice_thickness, bed_elevation, eta, h_x, h_y,
+                               xs, ys, xm, ym, eta.stencil_width(),
+                               dx, dy, invpow, dinvpow, etapow);
+    return;
+  }
+#endif
 
   auto GHOSTS = eta.stencil_width();
 
-  for (auto p = m_grid->points(GHOSTS); p; p.next()) {
-    const int i = p.i(), j = p.j();
+  petsc::DMDAVecArray thk_arr(ice_thickness.dm(), ice_thickness.vec());
+  petsc::DMDAVecArray bed_arr(bed_elevation.dm(), bed_elevation.vec());
+  petsc::DMDAVecArray eta_arr(eta.dm(), eta.vec());
+  petsc::DMDAVecArrayDOF hx_arr(h_x.dm(), h_x.vec());
+  petsc::DMDAVecArrayDOF hy_arr(h_y.dm(), h_y.vec());
 
-    eta(i, j) = pow(ice_thickness(i, j), etapow);
+  {
+    sia_kernels::EtaFromThickness<sia_kernels::HostArray2DConstView,
+                                  sia_kernels::HostArray2DView>
+      functor{{static_cast<const double *const *>(thk_arr.get())},
+              {static_cast<double **>(eta_arr.get())},
+              etapow};
+    for (auto p = m_grid->points(GHOSTS); p; p.next()) {
+      functor(p.i(), p.j());
+    }
   }
-
-  // now use Mahaffy on eta to get grad h on staggered;
-  // note   grad h = (3/8) eta^{-5/8} grad eta + grad b  because  h = H + b
 
   assert(eta.stencil_width() >= 2);
   assert(h_x.stencil_width() >= 1);
   assert(h_y.stencil_width() >= 1);
 
-  for (auto p = m_grid->points(1); p; p.next()) {
-    const int i = p.i(), j = p.j();
-
-    auto b = bed_elevation.box(i, j);
-    auto e = eta.box(i, j);
-
-    // i-offset
-    {
-      double mean_eta = 0.5 * (e.e + e.c);
-      if (mean_eta > 0.0) {
-        double factor = invpow * pow(mean_eta, dinvpow);
-        h_x(i, j, 0)  = factor * (e.e - e.c) / dx;
-        h_y(i, j, 0)  = factor * (e.ne + e.n - e.se - e.s) / (4.0 * dy);
-      } else {
-        h_x(i, j, 0) = 0.0;
-        h_y(i, j, 0) = 0.0;
-      }
-      // now add bed slope to get actual h_x, h_y
-      h_x(i, j, 0) += (b.e - b.c) / dx;
-      h_y(i, j, 0) += (b.ne + b.n - b.se - b.s) / (4.0 * dy);
+  {
+    sia_kernels::SurfaceGradientEta<sia_kernels::HostArray2DConstView,
+                                    sia_kernels::HostStaggeredView>
+      functor{{static_cast<const double *const *>(bed_arr.get())},
+              {static_cast<const double *const *>(eta_arr.get())},
+              {static_cast<double ***>(hx_arr.get())},
+              {static_cast<double ***>(hy_arr.get())},
+              dx, dy, invpow, dinvpow};
+    for (auto p = m_grid->points(1); p; p.next()) {
+      functor(p.i(), p.j());
     }
-
-    // j-offset
-    {
-      double mean_eta = 0.5 * (e.n + e.c);
-      if (mean_eta > 0.0) {
-        double factor = invpow * pow(mean_eta, dinvpow);
-        h_x(i, j, 1)  = factor * (e.ne + e.e - e.nw - e.w) / (4.0 * dx);
-        h_y(i, j, 1)  = factor * (e.n - e.c) / dy;
-      } else {
-        h_x(i, j, 1) = 0.0;
-        h_y(i, j, 1) = 0.0;
-      }
-      // now add bed slope to get actual h_x, h_y
-      h_x(i, j, 1) += (b.ne + b.e - b.nw - b.w) / (4.0 * dx);
-      h_y(i, j, 1) += (b.n - b.c) / dy;
-    }
-  } // end of the loop over grid points
+  }
 }
 
 
@@ -290,23 +324,39 @@ void SIAFD::surface_gradient_mahaffy(const array::Scalar &ice_surface_elevation,
 
   const array::Scalar &h = ice_surface_elevation;
 
-  array::AccessScope list{ &h_x, &h_y, &h };
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
 
-  // h_x and h_y have to have ghosts
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(h) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y)) {
+    if (!m_geometry_ghosts_valid) {
+      const_cast<array::Scalar &>(h).update_ghosts();
+      m_geometry_ghosts_valid = true;
+    }
+    cuda::surface_gradient_mahaffy(h, h_x, h_y, xs, ys, xm, ym, dx, dy);
+    return;
+  }
+#endif
+
   assert(h_x.stencil_width() >= 1);
   assert(h_y.stencil_width() >= 1);
-  // surface elevation needs more ghosts
   assert(h.stencil_width() >= 2);
 
-  for (auto p = m_grid->points(1); p; p.next()) {
-    const int i = p.i(), j = p.j();
+  petsc::DMDAVecArray h_arr(h.dm(), h.vec());
+  petsc::DMDAVecArrayDOF hx_arr(h_x.dm(), h_x.vec());
+  petsc::DMDAVecArrayDOF hy_arr(h_y.dm(), h_y.vec());
 
-    // I-offset
-    h_x(i, j, 0) = (h(i + 1, j) - h(i, j)) / dx;
-    h_y(i, j, 0) = (+h(i + 1, j + 1) + h(i, j + 1) - h(i + 1, j - 1) - h(i, j - 1)) / (4.0 * dy);
-    // J-offset
-    h_y(i, j, 1) = (h(i, j + 1) - h(i, j)) / dy;
-    h_x(i, j, 1) = (+h(i + 1, j + 1) + h(i + 1, j) - h(i - 1, j + 1) - h(i - 1, j)) / (4.0 * dx);
+  sia_kernels::SurfaceGradientMahaffy<sia_kernels::HostArray2DConstView,
+                                      sia_kernels::HostStaggeredView>
+    functor{{static_cast<const double *const *>(h_arr.get())},
+            {static_cast<double ***>(hx_arr.get())},
+            {static_cast<double ***>(hy_arr.get())},
+            dx, dy};
+
+  for (auto p = m_grid->points(1); p; p.next()) {
+    functor(p.i(), p.j());
   }
 }
 
@@ -368,7 +418,25 @@ void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevatio
 
   const auto &mask = cell_type;
 
-  array::AccessScope list{ &h_x, &h_y, &w_i, &w_j, &h, &mask };
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(h) && cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(w_i) &&
+      cuda::vec_is_cuda(w_j) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y)) {
+    if (!m_geometry_ghosts_valid) {
+      const_cast<array::Scalar2 &>(h).update_ghosts();
+      const_cast<array::CellType2 &>(mask).update_ghosts();
+      m_geometry_ghosts_valid = true;
+    }
+    cuda::surface_gradient_haseloff(h, mask, w_i, w_j, h_x, h_y, xs, ys, xm, ym, dx, dy);
+    h_x.update_ghosts();
+    h_y.update_ghosts();
+    return;
+  }
+#endif
 
   assert(mask.stencil_width() >= 2);
   assert(h.stencil_width() >= 2);
@@ -377,108 +445,42 @@ void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevatio
   assert(w_i.stencil_width() >= 1);
   assert(w_j.stencil_width() >= 1);
 
-  for (auto p = m_grid->points(1); p; p.next()) {
-    const int i = p.i(), j = p.j();
+  petsc::DMDAVecArray h_arr(h.dm(), h.vec());
+  petsc::DMDAVecArray mask_arr(mask.dm(), mask.vec());
+  petsc::DMDAVecArray wi_arr(w_i.dm(), w_i.vec());
+  petsc::DMDAVecArray wj_arr(w_j.dm(), w_j.vec());
+  petsc::DMDAVecArrayDOF hx_arr(h_x.dm(), h_x.vec());
+  petsc::DMDAVecArrayDOF hy_arr(h_y.dm(), h_y.vec());
 
-    // x-derivative, i-offset
-    {
-      if ((mask.floating_ice(i, j) && mask.ice_free_ocean(i + 1, j)) ||
-          (mask.ice_free_ocean(i, j) && mask.floating_ice(i + 1, j))) {
-        // marine margin
-        h_x(i, j, 0) = 0;
-        w_i(i, j)    = 0;
-      } else if ((mask.icy(i, j) && mask.ice_free(i + 1, j) && h(i + 1, j) > h(i, j)) ||
-                 (mask.ice_free(i, j) && mask.icy(i + 1, j) && h(i, j) > h(i + 1, j))) {
-        // ice next to a "cliff"
-        h_x(i, j, 0) = 0.0;
-        w_i(i, j)    = 0;
-      } else {
-        // default case
-        h_x(i, j, 0) = (h(i + 1, j) - h(i, j)) / dx;
-        w_i(i, j)    = 1;
-      }
-    }
-
-    // y-derivative, j-offset
-    {
-      if ((mask.floating_ice(i, j) && mask.ice_free_ocean(i, j + 1)) ||
-          (mask.ice_free_ocean(i, j) && mask.floating_ice(i, j + 1))) {
-        // marine margin
-        h_y(i, j, 1) = 0.0;
-        w_j(i, j)    = 0.0;
-      } else if ((mask.icy(i, j) && mask.ice_free(i, j + 1) && h(i, j + 1) > h(i, j)) ||
-                 (mask.ice_free(i, j) && mask.icy(i, j + 1) && h(i, j) > h(i, j + 1))) {
-        // ice next to a "cliff"
-        h_y(i, j, 1) = 0.0;
-        w_j(i, j)    = 0.0;
-      } else {
-        // default case
-        h_y(i, j, 1) = (h(i, j + 1) - h(i, j)) / dy;
-        w_j(i, j)    = 1.0;
-      }
+  {
+    sia_kernels::SurfaceGradientHaseloffPrimary<sia_kernels::HostArray2DConstView,
+                                                sia_kernels::HostArray2DView,
+                                                sia_kernels::HostStaggeredView,
+                                                sia_kernels::HostMaskView>
+      functor{{static_cast<const double *const *>(h_arr.get())},
+              {static_cast<double ***>(hx_arr.get())},
+              {static_cast<double ***>(hy_arr.get())},
+              {static_cast<double **>(wi_arr.get())},
+              {static_cast<double **>(wj_arr.get())},
+              {static_cast<const double *const *>(mask_arr.get())},
+              dx, dy};
+    for (auto p = m_grid->points(1); p; p.next()) {
+      functor(p.i(), p.j());
     }
   }
 
-  for (auto p = m_grid->points(); p; p.next()) {
-    const int i = p.i(), j = p.j();
-
-    // x-derivative, j-offset
-    {
-      if (w_j(i, j) > 0) {
-        double W = w_i(i, j) + w_i(i - 1, j) + w_i(i - 1, j + 1) + w_i(i, j + 1);
-        if (W > 0) {
-          h_x(i, j, 1) =
-              1.0 / W * (h_x(i, j, 0) + h_x(i - 1, j, 0) + h_x(i - 1, j + 1, 0) + h_x(i, j + 1, 0));
-        } else {
-          h_x(i, j, 1) = 0.0;
-        }
-      } else {
-        if (mask.icy(i, j)) {
-          double W = w_i(i, j) + w_i(i - 1, j);
-          if (W > 0) {
-            h_x(i, j, 1) = 1.0 / W * (h_x(i, j, 0) + h_x(i - 1, j, 0));
-          } else {
-            h_x(i, j, 1) = 0.0;
-          }
-        } else {
-          double W = w_i(i, j + 1) + w_i(i - 1, j + 1);
-          if (W > 0) {
-            h_x(i, j, 1) = 1.0 / W * (h_x(i - 1, j + 1, 0) + h_x(i, j + 1, 0));
-          } else {
-            h_x(i, j, 1) = 0.0;
-          }
-        }
-      }
-    } // end of "x-derivative, j-offset"
-
-    // y-derivative, i-offset
-    {
-      if (w_i(i, j) > 0) {
-        double W = w_j(i, j) + w_j(i, j - 1) + w_j(i + 1, j - 1) + w_j(i + 1, j);
-        if (W > 0) {
-          h_y(i, j, 0) =
-              1.0 / W * (h_y(i, j, 1) + h_y(i, j - 1, 1) + h_y(i + 1, j - 1, 1) + h_y(i + 1, j, 1));
-        } else {
-          h_y(i, j, 0) = 0.0;
-        }
-      } else {
-        if (mask.icy(i, j)) {
-          double W = w_j(i, j) + w_j(i, j - 1);
-          if (W > 0) {
-            h_y(i, j, 0) = 1.0 / W * (h_y(i, j, 1) + h_y(i, j - 1, 1));
-          } else {
-            h_y(i, j, 0) = 0.0;
-          }
-        } else {
-          double W = w_j(i + 1, j - 1) + w_j(i + 1, j);
-          if (W > 0) {
-            h_y(i, j, 0) = 1.0 / W * (h_y(i + 1, j - 1, 1) + h_y(i + 1, j, 1));
-          } else {
-            h_y(i, j, 0) = 0.0;
-          }
-        }
-      }
-    } // end of "y-derivative, i-offset"
+  {
+    sia_kernels::SurfaceGradientHaseloffSecondary<sia_kernels::HostArray2DConstView,
+                                                  sia_kernels::HostStaggeredView,
+                                                  sia_kernels::HostMaskView>
+      functor{{static_cast<double ***>(hx_arr.get())},
+              {static_cast<double ***>(hy_arr.get())},
+              {static_cast<const double *const *>(wi_arr.get())},
+              {static_cast<const double *const *>(wj_arr.get())},
+              {static_cast<const double *const *>(mask_arr.get())}};
+    for (auto p = m_grid->points(); p; p.next()) {
+      functor(p.i(), p.j());
+    }
   }
 
   h_x.update_ghosts();
@@ -533,8 +535,9 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
   array::Scalar2 &thk_smooth = m_work_2d_0, &theta = m_work_2d_1;
 
   array::Array3D *delta[] = { &m_delta_0, &m_delta_1 };
+  array::Array3D *I[]     = { &m_work_3d_0, &m_work_3d_1 };
 
-  result.set(0.0);
+  ensure_geometry_ghosts(geometry);
 
   const double current_time = time().current(),
                D_limit      = m_config->get_number("stress_balance.sia.max_diffusivity");
@@ -550,10 +553,101 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
   // get "theta" from Schoof (2003) bed smoothness calculation and the
   // thickness relative to the smoothed bed; each array::Scalar involved must
   // have stencil width WIDE_GHOSTS for this too work
-  m_bed_smoother->theta(geometry.ice_surface_elevation, theta);
+  m_bed_smoother->theta(geometry.ice_surface_elevation, theta, false);
 
   m_bed_smoother->smoothed_thk(geometry.ice_surface_elevation, geometry.ice_thickness,
-                               geometry.cell_type, thk_smooth);
+                               geometry.cell_type, thk_smooth, false);
+
+#if Pism_USE_CUDA_SIA
+  if (!use_age &&
+      cuda::vec_is_cuda(thk_smooth) && cuda::vec_is_cuda(theta) &&
+      cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y) &&
+      cuda::vec_is_cuda(*enthalpy) && cuda::vec_is_cuda(result) &&
+      cuda::vec_is_cuda(*delta[0]) && cuda::vec_is_cuda(*delta[1])) {
+    const std::string flow_law = m_config->get_string("stress_balance.sia.flow_law");
+    int flow_law_mode = -1;
+    if (flow_law == "pb") {
+      flow_law_mode = 0;
+    } else if (flow_law == "arr") {
+      flow_law_mode = 1;
+    } else if (flow_law == "arrwarm") {
+      flow_law_mode = 2;
+    }
+    if (flow_law_mode < 0) {
+      // Unsupported flow law for GPU diffusivity path.
+      goto cpu_path;
+    }
+    const auto &z = m_grid->z();
+    cuda::update_vertical_grid(z.data(), static_cast<int>(z.size()));
+
+    const int xs = m_grid->xs();
+    const int ys = m_grid->ys();
+    const int xm = m_grid->xm();
+    const int ym = m_grid->ym();
+    const int Mx = m_grid->Mx();
+    const int My = m_grid->My();
+    const int ghosts = 1;
+    const int periodic_x = (m_grid->periodicity() & grid::X_PERIODIC) ? 1 : 0;
+    const int periodic_y = (m_grid->periodicity() & grid::Y_PERIODIC) ? 1 : 0;
+
+    const double A_cold = m_config->get_number("flow_law.Paterson_Budd.A_cold");
+    const double A_warm = m_config->get_number("flow_law.Paterson_Budd.A_warm");
+    const double Q_cold = m_config->get_number("flow_law.Paterson_Budd.Q_cold");
+    const double Q_warm = m_config->get_number("flow_law.Paterson_Budd.Q_warm");
+    const double T_crit = m_config->get_number("flow_law.Paterson_Budd.T_critical");
+    const double gas_const = m_config->get_number("constants.ideal_gas_constant");
+    const double T_melting = m_config->get_number("constants.fresh_water.melting_point_temperature");
+    const double beta = m_config->get_number("constants.ice.beta_Clausius_Clapeyron");
+    const double c_i = m_config->get_number("constants.ice.specific_heat_capacity");
+    const double T_0 = m_config->get_number("enthalpy_converter.T_reference");
+    const double rho_i = m_config->get_number("constants.ice.density");
+    const double g = m_config->get_number("constants.standard_gravity");
+    const double p_air = m_config->get_number("surface.pressure");
+    const double n = m_flow_law->exponent();
+
+    double D_max_local = 0.0;
+    int high_diffusivity_counter_local = 0;
+    for (int o = 0; o < 2; ++o) {
+      double D_max_o = 0.0;
+      int high_count_o = 0;
+      const int gpu_full_update = full_update ? 1 : 0;
+      const int gpu_compute_I = full_update ? 1 : 0;
+      cuda::compute_diffusivity_pb(thk_smooth, theta, h_x, h_y, *enthalpy, result, *delta[o], *I[o],
+                                   xs, ys, xm, ym, Mx, My, ghosts, o, gpu_full_update, gpu_compute_I,
+                                   flow_law_mode,
+                                   periodic_x, periodic_y, limit_diffusivity ? 1 : 0,
+                                   D_limit, m_e_factor, A_cold, A_warm, Q_cold, Q_warm, T_crit,
+                                   gas_const, n, T_melting, beta, c_i, T_0, rho_i, g, p_air,
+                                   &D_max_o, &high_count_o);
+      D_max_local = std::max(D_max_local, D_max_o);
+      high_diffusivity_counter_local += high_count_o;
+    }
+
+    m_D_max = GlobalMax(m_grid->com, D_max_local);
+    high_diffusivity_counter_local = GlobalSum(m_grid->com, high_diffusivity_counter_local);
+
+    if (m_D_max > D_limit) {
+      throw RuntimeError::formatted(
+          PISM_ERROR_LOCATION,
+          "Maximum diffusivity of SIA flow (%f m2/s) is too high.\n"
+          "This probably means that the bed elevation or the ice thickness is "
+          "too rough.\n"
+          "Increase stress_balance.sia.max_diffusivity to suppress this message.",
+          m_D_max);
+    }
+
+    if (high_diffusivity_counter_local > 0) {
+      m_log->message(2, "  SIA diffusivity was capped at %.2f m2/s at %d locations.\n",
+                     D_limit, high_diffusivity_counter_local);
+    }
+    m_I_valid = full_update;
+    return;
+  }
+#endif
+
+cpu_path:
+
+  result.set(0.0);
 
   array::AccessScope list{ &result, &theta, &thk_smooth, &h_x, &h_y, enthalpy };
 
@@ -748,17 +842,38 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
 void SIAFD::compute_diffusive_flux(const array::Staggered &h_x, const array::Staggered &h_y,
                                    const array::Staggered &diffusivity, array::Staggered &result) {
 
-  array::AccessScope list{ &diffusivity, &h_x, &h_y, &result };
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y) &&
+      cuda::vec_is_cuda(diffusivity) && cuda::vec_is_cuda(result)) {
+    for (int o = 0; o < 2; o++) {
+      cuda::diffusive_flux(h_x, h_y, diffusivity, result, xs, ys, xm, ym, o);
+    }
+    return;
+  }
+#endif
+
+  petsc::DMDAVecArrayDOF hx_arr(h_x.dm(), h_x.vec());
+  petsc::DMDAVecArrayDOF hy_arr(h_y.dm(), h_y.vec());
+  petsc::DMDAVecArrayDOF D_arr(diffusivity.dm(), diffusivity.vec());
+  petsc::DMDAVecArrayDOF out_arr(result.dm(), result.vec());
 
   for (int o = 0; o < 2; o++) {
     ParallelSection loop(m_grid->com);
     try {
+      sia_kernels::DiffusiveFlux<sia_kernels::HostStaggeredConstView,
+                                 sia_kernels::HostStaggeredView>
+        functor{{static_cast<const double *const *const *>(hx_arr.get())},
+                {static_cast<const double *const *const *>(hy_arr.get())},
+                {static_cast<const double *const *const *>(D_arr.get())},
+                {static_cast<double ***>(out_arr.get())},
+                o};
       for (auto p = m_grid->points(1); p; p.next()) {
-        const int i = p.i(), j = p.j();
-
-        const double slope = (o == 0) ? h_x(i, j, o) : h_y(i, j, o);
-
-        result(i, j, o) = -diffusivity(i, j, o) * slope;
+        functor(p.i(), p.j());
       }
     } catch (...) {
       loop.failed();
@@ -780,6 +895,11 @@ void SIAFD::compute_diffusive_flux(const array::Staggered &h_x, const array::Sta
  * of the 3D-distributed horizontal ice velocity.
  */
 void SIAFD::compute_I(const Geometry &geometry) {
+  if (m_I_valid) {
+    return;
+  }
+
+  ensure_geometry_ghosts(geometry);
 
   array::Scalar &thk_smooth = m_work_2d_0;
   array::Array3D *I[]       = { &m_work_3d_0, &m_work_3d_1 };
@@ -789,7 +909,25 @@ void SIAFD::compute_I(const Geometry &geometry) {
 
   const auto &mask = geometry.cell_type;
 
-  m_bed_smoother->smoothed_thk(h, H, mask, thk_smooth);
+  m_bed_smoother->smoothed_thk(h, H, mask, thk_smooth, false);
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(thk_smooth) && cuda::vec_is_cuda(*delta[0]) &&
+      cuda::vec_is_cuda(*delta[1]) && cuda::vec_is_cuda(*I[0]) &&
+      cuda::vec_is_cuda(*I[1])) {
+    const auto &z = m_grid->z();
+    cuda::update_vertical_grid(z.data(), static_cast<int>(z.size()));
+    const int xs = m_grid->xs();
+    const int ys = m_grid->ys();
+    const int xm = m_grid->xm();
+    const int ym = m_grid->ym();
+    const int ghosts = 1;
+    for (int o = 0; o < 2; ++o) {
+      cuda::compute_I(thk_smooth, *delta[o], *I[o], xs, ys, xm, ym, ghosts, o);
+    }
+    return;
+  }
+#endif
 
   array::AccessScope list{ delta[0], delta[1], I[0], I[1], &thk_smooth };
 
@@ -839,6 +977,7 @@ void SIAFD::compute_I(const Geometry &geometry) {
     }
     loop.check();
   } // o-loop
+  m_I_valid = true;
 }
 
 //! \brief Compute horizontal components of the SIA velocity (in 3D).
@@ -864,9 +1003,31 @@ void SIAFD::compute_3d_horizontal_velocity(const Geometry &geometry, const array
                                            const array::Vector &sliding_velocity,
                                            array::Array3D &u_out, array::Array3D &v_out) {
 
+  array::Array3D *I[] = { &m_work_3d_0, &m_work_3d_1 };
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(m_delta_0) && cuda::vec_is_cuda(m_delta_1) &&
+      cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y) &&
+      cuda::vec_is_cuda(sliding_velocity) && cuda::vec_is_cuda(u_out) &&
+      cuda::vec_is_cuda(v_out)) {
+    const auto &z = m_grid->z();
+    cuda::update_vertical_grid(z.data(), static_cast<int>(z.size()));
+    const int xs = m_grid->xs();
+    const int ys = m_grid->ys();
+    const int xm = m_grid->xm();
+    const int ym = m_grid->ym();
+    const int Mz = m_grid->Mz();
+    cuda::compute_3d_horizontal_velocity_from_delta(m_delta_0, m_delta_1, h_x, h_y,
+                                                    sliding_velocity, u_out, v_out,
+                                                    xs, ys, xm, ym, Mz);
+    u_out.update_ghosts();
+    v_out.update_ghosts();
+    return;
+  }
+#endif
+
   compute_I(geometry);
   // after the compute_I() call work_3d[0,1] contains I on the staggered grid
-  array::Array3D *I[] = { &m_work_3d_0, &m_work_3d_1 };
 
   array::AccessScope list{ &u_out, &v_out, &h_x, &h_y, &sliding_velocity, I[0], I[1] };
 

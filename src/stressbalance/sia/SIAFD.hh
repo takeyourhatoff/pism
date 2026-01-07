@@ -106,6 +106,7 @@ protected:
   virtual void compute_I(const Geometry &geometry);
 
   bool interglacial(double accumulation_time) const;
+  void ensure_geometry_ghosts(const Geometry &geometry);
 
   const unsigned int m_stencil_width;
 
@@ -125,6 +126,8 @@ protected:
 
   // profiling
   int m_event_sia;
+  bool m_I_valid;
+  bool m_geometry_ghosts_valid = false;
 
   // unit conversion
   double m_seconds_per_year;

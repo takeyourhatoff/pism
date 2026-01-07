@@ -27,6 +27,11 @@
 #include "pism/util/petscwrappers/Vec.hh"
 #include "pism/util/pism_utilities.hh"
 #include "pism/util/VariableMetadata.hh"
+#include "pism/pism_config.hh"
+#include "pism/stressbalance/sia/SIAFD_stencils.hh"
+#if Pism_USE_CUDA_SIA
+#include "pism/stressbalance/sia/SIAFD_cuda.hh"
+#endif
 
 namespace pism {
 namespace stressbalance {
@@ -95,6 +100,8 @@ average.  Only square smoothing domains are allowed with this call, which is the
 default case.
  */
 void BedSmoother::preprocess_bed(const array::Scalar &topg) {
+  m_topg_ghosts_valid = false;
+  m_coeff_ghosts_valid = false;
 
   if (m_smoothing_range <= 0.0) {
     // smoothing completely inactive.  we transfer the original bed topg,
@@ -129,6 +136,8 @@ average.
  */
 void BedSmoother::preprocess_bed(const array::Scalar &topg,
                                  unsigned int Nx, unsigned int Ny) {
+  m_topg_ghosts_valid = false;
+  m_coeff_ghosts_valid = false;
 
   if ((Nx >= m_grid->Mx()) || (Ny >= m_grid->My())) {
     throw RuntimeError(PISM_ERROR_LOCATION, "input Nx, Ny in bed smoother is too large because\n"
@@ -282,9 +291,8 @@ Call preprocess_bed() first.
 void BedSmoother::smoothed_thk(const array::Scalar &usurf,
                                const array::Scalar &thk,
                                const array::CellType2 &mask,
-                               array::Scalar &result) const {
-
-  array::AccessScope list{&mask, &m_maxtl, &result, &thk, &m_topgsmooth, &usurf};
+                               array::Scalar &result,
+                               bool update_ghosts) const {
 
   auto GHOSTS = result.stencil_width();
   assert(mask.stencil_width()         >= GHOSTS);
@@ -293,31 +301,60 @@ void BedSmoother::smoothed_thk(const array::Scalar &usurf,
   assert(m_topgsmooth.stencil_width() >= GHOSTS);
   assert(usurf.stencil_width()        >= GHOSTS);
 
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(usurf) && cuda::vec_is_cuda(thk) && cuda::vec_is_cuda(m_maxtl) &&
+      cuda::vec_is_cuda(m_topgsmooth) && cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(result)) {
+    if (update_ghosts) {
+      const_cast<array::Scalar &>(usurf).update_ghosts();
+      const_cast<array::Scalar &>(thk).update_ghosts();
+      const_cast<array::CellType2 &>(mask).update_ghosts();
+    }
+    if (!m_topg_ghosts_valid) {
+      const_cast<array::Scalar2 &>(m_maxtl).update_ghosts();
+      const_cast<array::Scalar2 &>(m_topgsmooth).update_ghosts();
+      m_topg_ghosts_valid = true;
+    }
+    cuda::bed_smoother_smoothed_thk(usurf, thk, m_maxtl, m_topgsmooth, mask, result,
+                                    xs, ys, xm, ym, GHOSTS);
+    return;
+  }
+#endif
+
+  petsc::DMDAVecArray us_arr(usurf.dm(), usurf.vec());
+  petsc::DMDAVecArray thk_arr(thk.dm(), thk.vec());
+  petsc::DMDAVecArray maxtl_arr(m_maxtl.dm(), m_maxtl.vec());
+  petsc::DMDAVecArray topg_arr(m_topgsmooth.dm(), m_topgsmooth.vec());
+  petsc::DMDAVecArray mask_arr(mask.dm(), mask.vec());
+  petsc::DMDAVecArray out_arr(result.dm(), result.vec());
+
+  const auto *us_ptr = static_cast<const double *const *>(us_arr.get());
+  const auto *thk_ptr = static_cast<const double *const *>(thk_arr.get());
+  const auto *maxtl_ptr = static_cast<const double *const *>(maxtl_arr.get());
+  const auto *topg_ptr = static_cast<const double *const *>(topg_arr.get());
+  auto *mask_ptr = static_cast<const double *const *>(mask_arr.get());
+  auto *out_ptr = static_cast<double **>(out_arr.get());
+
+  sia_kernels::BedSmoothThk<sia_kernels::HostArray2DConstView,
+                            sia_kernels::HostArray2DView,
+                            sia_kernels::HostMaskView>
+    functor{{us_ptr}, {thk_ptr}, {maxtl_ptr}, {topg_ptr}, {mask_ptr}, {out_ptr}};
+
   ParallelSection loop(m_grid->com);
   try {
     for (auto p = m_grid->points(GHOSTS); p; p.next()) {
       const int i = p.i(), j = p.j();
 
-      if (thk(i, j) < 0.0) {
+      if (thk_ptr[j][i] < 0.0) {
         throw RuntimeError::formatted(PISM_ERROR_LOCATION, "BedSmoother detects negative original thickness\n"
                                       "at location (i, j) = (%d, %d) ... ending", i, j);
       }
 
-      if (thk(i, j) == 0.0) {
-        result(i, j) = 0.0;
-      } else if (m_maxtl(i, j) >= thk(i, j)) {
-        result(i, j) = thk(i, j);
-      } else {
-        if (mask.grounded(i, j)) {
-          // if grounded, compute smoothed thickness as the difference of ice surface
-          // elevation and smoothed bed elevation, making sure the result is non-negative
-          result(i, j) = std::max(usurf(i, j) - m_topgsmooth(i, j), 0.0);
-        } else {
-          // if floating, use original thickness (note: surface elevation was
-          // computed using this thickness and the sea level elevation)
-          result(i, j) = thk(i, j);
-        }
-      }
+      functor(i, j);
     }
   } catch (...) {
     loop.failed();
@@ -347,14 +384,14 @@ maxGHOSTS, has at least GHOSTS stencil width, and throw an error if not.
 
 Call preprocess_bed() first.
  */
-void BedSmoother::theta(const array::Scalar &usurf, array::Scalar &result) const {
+void BedSmoother::theta(const array::Scalar &usurf,
+                        array::Scalar &result,
+                        bool update_ghosts) const {
 
   if ((m_Nx < 0) || (m_Ny < 0)) {
     result.set(1.0);
     return;
   }
-
-  array::AccessScope list{&m_C2, &m_C3, &m_C4, &m_maxtl, &result, &m_topgsmooth, &usurf};
 
   unsigned int GHOSTS = result.stencil_width();
   assert(m_C2.stencil_width()         >= GHOSTS);
@@ -368,33 +405,60 @@ void BedSmoother::theta(const array::Scalar &usurf, array::Scalar &result) const
     theta_min = m_config->get_number("stress_balance.sia.bed_smoother.theta_min"),
     theta_max = 1.0;
 
+  const int xs = m_grid->xs();
+  const int ys = m_grid->ys();
+  const int xm = m_grid->xm();
+  const int ym = m_grid->ym();
+
+#if Pism_USE_CUDA_SIA
+  if (cuda::vec_is_cuda(usurf) && cuda::vec_is_cuda(m_maxtl) &&
+      cuda::vec_is_cuda(m_topgsmooth) && cuda::vec_is_cuda(m_C2) &&
+      cuda::vec_is_cuda(m_C3) && cuda::vec_is_cuda(m_C4) &&
+      cuda::vec_is_cuda(result)) {
+    if (update_ghosts) {
+      const_cast<array::Scalar &>(usurf).update_ghosts();
+    }
+    if (!m_topg_ghosts_valid) {
+      const_cast<array::Scalar2 &>(m_maxtl).update_ghosts();
+      const_cast<array::Scalar2 &>(m_topgsmooth).update_ghosts();
+      m_topg_ghosts_valid = true;
+    }
+    if (!m_coeff_ghosts_valid) {
+      const_cast<array::Scalar2 &>(m_C2).update_ghosts();
+      const_cast<array::Scalar2 &>(m_C3).update_ghosts();
+      const_cast<array::Scalar2 &>(m_C4).update_ghosts();
+      m_coeff_ghosts_valid = true;
+    }
+    cuda::bed_smoother_theta(usurf, m_maxtl, m_topgsmooth, m_C2, m_C3, m_C4, result,
+                             xs, ys, xm, ym, GHOSTS,
+                             theta_min, theta_max, m_Glen_exponent);
+    return;
+  }
+#endif
+
+  petsc::DMDAVecArray us_arr(usurf.dm(), usurf.vec());
+  petsc::DMDAVecArray maxtl_arr(m_maxtl.dm(), m_maxtl.vec());
+  petsc::DMDAVecArray topg_arr(m_topgsmooth.dm(), m_topgsmooth.vec());
+  petsc::DMDAVecArray c2_arr(m_C2.dm(), m_C2.vec());
+  petsc::DMDAVecArray c3_arr(m_C3.dm(), m_C3.vec());
+  petsc::DMDAVecArray c4_arr(m_C4.dm(), m_C4.vec());
+  petsc::DMDAVecArray out_arr(result.dm(), result.vec());
+
+  sia_kernels::BedSmoothTheta<sia_kernels::HostArray2DConstView,
+                              sia_kernels::HostArray2DView>
+    functor{{static_cast<const double *const *>(us_arr.get())},
+            {static_cast<const double *const *>(maxtl_arr.get())},
+            {static_cast<const double *const *>(topg_arr.get())},
+            {static_cast<const double *const *>(c2_arr.get())},
+            {static_cast<const double *const *>(c3_arr.get())},
+            {static_cast<const double *const *>(c4_arr.get())},
+            {static_cast<double **>(out_arr.get())},
+            theta_min, theta_max, m_Glen_exponent};
+
   ParallelSection loop(m_grid->com);
   try {
     for (auto p = m_grid->points(GHOSTS); p; p.next()) {
-      const int i = p.i(), j = p.j();
-
-      const double H = usurf(i, j) - m_topgsmooth(i, j);
-      if (H > m_maxtl(i, j)) {
-        // thickness exceeds maximum variation in patch of local topography,
-        // so ice buries local topography; note maxtl >= 0 always
-        const double Hinv = 1.0 / std::max(H, 1.0);
-        double omega = 1.0 + Hinv*Hinv * (m_C2(i, j) + Hinv * (m_C3(i, j) + Hinv*m_C4(i, j)));
-        if (omega <= 0) {  // this check *should not* be necessary: p4(s) > 0
-          throw RuntimeError::formatted(PISM_ERROR_LOCATION,
-                                        "omega is negative for i=%d, j=%d\n"
-                                        "in BedSmoother.theta()", i, j);
-        }
-
-        if (omega < 0.001) {      // this check *should not* be necessary
-          omega = 0.001;
-        }
-
-        result(i, j) = pow(omega, -m_Glen_exponent);
-      } else {
-        result(i, j) = 0.00;
-      }
-
-      result(i, j) = clip(result(i, j), theta_min, theta_max);
+      functor(p.i(), p.j());
     }
   } catch (...) {
     loop.failed();
