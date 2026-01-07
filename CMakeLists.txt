@@ -78,6 +78,7 @@ option (Pism_USE_YAC_INTERPOLATION "Use YAC and PROJ for interpolation" OFF)
 option (Pism_USE_PARALLEL_NETCDF4 "Enables parallel NetCDF-4 I/O." OFF)
 option (Pism_USE_PNETCDF "Enables parallel NetCDF-3 I/O using PnetCDF." OFF)
 option (Pism_ENABLE_DOCUMENTATION "Enable targets building PISM's documentation." ON)
+option (Pism_USE_CUDA_SIA "Enable CUDA kernels for SIA stencils." OFF)
 
 # PISM will eventually use Jansson to read configuration files.
 # set (Pism_USE_JANSSON OFF)
@@ -153,6 +154,13 @@ pism_set_dependencies()
 if (Pism_USE_EVERYTRACE)
   find_package(Everytrace REQUIRED)
 endif()
+
+if (Pism_USE_CUDA_SIA)
+  enable_language(CUDA)
+  set(CMAKE_CUDA_STANDARD 17)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  find_package(CUDAToolkit REQUIRED)
+endif ()
 
 if (Pism_BUILD_PYTHON_BINDINGS)
   find_package(Python3 COMPONENTS Interpreter Development)

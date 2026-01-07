@@ -17,6 +17,17 @@ add_library (stressbalance OBJECT
   factory.cc
 )
 
+if (Pism_USE_CUDA_SIA)
+  target_sources(stressbalance PRIVATE
+    sia/SIAFD_cuda.cu
+    StressBalance_cuda.cu
+    timestepping_cuda.cu
+  )
+  target_compile_options(stressbalance PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--fmad=false --prec-div=true --prec-sqrt=true --ftz=false>
+  )
+endif ()
+
 if (Pism_BUILD_EXTRA_EXECS)
   add_executable (pism_siafd_test sia/siafd_test.cc)
 

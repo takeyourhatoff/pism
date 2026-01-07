@@ -113,6 +113,10 @@ target_link_libraries (libpism
   ${UDUNITS2_LIBRARIES}
 )
 
+if (Pism_USE_CUDA_SIA)
+  target_link_libraries(libpism CUDA::cudart)
+endif ()
+
 add_dependencies (libpism pism_config)
 
 if (Pism_DEBUG)

@@ -26,6 +26,7 @@
 #include <memory>
 #include <numeric>
 #include <petscsys.h>
+#include <petscdm.h>
 #include <string>
 #include <vector>
 #include <utility>              // std::swap
@@ -555,6 +556,11 @@ std::shared_ptr<petsc::DM> Grid::Impl::create_dm(unsigned int da_dof, unsigned i
       (PetscInt)stencil_width, procs_x.data(), procs_y.data(), // lx, ly
       &result);
   PISM_CHK(ierr, "DMDACreate2d");
+
+#if PETSC_VERSION_GE(3, 8, 0)
+  ierr = DMSetFromOptions(result);
+  PISM_CHK(ierr, "DMSetFromOptions");
+#endif
 
 #if PETSC_VERSION_GE(3, 8, 0)
   ierr = DMSetUp(result);
