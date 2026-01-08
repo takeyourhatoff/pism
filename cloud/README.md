@@ -14,9 +14,8 @@ Minimal, production-shaped tooling to run PISM ensembles as single-node AWS Batc
 ### 1) Prerequisites
 
 - AWS account + configured credentials (`aws sts get-caller-identity` should work).
-- Terraform 1.4+.
 - Python 3.9+.
-- Network access to pull container images from GHCR (or copy to ECR).
+- Docker (for building images).
 
 ### 2) Create S3 buckets
 
@@ -31,29 +30,27 @@ Upload your inputs to:
 s3://pism-inputs/<run-id>/
 ```
 
-### 3) Deploy infrastructure
-
-```
-aws cloudformation deploy \
-  --stack-name pism-batch \
-  --template-file cloud/infra/cloudformation/pism-batch.yml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    SubnetIds=subnet-abc,subnet-def \
-    SecurityGroupIds=sg-123 \
-    InputBucketArn=arn:aws:s3:::pism-inputs \
-    OutputBucketArn=arn:aws:s3:::pism-results
-```
-
-The stack creates Batch queues, job definitions, a log group, and the DynamoDB table.
-
-### 4) Install the CLI
+### 3) Install the CLI
 
 ```
 python -m venv .venv
 source .venv/bin/activate
 pip install -e cloud
 ```
+
+### 4) Build images and deploy infrastructure
+
+```
+pism-cloud deploy \
+  --subnet-ids subnet-abc,subnet-def \
+  --security-group-ids sg-123 \
+  --input-bucket-arn arn:aws:s3:::pism-inputs \
+  --output-bucket-arn arn:aws:s3:::pism-results
+```
+
+This builds and pushes CPU/GPU images to ECR, then deploys the CloudFormation stack.
+The stack creates Batch queues, job definitions, a log group, and the DynamoDB table.
+ECR repositories (`pism-cpu`, `pism-gpu`) are created automatically if missing.
 
 ### 5) Submit a run
 
@@ -70,7 +67,7 @@ pism-cloud status biis-test-001
 ### 7) Launch the dashboard
 
 ```
-uvicorn dashboard.app:app --app-dir cloud --port 8080
+pism-cloud dashboard --port 8080
 ```
 
 Open `http://localhost:8080`.
@@ -89,11 +86,27 @@ Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
+## Container images
+
+Default Dockerfiles live in `cloud/images/`:
+
+- `cloud/images/Dockerfile.cpu`
+- `cloud/images/Dockerfile.gpu`
+
+Build and push both to ECR with:
+
+```
+pism-cloud build-images
+```
+
+These Dockerfiles build PISM from source; expect longer build times and customize as needed.
+For other GPU types, set `--cuda-arch` when building images.
+
 ## Cost policy
 
-- Static on-demand rates live in `cloud/pism_cloud/catalog.py`.
-- Spot discount defaults to 60%.
-- If `cost.max_usd` is below `cost.spot_threshold_usd` (default 250), Spot is used.
+- Spot is the default; set `compute.use_spot: false` to force CPU on-demand.
+- Estimated costs are pulled from AWS Pricing and spot history at submit time.
+- Set `cost.estimated_usd_per_hour` to override pricing if needed (requires `compute.instance`).
 - If the estimate exceeds `cost.max_usd`, submission fails fast.
 
 ## Batch queues and job definitions
@@ -120,5 +133,5 @@ Override these via environment variables:
 
 - GPU on-demand is not configured; GPU runs are Spot-only for now.
 - Ensure the container images include `aws` CLI for S3 sync.
-- For private GHCR images, copy to ECR or configure registry credentials.
 - One job is forced per instance by requesting full instance vCPU/memory.
+- Cost estimation calls the AWS Pricing API (`pricing:GetProducts`).

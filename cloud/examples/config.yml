@@ -6,11 +6,12 @@ compute:
   instance: g5.xlarge
   gpus: 1
   mpi_ranks: 1
-  use_spot: true
+  # use_spot: false
 
 cost:
   max_usd: 100
   estimated_hours_per_member: 0.4
+  # estimated_usd_per_hour: 0.85
 
 io:
   input_s3: s3://pism-inputs/biis
