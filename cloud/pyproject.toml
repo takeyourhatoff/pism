@@ -1,0 +1,19 @@
+[project]
+name = "pism-cloud"
+version = "0.1.0"
+description = "Minimal AWS Batch runner for PISM ensembles"
+requires-python = ">=3.9"
+dependencies = [
+  "boto3",
+  "PyYAML",
+  "fastapi",
+  "uvicorn[standard]",
+  "jinja2",
+]
+
+[project.scripts]
+pism-cloud = "pism_cloud.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

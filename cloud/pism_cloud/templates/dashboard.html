@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PISM Cloud Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --bg: #0f1b1c;
+      --panel: #142426;
+      --panel-strong: #1a3033;
+      --text: #edf4f5;
+      --muted: #9fb2b7;
+      --accent: #38b6a5;
+      --accent-2: #f0b45b;
+      --danger: #f26d5b;
+      --border: rgba(255, 255, 255, 0.08);
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 20%, rgba(56, 182, 165, 0.3), transparent 50%),
+        radial-gradient(circle at 80% 0%, rgba(240, 180, 91, 0.2), transparent 55%),
+        var(--bg);
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 28px 40px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: 0.02em;
+    }
+
+    header p {
+      margin: 4px 0 0;
+      color: var(--muted);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 20px;
+      padding: 0 40px 40px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .runs {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 400px;
+    }
+
+    .run-card {
+      padding: 14px;
+      border-radius: 12px;
+      background: var(--panel-strong);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: border 0.2s ease, transform 0.2s ease;
+    }
+
+    .run-card:hover {
+      border-color: rgba(56, 182, 165, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .run-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 182, 165, 0.3);
+    }
+
+    .run-card h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .run-card span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .detail {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 14px;
+    }
+
+    .metric {
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    .metric h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .metric p {
+      margin: 0;
+      font-size: 20px;
+    }
+
+    .status-bar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.04);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    th {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 11px;
+    }
+
+    .status-label {
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: rgba(56, 182, 165, 0.15);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 12px;
+    }
+
+    .status-failed {
+      background: rgba(242, 109, 91, 0.15);
+      color: var(--danger);
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 24px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+        padding: 0 20px 30px;
+      }
+
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 24px 20px 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>PISM Cloud</h1>
+      <p>Ensemble runs on AWS Batch, summarized for scientists.</p>
+    </div>
+    <div class="muted" id="refresh-status">Refreshing...</div>
+  </header>
+
+  <div class="layout">
+    <section class="panel runs" id="runs"></section>
+
+    <section class="panel detail">
+      <div>
+        <h2 id="run-title">Select a run</h2>
+        <p class="muted" id="run-subtitle">Choose a run on the left to see details.</p>
+      </div>
+      <div class="metric-grid" id="metrics"></div>
+      <div class="status-bar" id="status-bar"></div>
+      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>Job</th>
+              <th>Status</th>
+              <th>Reason</th>
+              <th>Logs</th>
+            </tr>
+          </thead>
+          <tbody id="jobs"></tbody>
+        </table>
+        <div class="empty" id="jobs-empty">No jobs loaded.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const runsEl = document.getElementById("runs");
+    const runTitle = document.getElementById("run-title");
+    const runSubtitle = document.getElementById("run-subtitle");
+    const metricsEl = document.getElementById("metrics");
+    const statusBar = document.getElementById("status-bar");
+    const jobsBody = document.getElementById("jobs");
+    const jobsEmpty = document.getElementById("jobs-empty");
+    const refreshStatus = document.getElementById("refresh-status");
+
+    let selectedRun = null;
+
+    function formatCurrency(value) {
+      if (value === null || value === undefined) return "-";
+      return `$${Number(value).toFixed(2)}`;
+    }
+
+    function setRefreshing(state) {
+      refreshStatus.textContent = state ? "Refreshing..." : "Up to date";
+    }
+
+    async function fetchRuns() {
+      const response = await fetch("/api/runs");
+      return response.json();
+    }
+
+    async function fetchRunDetail(runId) {
+      const response = await fetch(`/api/runs/${runId}`);
+      if (!response.ok) return null;
+      return response.json();
+    }
+
+    function renderRuns(runs) {
+      runsEl.innerHTML = "";
+      if (!runs.length) {
+        runsEl.innerHTML = '<div class="empty">No runs yet.</div>';
+        return;
+      }
+
+      runs.forEach((run) => {
+        const card = document.createElement("div");
+        card.className = "run-card" + (run.run_id === selectedRun ? " active" : "");
+        card.innerHTML = `
+          <h3>${run.run_id}</h3>
+          <span>${run.ensemble_members} members - ${run.instance_type} - ${run.use_spot ? "spot" : "on-demand"}</span>
+        `;
+        card.onclick = () => selectRun(run.run_id);
+        runsEl.appendChild(card);
+      });
+    }
+
+    function renderMetrics(run, detail) {
+      metricsEl.innerHTML = "";
+      if (!run) return;
+
+      const items = [
+        { label: "Members", value: run.ensemble_members },
+        { label: "Instance", value: run.instance_type },
+        { label: "Estimated cost", value: formatCurrency(run.estimated_total_cost) },
+        { label: "Budget cap", value: formatCurrency(run.cost_max_usd) },
+      ];
+
+      items.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "metric";
+        div.innerHTML = `<h4>${item.label}</h4><p>${item.value}</p>`;
+        metricsEl.appendChild(div);
+      });
+
+      if (detail) {
+        statusBar.innerHTML = "";
+        const summary = detail.summary;
+        [
+          `queued ${summary.queued}`,
+          `running ${summary.running}`,
+          `succeeded ${summary.succeeded}`,
+          `failed ${summary.failed}`,
+        ].forEach((text) => {
+          const pill = document.createElement("div");
+          pill.className = "status-pill";
+          pill.textContent = text;
+          statusBar.appendChild(pill);
+        });
+      }
+    }
+
+    function renderJobs(detail) {
+      jobsBody.innerHTML = "";
+      if (!detail || !detail.jobs.length) {
+        jobsEmpty.style.display = "block";
+        return;
+      }
+      jobsEmpty.style.display = "none";
+      detail.jobs.forEach((job) => {
+        const tr = document.createElement("tr");
+        const statusClass = job.status === "FAILED" ? "status-label status-failed" : "status-label";
+        tr.innerHTML = `
+          <td>${job.job_name}</td>
+          <td><span class="${statusClass}">${job.status}</span></td>
+          <td class="muted">${job.status_reason || ""}</td>
+          <td>${job.log_url ? `<a href="${job.log_url}" target="_blank">logs</a>` : "-"}</td>
+        `;
+        jobsBody.appendChild(tr);
+      });
+    }
+
+    async function selectRun(runId) {
+      selectedRun = runId;
+      setRefreshing(true);
+      const [runs, detail] = await Promise.all([fetchRuns(), fetchRunDetail(runId)]);
+      const run = runs.find((item) => item.run_id === runId);
+      renderRuns(runs);
+      if (run && detail) {
+        runTitle.textContent = run.run_id;
+        runSubtitle.textContent = `${run.ensemble_members} members on ${run.instance_type}`;
+        renderMetrics(run, detail);
+        renderJobs(detail);
+      }
+      setRefreshing(false);
+    }
+
+    async function refresh() {
+      setRefreshing(true);
+      const runs = await fetchRuns();
+      renderRuns(runs);
+      if (selectedRun) {
+        const detail = await fetchRunDetail(selectedRun);
+        const run = runs.find((item) => item.run_id === selectedRun);
+        if (run && detail) {
+          renderMetrics(run, detail);
+          renderJobs(detail);
+        }
+      }
+      setRefreshing(false);
+    }
+
+    refresh();
+    setInterval(refresh, 15000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+boto3
+PyYAML
+fastapi
+uvicorn[standard]
+jinja2
