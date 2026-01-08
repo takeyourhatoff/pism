@@ -12,6 +12,8 @@ from fastapi.templating import Jinja2Templates
 from pism_cloud.aws import aws_region
 from pism_cloud.batch import describe_jobs, summarize_status
 from pism_cloud.dynamo import get_run, get_table, list_jobs, list_runs
+from pism_cloud.logs import fetch_log_events
+from pism_cloud.progress import estimate_progress
 from pism_cloud.runtime import hourly_rate, summarize_costs
 
 LOG_GROUP = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
@@ -69,6 +71,9 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     hourly_rate_usd = None
     cost_to_date_usd = None
     running_rate_usd = None
+    progress_percent = None
+    eta_seconds = None
+    estimated_total_cost = None
     instance_type = run_item.get("instance_type")
     use_spot = run_item.get("use_spot")
     budget_usd = run_item.get("budget_usd")
@@ -82,6 +87,30 @@ async def run_detail(run_id: str) -> Dict[str, object]:
             running_rate_usd = snapshot.running_rate_usd
         except Exception:
             pass
+
+    running_job = next(
+        (
+            job
+            for job in batch_jobs
+            if job.get("status") in {"STARTING", "RUNNING"}
+            and job.get("container", {}).get("logStreamName")
+        ),
+        None,
+    )
+    if running_job:
+        log_stream = running_job.get("container", {}).get("logStreamName")
+        if log_stream:
+            try:
+                events = fetch_log_events(LOG_GROUP, log_stream)
+                progress = estimate_progress(events)
+                if progress:
+                    progress_percent = progress.progress_fraction * 100.0
+                    eta_seconds = progress.eta_seconds
+                    if hourly_rate_usd is not None and cost_to_date_usd is not None:
+                        eta_hours = progress.eta_seconds / 3600.0
+                        estimated_total_cost = cost_to_date_usd + eta_hours * hourly_rate_usd
+            except Exception:
+                pass
 
     job_details = []
     for job in batch_jobs:
@@ -106,4 +135,7 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         "running_rate_usd": running_rate_usd,
         "budget_usd": budget_usd,
         "timeout_seconds": timeout_seconds,
+        "progress_percent": progress_percent,
+        "eta_seconds": eta_seconds,
+        "estimated_total_cost_usd": estimated_total_cost,
     }

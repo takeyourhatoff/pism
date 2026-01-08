@@ -123,6 +123,10 @@ pism:
 pism-cloud status biis-test-001
 ```
 
+Status prints a progress bar, ETA, and estimated total cost once logs are available.
+If `budget_usd` is set and the estimate exceeds the budget by ~20% after at least
+15 minutes, the run is cancelled.
+
 ### 7) Launch the dashboard
 
 ```

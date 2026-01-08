@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Dict
@@ -20,6 +21,8 @@ from .config import NormalizedConfig, load_configs
 from .dynamo import get_run, get_table, list_jobs, list_runs, store_job, store_run, utc_now
 from .images import build_and_push, repo_root
 from .infra import deploy_stack, stack_outputs
+from .logs import fetch_log_events
+from .progress import estimate_progress
 from .runtime import hourly_rate, job_costs, summarize_costs
 from .s3 import upload_path
 
@@ -210,9 +213,11 @@ def status(run_id: str) -> int:
     run_item = get_run(table, run_id)
     instance_type = None
     use_spot = None
+    budget_usd = None
     if run_item:
         instance_type = run_item.get("instance_type")
         use_spot = run_item.get("use_spot")
+        budget_usd = run_item.get("budget_usd")
 
     job_ids = [job["job_id"] for job in jobs]
     batch_jobs = describe_jobs(job_ids)
@@ -224,6 +229,9 @@ def status(run_id: str) -> int:
             **summary
         )
     )
+    rate = None
+    snapshot = None
+    cost_by_job = {}
     if instance_type and use_spot is not None:
         try:
             rate = hourly_rate(str(instance_type), bool(use_spot))
@@ -238,9 +246,58 @@ def status(run_id: str) -> int:
             cost_by_job = job_costs(batch_jobs, rate)
         except Exception as exc:
             print(f"Cost per hour unavailable: {exc}", file=sys.stderr)
-            cost_by_job = {}
-    else:
-        cost_by_job = {}
+
+    progress = None
+    running_job = next(
+        (
+            job
+            for job in batch_jobs
+            if job.get("status") in {"STARTING", "RUNNING"}
+            and job.get("container", {}).get("logStreamName")
+        ),
+        None,
+    )
+    if running_job:
+        log_stream = running_job.get("container", {}).get("logStreamName")
+        if log_stream:
+            log_group = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
+            try:
+                events = fetch_log_events(log_group, log_stream)
+                progress = estimate_progress(events)
+            except Exception as exc:
+                print(f"ETA unavailable: {exc}", file=sys.stderr)
+
+    if progress:
+        bar = _format_progress_bar(progress.progress_fraction)
+        eta = _format_eta(progress.eta_seconds)
+        print(
+            "Progress: {bar} | model time {current:.2f}/{end:.2f} | ETA {eta}".format(
+                bar=bar,
+                current=progress.current_time,
+                end=progress.end_time,
+                eta=eta,
+            )
+        )
+        if rate is not None and snapshot is not None:
+            eta_hours = progress.eta_seconds / 3600.0
+            estimated_total = snapshot.cost_to_date_usd + eta_hours * rate
+            print(f"Estimated total cost: ${estimated_total:.2f}")
+            if budget_usd is not None:
+                buffer_multiplier = 1.2
+                min_wall_seconds = 900
+                if (
+                    estimated_total > float(budget_usd) * buffer_multiplier
+                    and progress.wall_seconds >= min_wall_seconds
+                    and progress.sample_count >= 3
+                ):
+                    print(
+                        f"Budget guard: estimate ${estimated_total:.2f} exceeds budget ${float(budget_usd):.2f}; cancelling run"
+                    )
+                    from .batch import batch_client
+
+                    client = batch_client()
+                    for job in jobs:
+                        client.terminate_job(jobId=job["job_id"], reason="Budget estimate exceeded")
 
     if run_item:
         budget = run_item.get("budget_usd")
@@ -267,6 +324,26 @@ def status(run_id: str) -> int:
             )
         )
     return 0
+
+
+def _format_progress_bar(progress: float, width: int = 24) -> str:
+    clamped = max(0.0, min(1.0, progress))
+    filled = int(round(clamped * width))
+    return "[{fill}{rest}] {pct:5.1f}%".format(
+        fill="#" * filled,
+        rest="-" * (width - filled),
+        pct=clamped * 100.0,
+    )
+
+
+def _format_eta(seconds: float) -> str:
+    if seconds <= 0:
+        return "0m"
+    minutes = int(round(seconds / 60.0))
+    hours, minutes = divmod(minutes, 60)
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
 
 
 def cancel(run_id: str) -> int:

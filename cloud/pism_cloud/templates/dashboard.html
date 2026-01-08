@@ -281,6 +281,22 @@
       return `$${Number(value).toFixed(2)}/hr`;
     }
 
+    function formatPercent(value) {
+      if (value === null || value === undefined) return "-";
+      return `${Number(value).toFixed(1)}%`;
+    }
+
+    function formatEta(seconds) {
+      if (seconds === null || seconds === undefined) return "-";
+      const totalMinutes = Math.max(0, Math.round(seconds / 60));
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      if (hours > 0) {
+        return `${hours}h${String(minutes).padStart(2, "0")}m`;
+      }
+      return `${minutes}m`;
+    }
+
     function setRefreshing(state) {
       refreshStatus.textContent = state ? "Refreshing..." : "Up to date";
     }
@@ -326,8 +342,13 @@
         items.push({ label: "Budget", value: formatCurrency(detail.budget_usd) });
       }
       items.push(
+        { label: "Progress", value: formatPercent(detail ? detail.progress_percent : null) },
+        { label: "ETA", value: formatEta(detail ? detail.eta_seconds : null) },
+      );
+      items.push(
         { label: "Cost per hour", value: formatRate(detail ? detail.hourly_rate_usd : null) },
         { label: "Cost so far", value: formatCurrency(detail ? detail.cost_to_date_usd : null) },
+        { label: "Est. total cost", value: formatCurrency(detail ? detail.estimated_total_cost_usd : null) },
       );
 
       items.forEach((item) => {
