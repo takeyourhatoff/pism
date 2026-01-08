@@ -378,8 +378,10 @@ int main(int argc, char *argv[]) {
     inputs.water_column_pressure = nullptr;
     inputs.enthalpy              = &enthalpy;
     inputs.age                   = &age;
+    inputs.new_bed_elevation     = true;
 
     for (int step = 0; step < steps; ++step) {
+      inputs.new_bed_elevation = (step == 0);
       stress_balance.update(inputs, full_update);
     }
 
