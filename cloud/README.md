@@ -40,7 +40,9 @@ with `--spot-allocation-strategy SPOT_CAPACITY_OPTIMIZED` for fewer interruption
 
 ### 4) Upload inputs
 
-Use the `InputBucketName` output from `pism-cloud deploy` and upload inputs to:
+The stack creates an input bucket (printed as `InputBucketName` after deploy).
+You do not need to type the bucket name; use `pism-cloud upload` and choose a prefix.
+Inputs live at:
 
 ```
 s3://<input-bucket>/<prefix>/
@@ -126,6 +128,7 @@ pism-cloud status biis-test-001
 Status prints a progress bar, ETA, and estimated total cost once logs are available.
 If `budget_usd` is set and the estimate exceeds the budget by ~20% after at least
 15 minutes, the run is cancelled.
+ETA is only available when PISM logs numeric model years (not calendar dates).
 
 ### 7) Launch the dashboard
 
@@ -137,28 +140,25 @@ Open `http://localhost:8080`.
 
 ## Configuration
 
-Set `inputs` to a map of input names to S3 prefixes or full S3 URIs. Prefixes are
-resolved under the input bucket created by `pism-cloud deploy`. Outputs are always
-written under `s3://<output-bucket>/<run_id>/`. Set `compute.instance` to control
-instance selection.
-
-`run_id` identifies a run in the dashboard. Each YAML document is one job, so every
-document should use a unique `run_id`; submissions fail if the run already exists.
-
-Outputs always land under `s3://<output-bucket>/<run_id>/`.
+- `run_id` identifies a run in the dashboard. Each YAML document is one job, so every
+  document must use a unique `run_id`; submissions fail if the run already exists.
+- `inputs` is a map of input names to S3 prefixes or full S3 URIs. Prefixes are resolved
+  under the input bucket created by `pism-cloud deploy`.
+- Outputs always land under `s3://<output-bucket>/<run_id>/`.
+- `compute.instance` controls instance selection.
 
 Set `budget_usd` to enable an automatic safety timeout. The CLI converts the budget
 into a job timeout using the current on-demand or spot hourly rate for the instance
 type and passes that timeout to AWS Batch. This guards against runaway jobs, but
-does not include queue time or data transfer costs.
+does not include queue time or data transfer costs. The ETA-based budget guard only
+acts when ETA is available.
 
 Checkpointing is always enabled. The wrapper injects `-checkpoint_interval 0.1667`
 (10 minutes wall clock) unless you already set it, syncs outputs every 10 minutes, and
 handles SIGTERM so PISM writes its last model state to the `-o` output file before the
-container exits. On retry, the wrapper prefers the checkpoint file (`<output>_checkpoint`)
-if present, otherwise it resumes from the `-o` file in S3, replaces any `-i` argument
-with that file, and drops `-bootstrap`. The output file must live under
-`{{OUTPUT_DIR}}`.
+container exits. On retry, the wrapper picks the newest of the checkpoint file
+(`<output>_checkpoint`) or the `-o` file in S3, replaces any `-i` argument with that file,
+and drops `-bootstrap`. The output file must live under `{{OUTPUT_DIR}}`.
 
 Placeholders inside `pism.args` are expanded per job:
 
@@ -208,6 +208,8 @@ pism:
   # executable: pismr | pism
   args: >
     --config {{INPUTS.<name>}}/config.cfg
+    # Optional: override checkpoint interval
+    # --checkpoint_interval 0.25
     --o {{OUTPUT_DIR}}/out.nc
 ```
 
