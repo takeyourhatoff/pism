@@ -148,11 +148,13 @@ into a job timeout using the current on-demand or spot hourly rate for the insta
 type and passes that timeout to AWS Batch. This guards against runaway jobs, but
 does not include queue time or data transfer costs.
 
-Checkpointing is always enabled. The job wrapper syncs outputs every 10 minutes and
+Checkpointing is always enabled. The wrapper injects `-checkpoint_interval 0.1667`
+(10 minutes wall clock) unless you already set it, syncs outputs every 10 minutes, and
 handles SIGTERM so PISM writes its last model state to the `-o` output file before the
-container exits. On retry, the wrapper looks for the existing `-o` file in S3, downloads
-it, replaces any `-i` argument with that file, and drops `-bootstrap` so the job resumes.
-The output file must live under `{{OUTPUT_DIR}}`.
+container exits. On retry, the wrapper prefers the checkpoint file (`<output>_checkpoint`)
+if present, otherwise it resumes from the `-o` file in S3, replaces any `-i` argument
+with that file, and drops `-bootstrap`. The output file must live under
+`{{OUTPUT_DIR}}`.
 
 Placeholders inside `pism.args` are expanded per job:
 

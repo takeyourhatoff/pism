@@ -34,6 +34,7 @@ def build_job_command() -> List[str]:
     script = """
 set -euo pipefail
 python3 - <<'PY'
+import datetime
 import json
 import os
 import shlex
@@ -51,6 +52,7 @@ PISM_ARGS_RAW = os.environ.get("PISM_ARGS", "")
 CHECKPOINT_ENABLED = True
 CHECKPOINT_RESUME = True
 CHECKPOINT_SYNC_INTERVAL = 600
+CHECKPOINT_INTERVAL_HOURS = 0.1667
 
 
 def sync_outputs() -> None:
@@ -76,6 +78,33 @@ def find_output_file(tokens: list[str]) -> str | None:
     return None
 
 
+def _s3_object_mtime(uri: str) -> float | None:
+    if not uri or not uri.startswith("s3://"):
+        return None
+    path = uri[len("s3://") :]
+    if "/" not in path:
+        return None
+    bucket, key = path.split("/", 1)
+    result = subprocess.run(
+        ["aws", "s3api", "head-object", "--bucket", bucket, "--key", key],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+        last_modified = payload.get("LastModified", "")
+        return datetime.datetime.fromisoformat(last_modified.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+
+def _checkpoint_path(output_file: str) -> str:
+    return output_file + "_checkpoint"
+
+
 def resume_if_possible(tokens: list[str]) -> list[str]:
     if not (CHECKPOINT_ENABLED and CHECKPOINT_RESUME):
         return tokens
@@ -87,15 +116,26 @@ def resume_if_possible(tokens: list[str]) -> list[str]:
     relpath = output_file[len(OUTPUT_DIR) + 1 :]
     if not relpath or not OUTPUT_S3:
         return tokens
-    s3_uri = OUTPUT_S3.rstrip("/") + "/" + relpath
-    result = subprocess.run(
-        ["aws", "s3", "ls", s3_uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
-    if result.returncode != 0:
+    output_uri = OUTPUT_S3.rstrip("/") + "/" + relpath
+    checkpoint_file = _checkpoint_path(output_file)
+    checkpoint_rel = checkpoint_file[len(OUTPUT_DIR) + 1 :]
+    checkpoint_uri = OUTPUT_S3.rstrip("/") + "/" + checkpoint_rel
+
+    output_mtime = _s3_object_mtime(output_uri)
+    checkpoint_mtime = _s3_object_mtime(checkpoint_uri)
+    resume_uri = None
+    local_file = None
+    if output_mtime is None and checkpoint_mtime is None:
         return tokens
-    os.makedirs(os.path.dirname(output_file), exist_ok=True)
-    subprocess.run(["aws", "s3", "cp", s3_uri, output_file], check=True)
-    print(f"Resuming from {s3_uri}", flush=True)
+    if checkpoint_mtime is None or (output_mtime is not None and output_mtime >= checkpoint_mtime):
+        resume_uri = output_uri
+        local_file = output_file
+    else:
+        resume_uri = checkpoint_uri
+        local_file = checkpoint_file
+    os.makedirs(os.path.dirname(local_file), exist_ok=True)
+    subprocess.run(["aws", "s3", "cp", resume_uri, local_file], check=True)
+    print(f"Resuming from {resume_uri}", flush=True)
     new_tokens: list[str] = []
     replaced_i = False
     idx = 0
@@ -105,14 +145,14 @@ def resume_if_possible(tokens: list[str]) -> list[str]:
             idx += 1
             continue
         if token == "-i" and idx + 1 < len(tokens):
-            new_tokens.extend(["-i", output_file])
+            new_tokens.extend(["-i", local_file])
             idx += 2
             replaced_i = True
             continue
         new_tokens.append(token)
         idx += 1
     if not replaced_i:
-        new_tokens.extend(["-i", output_file])
+        new_tokens.extend(["-i", local_file])
     return new_tokens
 
 
@@ -121,6 +161,8 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 sync_inputs()
 
 args_tokens = shlex.split(PISM_ARGS_RAW)
+if "-checkpoint_interval" not in args_tokens and "--checkpoint_interval" not in args_tokens:
+    args_tokens.extend(["-checkpoint_interval", str(CHECKPOINT_INTERVAL_HOURS)])
 args_tokens = resume_if_possible(args_tokens)
 
 stop_event = threading.Event()
