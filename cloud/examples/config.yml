@@ -1,0 +1,20 @@
+run_id: biis-test-001
+ensemble_members: 50
+
+compute:
+  backend: aws-batch
+  instance: g5.xlarge
+  gpus: 1
+  mpi_ranks: 1
+  use_spot: true
+
+cost:
+  max_usd: 100
+  estimated_hours_per_member: 0.4
+
+io:
+  input_s3: s3://pism-inputs/biis
+  output_s3: s3://pism-results/biis-test-001
+
+pism:
+  args: "--config {{INPUT_DIR}}/biis.cfg --time.end 20000 --o {{OUTPUT_DIR}}/member-{{MEMBER_ID}}.nc"

@@ -4,6 +4,7 @@
 Changes since v2.2.0
 ====================
 
+- Added a minimal AWS Batch based ensemble runner and dashboard under `cloud/`.
 - Fixed a minor bug: EISMINT II simplified geometry experiments should use the "cold"
   (temperature-based) energy conservation model. In PISM 2.2.0 the EISMINT II default of
   `energy.model` was mistakenly set to "none", i.e. isothermal mode without energy
