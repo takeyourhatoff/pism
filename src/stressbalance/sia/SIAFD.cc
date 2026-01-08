@@ -41,6 +41,13 @@
 #include "pism/util/pism_utilities.hh"
 #include "pism/util/array/Vector.hh"
 
+namespace {
+constexpr unsigned int GEOM_SURFACE = 1u << 0;
+constexpr unsigned int GEOM_THICKNESS = 1u << 1;
+constexpr unsigned int GEOM_BED = 1u << 2;
+constexpr unsigned int GEOM_CELL_TYPE = 1u << 3;
+} // namespace
+
 namespace pism {
 namespace stressbalance {
 
@@ -130,7 +137,7 @@ void SIAFD::init() {
 //! heating.
 void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, bool full_update) {
   m_I_valid = false;
-  m_geometry_ghosts_valid = false;
+  m_geometry_ghosts_valid_mask = 0;
   m_diffusive_flux_valid = false;
 
   // Check if the smoothed bed computed by BedSmoother is out of date and
@@ -166,7 +173,7 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
     profiling().end("sia.3d_velocity");
   }
 
-  m_geometry_ghosts_valid = false;
+  m_geometry_ghosts_valid_mask = 0;
 }
 
 
@@ -208,9 +215,16 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
 */
 void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered &h_x,
                                      array::Staggered &h_y) {
-  ensure_geometry_ghosts(*inputs.geometry);
-
   const std::string method = m_config->get_string("stress_balance.sia.surface_gradient_method");
+  unsigned int geom_mask = 0;
+  if (method == "eta") {
+    geom_mask = GEOM_THICKNESS | GEOM_BED;
+  } else if (method == "haseloff") {
+    geom_mask = GEOM_SURFACE | GEOM_CELL_TYPE;
+  } else if (method == "mahaffy") {
+    geom_mask = GEOM_SURFACE;
+  }
+  ensure_geometry_ghosts(*inputs.geometry, geom_mask);
 
   if (method == "eta") {
 
@@ -233,27 +247,48 @@ void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered &h_x
   }
 }
 
-void SIAFD::ensure_geometry_ghosts(const Geometry &geometry) {
+void SIAFD::ensure_geometry_ghosts(const Geometry &geometry, unsigned int mask) {
 #if Pism_USE_CUDA_SIA
-  if (m_geometry_ghosts_valid) {
+  if (mask == 0) {
     return;
   }
 
-  if (!(cuda::vec_is_cuda(geometry.ice_surface_elevation) ||
-        cuda::vec_is_cuda(geometry.ice_thickness) ||
-        cuda::vec_is_cuda(geometry.bed_elevation) ||
-        cuda::vec_is_cuda(geometry.cell_type))) {
+  if ((m_geometry_ghosts_valid_mask & mask) == mask) {
     return;
   }
 
-  const_cast<array::Scalar2 &>(geometry.ice_surface_elevation).update_ghosts();
-  const_cast<array::Scalar2 &>(geometry.ice_thickness).update_ghosts();
-  const_cast<array::Scalar2 &>(geometry.bed_elevation).update_ghosts();
-  const_cast<array::CellType2 &>(geometry.cell_type).update_ghosts();
+  const bool surface_cuda = (mask & GEOM_SURFACE) &&
+      cuda::vec_is_cuda(geometry.ice_surface_elevation);
+  const bool thickness_cuda = (mask & GEOM_THICKNESS) &&
+      cuda::vec_is_cuda(geometry.ice_thickness);
+  const bool bed_cuda = (mask & GEOM_BED) &&
+      cuda::vec_is_cuda(geometry.bed_elevation);
+  const bool cell_cuda = (mask & GEOM_CELL_TYPE) &&
+      cuda::vec_is_cuda(geometry.cell_type);
 
-  m_geometry_ghosts_valid = true;
+  if (!(surface_cuda || thickness_cuda || bed_cuda || cell_cuda)) {
+    return;
+  }
+
+  if ((mask & GEOM_SURFACE) && !(m_geometry_ghosts_valid_mask & GEOM_SURFACE)) {
+    const_cast<array::Scalar2 &>(geometry.ice_surface_elevation).update_ghosts();
+    m_geometry_ghosts_valid_mask |= GEOM_SURFACE;
+  }
+  if ((mask & GEOM_THICKNESS) && !(m_geometry_ghosts_valid_mask & GEOM_THICKNESS)) {
+    const_cast<array::Scalar2 &>(geometry.ice_thickness).update_ghosts();
+    m_geometry_ghosts_valid_mask |= GEOM_THICKNESS;
+  }
+  if ((mask & GEOM_BED) && !(m_geometry_ghosts_valid_mask & GEOM_BED)) {
+    const_cast<array::Scalar2 &>(geometry.bed_elevation).update_ghosts();
+    m_geometry_ghosts_valid_mask |= GEOM_BED;
+  }
+  if ((mask & GEOM_CELL_TYPE) && !(m_geometry_ghosts_valid_mask & GEOM_CELL_TYPE)) {
+    const_cast<array::CellType2 &>(geometry.cell_type).update_ghosts();
+    m_geometry_ghosts_valid_mask |= GEOM_CELL_TYPE;
+  }
 #else
   (void)geometry;
+  (void)mask;
 #endif
 }
 
@@ -327,10 +362,16 @@ void SIAFD::surface_gradient_eta(const array::Scalar2 &ice_thickness,
 #if Pism_USE_CUDA_SIA
   if (cuda::vec_is_cuda(eta) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y) &&
       cuda::vec_is_cuda(ice_thickness) && cuda::vec_is_cuda(bed_elevation)) {
-    if (!m_geometry_ghosts_valid) {
-      const_cast<array::Scalar2 &>(ice_thickness).update_ghosts();
-      const_cast<array::Scalar2 &>(bed_elevation).update_ghosts();
-      m_geometry_ghosts_valid = true;
+    const unsigned int needed = GEOM_THICKNESS | GEOM_BED;
+    if ((m_geometry_ghosts_valid_mask & needed) != needed) {
+      if (!(m_geometry_ghosts_valid_mask & GEOM_THICKNESS)) {
+        const_cast<array::Scalar2 &>(ice_thickness).update_ghosts();
+        m_geometry_ghosts_valid_mask |= GEOM_THICKNESS;
+      }
+      if (!(m_geometry_ghosts_valid_mask & GEOM_BED)) {
+        const_cast<array::Scalar2 &>(bed_elevation).update_ghosts();
+        m_geometry_ghosts_valid_mask |= GEOM_BED;
+      }
     }
     cuda::surface_gradient_eta(ice_thickness, bed_elevation, eta, h_x, h_y,
                                xs, ys, xm, ym, eta.stencil_width(),
@@ -392,9 +433,9 @@ void SIAFD::surface_gradient_mahaffy(const array::Scalar &ice_surface_elevation,
 
 #if Pism_USE_CUDA_SIA
   if (cuda::vec_is_cuda(h) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y)) {
-    if (!m_geometry_ghosts_valid) {
+    if (!(m_geometry_ghosts_valid_mask & GEOM_SURFACE)) {
       const_cast<array::Scalar &>(h).update_ghosts();
-      m_geometry_ghosts_valid = true;
+      m_geometry_ghosts_valid_mask |= GEOM_SURFACE;
     }
     cuda::surface_gradient_mahaffy(h, h_x, h_y, xs, ys, xm, ym, dx, dy);
     return;
@@ -492,10 +533,16 @@ void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevatio
       // GPU Haseloff gradients compute ghost values locally and require width=2 storage.
       goto cpu_path;
     }
-    if (!m_geometry_ghosts_valid) {
-      const_cast<array::Scalar2 &>(h).update_ghosts();
-      const_cast<array::CellType2 &>(mask).update_ghosts();
-      m_geometry_ghosts_valid = true;
+    const unsigned int needed = GEOM_SURFACE | GEOM_CELL_TYPE;
+    if ((m_geometry_ghosts_valid_mask & needed) != needed) {
+      if (!(m_geometry_ghosts_valid_mask & GEOM_SURFACE)) {
+        const_cast<array::Scalar2 &>(h).update_ghosts();
+        m_geometry_ghosts_valid_mask |= GEOM_SURFACE;
+      }
+      if (!(m_geometry_ghosts_valid_mask & GEOM_CELL_TYPE)) {
+        const_cast<array::CellType2 &>(mask).update_ghosts();
+        m_geometry_ghosts_valid_mask |= GEOM_CELL_TYPE;
+      }
     }
     cuda::surface_gradient_haseloff(h, mask, w_i, w_j, h_x, h_y, xs, ys, xm, ym, dx, dy);
     return;
@@ -621,7 +668,7 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
   // get "theta" from Schoof (2003) bed smoothness calculation and the
   // thickness relative to the smoothed bed; each array::Scalar involved must
   // have stencil width WIDE_GHOSTS for this too work
-  ensure_geometry_ghosts(geometry);
+  ensure_geometry_ghosts(geometry, GEOM_SURFACE | GEOM_THICKNESS | GEOM_CELL_TYPE);
 
   m_bed_smoother->theta(geometry.ice_surface_elevation, theta, false);
 
@@ -969,7 +1016,7 @@ void SIAFD::compute_I(const Geometry &geometry) {
     return;
   }
 
-  ensure_geometry_ghosts(geometry);
+  ensure_geometry_ghosts(geometry, GEOM_SURFACE | GEOM_THICKNESS | GEOM_CELL_TYPE);
 
   array::Scalar &thk_smooth = m_work_2d_0;
   array::Array3D *I[]       = { &m_work_3d_0, &m_work_3d_1 };
@@ -1086,12 +1133,45 @@ void SIAFD::compute_3d_horizontal_velocity(const Geometry &geometry, const array
     const int ys = m_grid->ys();
     const int xm = m_grid->xm();
     const int ym = m_grid->ym();
+    const int Mx = m_grid->Mx();
+    const int My = m_grid->My();
     const int Mz = m_grid->Mz();
-    cuda::compute_3d_horizontal_velocity_from_delta(m_delta_0, m_delta_1, h_x, h_y,
-                                                    sliding_velocity, u_out, v_out,
-                                                    xs, ys, xm, ym, Mz);
-    u_out.update_ghosts();
-    v_out.update_ghosts();
+    const char *use_I_env = std::getenv("PISM_SIAFD_CUDA_USE_I");
+    bool force_I = false;
+    bool force_delta = false;
+    if (use_I_env && use_I_env[0] != '\0') {
+      if (use_I_env[0] == '0') {
+        force_delta = true;
+      } else {
+        force_I = true;
+      }
+    }
+    bool use_I = m_I_valid || force_I;
+    if (force_delta) {
+      use_I = false;
+    }
+    if (use_I) {
+      if (!m_I_valid) {
+        const int ghosts = 1;
+        cuda::compute_I(m_work_2d_0, m_delta_0, m_work_3d_0, xs, ys, xm, ym, ghosts, 0);
+        cuda::compute_I(m_work_2d_0, m_delta_1, m_work_3d_1, xs, ys, xm, ym, ghosts, 1);
+      }
+      cuda::compute_3d_horizontal_velocity(m_work_3d_0, m_work_3d_1, h_x, h_y,
+                                           sliding_velocity, u_out, v_out,
+                                           xs, ys, xm, ym, Mz);
+    } else {
+      cuda::compute_3d_horizontal_velocity_from_delta(m_delta_0, m_delta_1, h_x, h_y,
+                                                      sliding_velocity, u_out, v_out,
+                                                      xs, ys, xm, ym, Mz);
+    }
+    if (m_grid->size() == 1) {
+      const int ghosts = static_cast<int>(u_out.stencil_width());
+      cuda::update_periodic_ghosts(u_out, xs, ys, xm, ym, Mx, My, ghosts);
+      cuda::update_periodic_ghosts(v_out, xs, ys, xm, ym, Mx, My, ghosts);
+    } else {
+      u_out.update_ghosts();
+      v_out.update_ghosts();
+    }
     return;
   }
 #endif

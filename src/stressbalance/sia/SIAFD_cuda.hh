@@ -112,6 +112,11 @@ void compute_3d_horizontal_velocity_from_delta(const array::Array3D &delta0,
                                                int xs, int ys, int xm, int ym,
                                                int Mz);
 
+void update_periodic_ghosts(array::Array &array,
+                            int xs, int ys, int xm, int ym,
+                            int Mx, int My,
+                            int ghosts);
+
 void compute_diffusivity_pb_both(const array::Scalar &thk_smooth,
                                  const array::Scalar &theta,
                                  const array::Scalar2 &ice_surface_elevation,

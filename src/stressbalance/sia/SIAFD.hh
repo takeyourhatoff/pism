@@ -107,7 +107,7 @@ protected:
   virtual void compute_I(const Geometry &geometry);
 
   bool interglacial(double accumulation_time) const;
-  void ensure_geometry_ghosts(const Geometry &geometry);
+  void ensure_geometry_ghosts(const Geometry &geometry, unsigned int mask);
   bool can_use_cuda_diffusivity(const Geometry &geometry,
                                 const array::Array3D *enthalpy,
                                 const array::Array3D *age,
@@ -136,7 +136,7 @@ protected:
   int m_event_sia;
   bool m_I_valid;
   bool m_diffusive_flux_valid = false;
-  bool m_geometry_ghosts_valid = false;
+  unsigned int m_geometry_ghosts_valid_mask = 0;
 
   // unit conversion
   double m_seconds_per_year;

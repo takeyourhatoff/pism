@@ -178,6 +178,31 @@ void launch_2d(Functor functor, int xs, int ys, int xm, int ym, int W) {
   check_cuda(cudaGetLastError(), "kernel_2d");
 }
 
+__device__ inline int wrap_index(int idx, int n) {
+  int r = idx % n;
+  return (r < 0) ? (r + n) : r;
+}
+
+struct PeriodicGhostFill {
+  sia_kernels::DeviceArray2DView field;
+  int xs;
+  int ys;
+  int xm;
+  int ym;
+  int Mx;
+  int My;
+  __device__ inline void operator()(int i, int j) const {
+    if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+      return;
+    }
+    const int ii = wrap_index(i, Mx);
+    const int jj = wrap_index(j, My);
+    for (int d = 0; d < field.dof; ++d) {
+      field(i, j, d) = field(ii, jj, d);
+    }
+  }
+};
+
 PISM_HOST_DEVICE inline int k_below_height(const double *z, int Mz, double height) {
   if (height <= z[0]) {
     return 0;
@@ -450,6 +475,477 @@ __device__ inline void compute_diffusivity_orient(
   atomic_max_double(D_max, D);
 }
 
+template <int FlowLawMode, bool UseQuadratic>
+__device__ inline void compute_diffusivity_pair_no_update(
+    int i, int j,
+    double h_x_0, double h_y_0,
+    double h_x_1, double h_y_1,
+    const sia_kernels::DeviceArray2DConstView &thk,
+    const sia_kernels::DeviceArray2DConstView &theta,
+    const sia_kernels::DeviceArray2DConstView &enthalpy,
+    const sia_kernels::DeviceArray2DView &result,
+    const sia_kernels::DeviceArray2DView &flux,
+    const double *z, int Mz,
+    int Mx, int My, int xs, int ys, int xm, int ym,
+    int periodic_x, int periodic_y,
+    int limit_diffusivity, double D_limit, double e_factor,
+    double A_cold, double A_warm,
+    double Q_cold, double Q_warm, double T_crit,
+    double gas_const, double n_minus_1,
+    double T_melting, double beta, double c_i, double T_0,
+    double rho_i_g, double p_air,
+    double *D_max, int *high_diffusivity_counter) {
+  const double thk_c = thk(i, j);
+  const double thk_e = thk(i + 1, j);
+  const double thk_n = thk(i, j + 1);
+
+  const double thk0 = 0.5 * (thk_c + thk_e);
+  const double thk1 = 0.5 * (thk_c + thk_n);
+
+  const double theta_c = theta(i, j);
+  const double theta_e = theta(i + 1, j);
+  const double theta_n = theta(i, j + 1);
+  const double theta0 = 0.5 * (theta_c + theta_e);
+  const double theta1 = 0.5 * (theta_c + theta_n);
+
+  const bool zero_thk0 = (thk0 == 0.0);
+  const bool zero_thk1 = (thk1 == 0.0);
+  const double alpha0 = sqrt(h_x_0 * h_x_0 + h_y_0 * h_y_0);
+  const double alpha1 = sqrt(h_x_1 * h_x_1 + h_y_1 * h_y_1);
+  const bool zero_slope0 = (alpha0 == 0.0);
+  const bool zero_slope1 = (alpha1 == 0.0);
+  const bool compute0 = (!zero_thk0 && !zero_slope0);
+  const bool compute1 = (!zero_thk1 && !zero_slope1);
+
+  if (!compute0) {
+    result(i, j, 0) = 0.0;
+    if (!zero_thk0 && zero_slope0) {
+      if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+        flux(i, j, 0) = 0.0;
+      }
+    }
+  }
+  if (!compute1) {
+    result(i, j, 1) = 0.0;
+    if (!zero_thk1 && zero_slope1) {
+      if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+        flux(i, j, 1) = 0.0;
+      }
+    }
+  }
+  if (!compute0 && !compute1) {
+    return;
+  }
+
+  const int ks0 = compute0 ? k_below_height(z, Mz, thk0) : -1;
+  const int ks1 = compute1 ? k_below_height(z, Mz, thk1) : -1;
+  const int kmax = (ks0 > ks1) ? ks0 : ks1;
+
+  double D0 = 0.0;
+  double D1 = 0.0;
+  double delta_prev0 = 0.0;
+  double delta_prev1 = 0.0;
+
+  for (int k = 0; k <= kmax; ++k) {
+    const double E_c = enthalpy(i, j, k);
+    if (compute0 && k <= ks0) {
+      const double depth0 = thk0 - z[k];
+      const double pressure0 = p_air + rho_i_g * depth0;
+      const double E_e = enthalpy(i + 1, j, k);
+      const double E0 = 0.5 * (E_c + E_e);
+      const double stress0 = alpha0 * pressure0;
+      const double T0 = pb_cold_temperature(E0, pressure0, T_melting, beta, c_i, T_0);
+      double A = A_cold;
+      double Q = Q_cold;
+      double T_use = T0;
+      if constexpr (FlowLawMode == 0) {
+        const double T_pa = T0 + beta * pressure0;
+        T_use = T_pa;
+        if (T_pa >= T_crit) {
+          A = A_warm;
+          Q = Q_warm;
+        }
+      } else if constexpr (FlowLawMode == 2) {
+        A = A_warm;
+        Q = Q_warm;
+      }
+      const double stress_pow = UseQuadratic ? (stress0 * stress0) : pow(stress0, n_minus_1);
+      const double flow = pb_softness(T_use, A, Q, gas_const) * stress_pow;
+      const double delta_k0 = e_factor * theta0 * 2.0 * pressure0 * flow;
+
+      if (k >= 1) {
+        const double dz = z[k] - z[k - 1];
+        D0 += 0.5 * dz * ((depth0 + dz) * delta_prev0 + depth0 * delta_k0);
+      }
+      delta_prev0 = delta_k0;
+    }
+
+    if (compute1 && k <= ks1) {
+      const double depth1 = thk1 - z[k];
+      const double pressure1 = p_air + rho_i_g * depth1;
+      const double E_n = enthalpy(i, j + 1, k);
+      const double E1 = 0.5 * (E_c + E_n);
+      const double stress1 = alpha1 * pressure1;
+      const double T1 = pb_cold_temperature(E1, pressure1, T_melting, beta, c_i, T_0);
+      double A = A_cold;
+      double Q = Q_cold;
+      double T_use = T1;
+      if constexpr (FlowLawMode == 0) {
+        const double T_pa = T1 + beta * pressure1;
+        T_use = T_pa;
+        if (T_pa >= T_crit) {
+          A = A_warm;
+          Q = Q_warm;
+        }
+      } else if constexpr (FlowLawMode == 2) {
+        A = A_warm;
+        Q = Q_warm;
+      }
+      const double stress_pow = UseQuadratic ? (stress1 * stress1) : pow(stress1, n_minus_1);
+      const double flow = pb_softness(T_use, A, Q, gas_const) * stress_pow;
+      const double delta_k1 = e_factor * theta1 * 2.0 * pressure1 * flow;
+
+      if (k >= 1) {
+        const double dz = z[k] - z[k - 1];
+        D1 += 0.5 * dz * ((depth1 + dz) * delta_prev1 + depth1 * delta_k1);
+      }
+      delta_prev1 = delta_k1;
+    }
+  }
+
+  if (compute0) {
+    const double dz0 = thk0 - z[ks0];
+    D0 += 0.5 * dz0 * dz0 * delta_prev0;
+  }
+  if (compute1) {
+    const double dz1 = thk1 - z[ks1];
+    D1 += 0.5 * dz1 * dz1 * delta_prev1;
+  }
+
+  double local_max = -1.0;
+  int capped = 0;
+  if (compute0) {
+    if ((!periodic_x && (i < 0 || i >= Mx - 1)) ||
+        (!periodic_y && (j < 0 || j >= My - 1))) {
+      D0 = 0.0;
+    }
+    if (limit_diffusivity && D0 >= D_limit) {
+      D0 = D_limit;
+      capped += 1;
+    }
+    result(i, j, 0) = D0;
+    if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+      flux(i, j, 0) = -D0 * h_x_0;
+    }
+    local_max = (D0 > local_max) ? D0 : local_max;
+  }
+
+  if (compute1) {
+    if ((!periodic_x && (i < 0 || i >= Mx - 1)) ||
+        (!periodic_y && (j < 0 || j >= My - 1))) {
+      D1 = 0.0;
+    }
+    if (limit_diffusivity && D1 >= D_limit) {
+      D1 = D_limit;
+      capped += 1;
+    }
+    result(i, j, 1) = D1;
+    if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+      flux(i, j, 1) = -D1 * h_y_1;
+    }
+    local_max = (D1 > local_max) ? D1 : local_max;
+  }
+
+  if (local_max >= 0.0) {
+    atomic_max_double(D_max, local_max);
+  }
+  if (capped > 0) {
+    atomicAdd(high_diffusivity_counter, capped);
+  }
+}
+
+template <int FlowLawMode, bool FullUpdate, bool ComputeI, bool UseQuadratic>
+__device__ inline void compute_diffusivity_pair_update(
+    int i, int j,
+    double h_x_0, double h_y_0,
+    double h_x_1, double h_y_1,
+    const sia_kernels::DeviceArray2DConstView &thk,
+    const sia_kernels::DeviceArray2DConstView &theta,
+    const sia_kernels::DeviceArray2DConstView &enthalpy,
+    const sia_kernels::DeviceArray2DView &result,
+    const sia_kernels::DeviceArray2DView &flux,
+    const sia_kernels::DeviceArray2DView &delta0,
+    const sia_kernels::DeviceArray2DView &delta1,
+    const sia_kernels::DeviceArray2DView &I0,
+    const sia_kernels::DeviceArray2DView &I1,
+    const double *z, int Mz,
+    int Mx, int My, int xs, int ys, int xm, int ym,
+    int periodic_x, int periodic_y,
+    int limit_diffusivity, double D_limit, double e_factor,
+    double A_cold, double A_warm,
+    double Q_cold, double Q_warm, double T_crit,
+    double gas_const, double n_minus_1,
+    double T_melting, double beta, double c_i, double T_0,
+    double rho_i_g, double p_air,
+    double *D_max, int *high_diffusivity_counter) {
+  const double thk_c = thk(i, j);
+  const double thk_e = thk(i + 1, j);
+  const double thk_n = thk(i, j + 1);
+
+  const double thk0 = 0.5 * (thk_c + thk_e);
+  const double thk1 = 0.5 * (thk_c + thk_n);
+
+  const bool zero_thk0 = (thk0 == 0.0);
+  const bool zero_thk1 = (thk1 == 0.0);
+
+  const double alpha0 = sqrt(h_x_0 * h_x_0 + h_y_0 * h_y_0);
+  const double alpha1 = sqrt(h_x_1 * h_x_1 + h_y_1 * h_y_1);
+  const bool zero_slope0 = (alpha0 == 0.0);
+  const bool zero_slope1 = (alpha1 == 0.0);
+
+  const bool compute0 = (!zero_thk0 && !zero_slope0);
+  const bool compute1 = (!zero_thk1 && !zero_slope1);
+
+  if (!compute0) {
+    result(i, j, 0) = 0.0;
+    if constexpr (FullUpdate) {
+      for (int k = 0; k < Mz; ++k) {
+        delta0(i, j, k) = 0.0;
+      }
+    }
+    if constexpr (ComputeI) {
+      for (int k = 0; k < Mz; ++k) {
+        I0(i, j, k) = 0.0;
+      }
+    }
+    if (!zero_thk0 && zero_slope0) {
+      if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+        flux(i, j, 0) = 0.0;
+      }
+    }
+  }
+
+  if (!compute1) {
+    result(i, j, 1) = 0.0;
+    if constexpr (FullUpdate) {
+      for (int k = 0; k < Mz; ++k) {
+        delta1(i, j, k) = 0.0;
+      }
+    }
+    if constexpr (ComputeI) {
+      for (int k = 0; k < Mz; ++k) {
+        I1(i, j, k) = 0.0;
+      }
+    }
+    if (!zero_thk1 && zero_slope1) {
+      if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+        flux(i, j, 1) = 0.0;
+      }
+    }
+  }
+
+  if (!compute0 && !compute1) {
+    return;
+  }
+
+  const int ks0 = compute0 ? k_below_height(z, Mz, thk0) : -1;
+  const int ks1 = compute1 ? k_below_height(z, Mz, thk1) : -1;
+  const int kmax = (ks0 > ks1) ? ks0 : ks1;
+
+  const double theta_c = theta(i, j);
+  const double theta_e = theta(i + 1, j);
+  const double theta_n = theta(i, j + 1);
+  const double theta0 = 0.5 * (theta_c + theta_e);
+  const double theta1 = 0.5 * (theta_c + theta_n);
+
+  double D0 = 0.0;
+  double D1 = 0.0;
+  double delta_prev0 = 0.0;
+  double delta_prev1 = 0.0;
+  double I_current0 = 0.0;
+  double I_current1 = 0.0;
+
+  if constexpr (ComputeI) {
+    if (compute0) {
+      I0(i, j, 0) = 0.0;
+    }
+    if (compute1) {
+      I1(i, j, 0) = 0.0;
+    }
+  }
+
+  for (int k = 0; k <= kmax; ++k) {
+    const double E_c = enthalpy(i, j, k);
+
+    if (compute0) {
+      if (k <= ks0) {
+        const double depth0 = thk0 - z[k];
+        const double pressure0 = p_air + rho_i_g * depth0;
+        const double E_e = enthalpy(i + 1, j, k);
+        const double E0 = 0.5 * (E_c + E_e);
+        const double stress0 = alpha0 * pressure0;
+        const double T0 = pb_cold_temperature(E0, pressure0, T_melting, beta, c_i, T_0);
+        double A = A_cold;
+        double Q = Q_cold;
+        double T_use = T0;
+        if constexpr (FlowLawMode == 0) {
+          const double T_pa = T0 + beta * pressure0;
+          T_use = T_pa;
+          if (T_pa >= T_crit) {
+            A = A_warm;
+            Q = Q_warm;
+          }
+        } else if constexpr (FlowLawMode == 2) {
+          A = A_warm;
+          Q = Q_warm;
+        }
+        const double stress_pow = UseQuadratic ? (stress0 * stress0) : pow(stress0, n_minus_1);
+        const double flow = pb_softness(T_use, A, Q, gas_const) * stress_pow;
+        const double delta_k0 = e_factor * theta0 * 2.0 * pressure0 * flow;
+
+        if constexpr (FullUpdate) {
+          delta0(i, j, k) = delta_k0;
+        }
+        if (k >= 1) {
+          const double dz = z[k] - z[k - 1];
+          D0 += 0.5 * dz * ((depth0 + dz) * delta_prev0 + depth0 * delta_k0);
+          if constexpr (ComputeI) {
+            I_current0 += 0.5 * dz * (delta_prev0 + delta_k0);
+            I0(i, j, k) = I_current0;
+          }
+        }
+        delta_prev0 = delta_k0;
+      } else {
+        if constexpr (FullUpdate) {
+          delta0(i, j, k) = 0.0;
+        }
+        if constexpr (ComputeI) {
+          I0(i, j, k) = I_current0;
+        }
+      }
+    }
+
+    if (compute1) {
+      if (k <= ks1) {
+        const double depth1 = thk1 - z[k];
+        const double pressure1 = p_air + rho_i_g * depth1;
+        const double E_n = enthalpy(i, j + 1, k);
+        const double E1 = 0.5 * (E_c + E_n);
+        const double stress1 = alpha1 * pressure1;
+        const double T1 = pb_cold_temperature(E1, pressure1, T_melting, beta, c_i, T_0);
+        double A = A_cold;
+        double Q = Q_cold;
+        double T_use = T1;
+        if constexpr (FlowLawMode == 0) {
+          const double T_pa = T1 + beta * pressure1;
+          T_use = T_pa;
+          if (T_pa >= T_crit) {
+            A = A_warm;
+            Q = Q_warm;
+          }
+        } else if constexpr (FlowLawMode == 2) {
+          A = A_warm;
+          Q = Q_warm;
+        }
+        const double stress_pow = UseQuadratic ? (stress1 * stress1) : pow(stress1, n_minus_1);
+        const double flow = pb_softness(T_use, A, Q, gas_const) * stress_pow;
+        const double delta_k1 = e_factor * theta1 * 2.0 * pressure1 * flow;
+
+        if constexpr (FullUpdate) {
+          delta1(i, j, k) = delta_k1;
+        }
+        if (k >= 1) {
+          const double dz = z[k] - z[k - 1];
+          D1 += 0.5 * dz * ((depth1 + dz) * delta_prev1 + depth1 * delta_k1);
+          if constexpr (ComputeI) {
+            I_current1 += 0.5 * dz * (delta_prev1 + delta_k1);
+            I1(i, j, k) = I_current1;
+          }
+        }
+        delta_prev1 = delta_k1;
+      } else {
+        if constexpr (FullUpdate) {
+          delta1(i, j, k) = 0.0;
+        }
+        if constexpr (ComputeI) {
+          I1(i, j, k) = I_current1;
+        }
+      }
+    }
+  }
+
+  if (compute0) {
+    const double dz0 = thk0 - z[ks0];
+    D0 += 0.5 * dz0 * dz0 * delta_prev0;
+  }
+  if (compute1) {
+    const double dz1 = thk1 - z[ks1];
+    D1 += 0.5 * dz1 * dz1 * delta_prev1;
+  }
+
+  if constexpr (FullUpdate || ComputeI) {
+    for (int k = kmax + 1; k < Mz; ++k) {
+      if (compute0) {
+        if constexpr (FullUpdate) {
+          delta0(i, j, k) = 0.0;
+        }
+        if constexpr (ComputeI) {
+          I0(i, j, k) = I_current0;
+        }
+      }
+      if (compute1) {
+        if constexpr (FullUpdate) {
+          delta1(i, j, k) = 0.0;
+        }
+        if constexpr (ComputeI) {
+          I1(i, j, k) = I_current1;
+        }
+      }
+    }
+  }
+
+  double local_max = -1.0;
+  int capped = 0;
+  if (compute0) {
+    if ((!periodic_x && (i < 0 || i >= Mx - 1)) ||
+        (!periodic_y && (j < 0 || j >= My - 1))) {
+      D0 = 0.0;
+    }
+    if (limit_diffusivity && D0 >= D_limit) {
+      D0 = D_limit;
+      capped += 1;
+    }
+    result(i, j, 0) = D0;
+    if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+      flux(i, j, 0) = -D0 * h_x_0;
+    }
+    local_max = (D0 > local_max) ? D0 : local_max;
+  }
+
+  if (compute1) {
+    if ((!periodic_x && (i < 0 || i >= Mx - 1)) ||
+        (!periodic_y && (j < 0 || j >= My - 1))) {
+      D1 = 0.0;
+    }
+    if (limit_diffusivity && D1 >= D_limit) {
+      D1 = D_limit;
+      capped += 1;
+    }
+    result(i, j, 1) = D1;
+    if (i >= xs && i < xs + xm && j >= ys && j < ys + ym) {
+      flux(i, j, 1) = -D1 * h_y_1;
+    }
+    local_max = (D1 > local_max) ? D1 : local_max;
+  }
+
+  if (local_max >= 0.0) {
+    atomic_max_double(D_max, local_max);
+  }
+  if (capped > 0) {
+    atomicAdd(high_diffusivity_counter, capped);
+  }
+}
+
 template <int FlowLawMode, bool FullUpdate, bool ComputeI, bool UseQuadratic>
 struct DiffusivityPBBoth {
   sia_kernels::DeviceArray2DConstView thk;
@@ -495,25 +991,28 @@ struct DiffusivityPBBoth {
   __device__ inline void operator()(int i, int j) const {
     const double h_x_0 = h_x(i, j, 0);
     const double h_y_0 = h_y(i, j, 0);
-    compute_diffusivity_orient<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
-        i, j, 0, 1, 0, h_x_0, h_y_0,
-        thk, theta, enthalpy, result, flux, delta0, I0,
-        z, Mz, Mx, My, xs, ys, xm, ym,
-        periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
-        A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
-        T_melting, beta, c_i, T_0, rho_i_g, p_air,
-        D_max, high_diffusivity_counter);
-
     const double h_x_1 = h_x(i, j, 1);
     const double h_y_1 = h_y(i, j, 1);
-    compute_diffusivity_orient<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
-        i, j, 1, 0, 1, h_x_1, h_y_1,
-        thk, theta, enthalpy, result, flux, delta1, I1,
-        z, Mz, Mx, My, xs, ys, xm, ym,
-        periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
-        A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
-        T_melting, beta, c_i, T_0, rho_i_g, p_air,
-        D_max, high_diffusivity_counter);
+
+    if constexpr (!FullUpdate && !ComputeI) {
+      compute_diffusivity_pair_no_update<FlowLawMode, UseQuadratic>(
+          i, j, h_x_0, h_y_0, h_x_1, h_y_1,
+          thk, theta, enthalpy, result, flux,
+          z, Mz, Mx, My, xs, ys, xm, ym,
+          periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
+          A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
+          T_melting, beta, c_i, T_0, rho_i_g, p_air,
+          D_max, high_diffusivity_counter);
+    } else {
+      compute_diffusivity_pair_update<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
+          i, j, h_x_0, h_y_0, h_x_1, h_y_1,
+          thk, theta, enthalpy, result, flux, delta0, delta1, I0, I1,
+          z, Mz, Mx, My, xs, ys, xm, ym,
+          periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
+          A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
+          T_melting, beta, c_i, T_0, rho_i_g, p_air,
+          D_max, high_diffusivity_counter);
+    }
   }
 };
 
@@ -575,23 +1074,25 @@ struct DiffusivityPBWithGradientBoth {
     h_x(i, j, 1) = h_x_1;
     h_y(i, j, 1) = h_y_1;
 
-    compute_diffusivity_orient<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
-        i, j, 0, 1, 0, h_x_0, h_y_0,
-        thk, theta, enthalpy, result, flux, delta0, I0,
-        z, Mz, Mx, My, xs, ys, xm, ym,
-        periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
-        A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
-        T_melting, beta, c_i, T_0, rho_i_g, p_air,
-        D_max, high_diffusivity_counter);
-
-    compute_diffusivity_orient<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
-        i, j, 1, 0, 1, h_x_1, h_y_1,
-        thk, theta, enthalpy, result, flux, delta1, I1,
-        z, Mz, Mx, My, xs, ys, xm, ym,
-        periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
-        A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
-        T_melting, beta, c_i, T_0, rho_i_g, p_air,
-        D_max, high_diffusivity_counter);
+    if constexpr (!FullUpdate && !ComputeI) {
+      compute_diffusivity_pair_no_update<FlowLawMode, UseQuadratic>(
+          i, j, h_x_0, h_y_0, h_x_1, h_y_1,
+          thk, theta, enthalpy, result, flux,
+          z, Mz, Mx, My, xs, ys, xm, ym,
+          periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
+          A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
+          T_melting, beta, c_i, T_0, rho_i_g, p_air,
+          D_max, high_diffusivity_counter);
+    } else {
+      compute_diffusivity_pair_update<FlowLawMode, FullUpdate, ComputeI, UseQuadratic>(
+          i, j, h_x_0, h_y_0, h_x_1, h_y_1,
+          thk, theta, enthalpy, result, flux, delta0, delta1, I0, I1,
+          z, Mz, Mx, My, xs, ys, xm, ym,
+          periodic_x, periodic_y, limit_diffusivity, D_limit, e_factor,
+          A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n_minus_1,
+          T_melting, beta, c_i, T_0, rho_i_g, p_air,
+          D_max, high_diffusivity_counter);
+    }
   }
 };
 
@@ -1116,6 +1617,18 @@ void compute_3d_horizontal_velocity_from_delta(const array::Array3D &delta0,
                                              sliding.view, u.view, v.view,
                                              g_z_device, Mz};
   launch_2d(functor, xs, ys, xm, ym, 0);
+}
+
+void update_periodic_ghosts(array::Array &array,
+                            int xs, int ys, int xm, int ym,
+                            int Mx, int My,
+                            int ghosts) {
+  if (ghosts <= 0) {
+    return;
+  }
+  CudaArrayView view(array);
+  PeriodicGhostFill functor{view.view, xs, ys, xm, ym, Mx, My};
+  launch_2d(functor, xs, ys, xm, ym, ghosts);
 }
 
 void compute_diffusivity_pb_both(const array::Scalar &thk_smooth,
