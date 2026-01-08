@@ -10,8 +10,6 @@ import yaml
 from .aws import instance_spec
 from .cost import estimate_total_cost
 
-DEFAULT_CPU_INSTANCE_TYPES = ["c7i.4xlarge", "hpc6a.48xlarge"]
-DEFAULT_GPU_INSTANCE_TYPES = ["g5.xlarge"]
 INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.xlarge"}
 
 
@@ -102,9 +100,7 @@ def load_config(path: str) -> NormalizedConfig:
         if hourly_override is not None:
             raise ValueError("cost.estimated_usd_per_hour requires compute.instance")
         if instance_types is None:
-            instance_types = (
-                DEFAULT_GPU_INSTANCE_TYPES if requested_gpus > 0 else DEFAULT_CPU_INSTANCE_TYPES
-            )
+            raise ValueError("compute.instance or compute.instance_types is required")
         if isinstance(instance_types, str):
             candidates = [value.strip() for value in instance_types.split(",") if value.strip()]
         else:

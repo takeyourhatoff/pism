@@ -2,12 +2,18 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: "PISM AWS Batch infrastructure (CPU/GPU queues, job definitions, DynamoDB)."
 
 Parameters:
-  SubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: "Subnets for AWS Batch compute environments."
-  SecurityGroupIds:
-    Type: List<AWS::EC2::SecurityGroup::Id>
-    Description: "Security groups for AWS Batch compute environments."
+  VpcCidr:
+    Type: String
+    Description: "CIDR block for the VPC."
+    Default: 10.0.0.0/16
+  PublicSubnetCidrA:
+    Type: String
+    Description: "CIDR block for public subnet A."
+    Default: 10.0.1.0/24
+  PublicSubnetCidrB:
+    Type: String
+    Description: "CIDR block for public subnet B."
+    Default: 10.0.2.0/24
   CpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "CPU instance types for Batch."
@@ -32,12 +38,6 @@ Parameters:
     Type: Number
     Description: "Desired vCPUs for GPU compute environments."
     Default: 0
-  InputBucketArn:
-    Type: String
-    Description: "ARN of the S3 bucket holding inputs (e.g., arn:aws:s3:::pism-inputs)."
-  OutputBucketArn:
-    Type: String
-    Description: "ARN of the S3 bucket holding outputs (e.g., arn:aws:s3:::pism-results)."
   CpuImage:
     Type: String
     Description: "Container image for CPU jobs."
@@ -51,6 +51,118 @@ Resources:
     Properties:
       LogGroupName: /aws/batch/pism
       RetentionInDays: 14
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: pism-batch-igw
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-rt
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrA
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-a
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrB
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-b
+
+  PublicSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  BatchSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for PISM Batch instances"
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  InputBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
 
   BatchServiceRole:
     Type: AWS::IAM::Role
@@ -122,16 +234,16 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource:
-                  - !Ref InputBucketArn
-                  - !Sub "${InputBucketArn}/*"
+                  - !GetAtt InputBucket.Arn
+                  - !Sub "${InputBucket.Arn}/*"
               - Effect: Allow
                 Action:
                   - s3:PutObject
                   - s3:ListBucket
                   - s3:AbortMultipartUpload
                 Resource:
-                  - !Ref OutputBucketArn
-                  - !Sub "${OutputBucketArn}/*"
+                  - !GetAtt OutputBucket.Arn
+                  - !Sub "${OutputBucket.Arn}/*"
 
   CpuSpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
@@ -147,8 +259,11 @@ Resources:
         MaxvCpus: !Ref MaxVcpusCpu
         DesiredvCpus: !Ref DesiredVcpusCpu
         InstanceTypes: !Ref CpuInstanceTypes
-        Subnets: !Ref SubnetIds
-        SecurityGroupIds: !Ref SecurityGroupIds
+        Subnets:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+        SecurityGroupIds:
+          - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
         SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
 
@@ -164,8 +279,11 @@ Resources:
         MaxvCpus: !Ref MaxVcpusCpu
         DesiredvCpus: !Ref DesiredVcpusCpu
         InstanceTypes: !Ref CpuInstanceTypes
-        Subnets: !Ref SubnetIds
-        SecurityGroupIds: !Ref SecurityGroupIds
+        Subnets:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+        SecurityGroupIds:
+          - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
 
   GpuSpotComputeEnvironment:
@@ -182,8 +300,11 @@ Resources:
         MaxvCpus: !Ref MaxVcpusGpu
         DesiredvCpus: !Ref DesiredVcpusGpu
         InstanceTypes: !Ref GpuInstanceTypes
-        Subnets: !Ref SubnetIds
-        SecurityGroupIds: !Ref SecurityGroupIds
+        Subnets:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+        SecurityGroupIds:
+          - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
         SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
 
@@ -306,3 +427,18 @@ Outputs:
   DynamoTable:
     Description: "DynamoDB table for run metadata."
     Value: !Ref RunsTable
+  InputBucketName:
+    Description: "S3 bucket for inputs."
+    Value: !Ref InputBucket
+  OutputBucketName:
+    Description: "S3 bucket for outputs."
+    Value: !Ref OutputBucket
+  VpcId:
+    Description: "VPC used for Batch compute."
+    Value: !Ref Vpc
+  PublicSubnetIds:
+    Description: "Public subnets for Batch compute."
+    Value: !Sub "${PublicSubnetA},${PublicSubnetB}"
+  BatchSecurityGroupId:
+    Description: "Security group for Batch compute."
+    Value: !Ref BatchSecurityGroup

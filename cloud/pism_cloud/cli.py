@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 from .batch import (
     build_overrides,
@@ -186,10 +186,6 @@ def list_runs_cmd() -> int:
     return 0
 
 
-def _parse_csv(value: str) -> List[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
 def _build_images_internal(args: argparse.Namespace) -> tuple[str, str]:
     root = repo_root()
     context = Path(args.context or root)
@@ -235,13 +231,15 @@ def deploy(args: argparse.Namespace) -> int:
         return 2
 
     parameters = {
-        "SubnetIds": ",".join(args.subnet_ids),
-        "SecurityGroupIds": ",".join(args.security_group_ids),
-        "InputBucketArn": args.input_bucket_arn,
-        "OutputBucketArn": args.output_bucket_arn,
         "CpuImage": cpu_image,
         "GpuImage": gpu_image,
     }
+    if args.vpc_cidr:
+        parameters["VpcCidr"] = args.vpc_cidr
+    if args.public_subnet_cidr_a:
+        parameters["PublicSubnetCidrA"] = args.public_subnet_cidr_a
+    if args.public_subnet_cidr_b:
+        parameters["PublicSubnetCidrB"] = args.public_subnet_cidr_b
 
     outputs = deploy_stack(args.stack_name, template_path, parameters)
     print("Stack deployed")
@@ -291,10 +289,6 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser = subcommands.add_parser("deploy", help="Build images and deploy CloudFormation stack")
     deploy_parser.add_argument("--stack-name", default="pism-batch")
     deploy_parser.add_argument("--template", default=str(repo_root() / "cloud/infra/cloudformation/pism-batch.yml"))
-    deploy_parser.add_argument("--subnet-ids", type=_parse_csv, required=True)
-    deploy_parser.add_argument("--security-group-ids", type=_parse_csv, required=True)
-    deploy_parser.add_argument("--input-bucket-arn", required=True)
-    deploy_parser.add_argument("--output-bucket-arn", required=True)
     deploy_parser.add_argument("--cpu-repo", default="pism-cpu")
     deploy_parser.add_argument("--gpu-repo", default="pism-gpu")
     deploy_parser.add_argument("--cpu-dockerfile", default=str(repo_root() / "cloud/images/Dockerfile.cpu"))
@@ -303,6 +297,9 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--context", default=str(repo_root()))
     deploy_parser.add_argument("--region", default=None)
     deploy_parser.add_argument("--cuda-arch", default="sm_86")
+    deploy_parser.add_argument("--vpc-cidr", default=None)
+    deploy_parser.add_argument("--public-subnet-cidr-a", default=None)
+    deploy_parser.add_argument("--public-subnet-cidr-b", default=None)
     deploy_parser.add_argument("--no-build-images", dest="build_images", action="store_false")
     deploy_parser.add_argument("--cpu-image", default=None)
     deploy_parser.add_argument("--gpu-image", default=None)
