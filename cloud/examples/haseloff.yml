@@ -14,4 +14,13 @@ io:
 
 pism:
   executable: pism
-  args: "-i {{INPUT_DIR}}/startSMALLablate.nc -bootstrap -Lz 3500 -Mx 51 -My 51 -Mz 61 -y 1 -no_temp -o {{OUTPUT_DIR}}/out-{{MEMBER_ID}}.nc"
+  args: >
+    -i {{INPUT_DIR}}/startSMALLablate.nc
+    -bootstrap
+    -Lz 3500
+    -Mx 51
+    -My 51
+    -Mz 61
+    -y 1
+    -no_temp
+    -o {{OUTPUT_DIR}}/out-{{MEMBER_ID}}.nc

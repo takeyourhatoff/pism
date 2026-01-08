@@ -14,4 +14,7 @@ io:
   output_prefix: biis-test-001
 
 pism:
-  args: "--config {{INPUT_DIR}}/biis.cfg --time.end 20000 --o {{OUTPUT_DIR}}/member-{{MEMBER_ID}}.nc"
+  args: >
+    --config {{INPUT_DIR}}/biis.cfg
+    --time.end 20000
+    --o {{OUTPUT_DIR}}/member-{{MEMBER_ID}}.nc
