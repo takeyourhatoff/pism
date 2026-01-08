@@ -4,14 +4,12 @@ compute:
   backend: aws-batch
   instance: g5.xlarge
   # use_spot: false
-  # instance_types: [c7i.4xlarge, hpc6a.48xlarge]
 
-io:
-  input_prefix: biis
-  output_prefix: biis-test-001
+inputs:
+  base: biis
 
 pism:
   args: >
-    --config {{INPUT_DIR}}/biis.cfg
+    --config {{INPUTS.base}}/biis.cfg
     --time.end 20000
     --o {{OUTPUT_DIR}}/run-{{RUN_ID}}.nc

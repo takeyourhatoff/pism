@@ -321,7 +321,7 @@
 
       const items = [
         { label: "Instance", value: run.instance_type },
-        { label: "Cost per hour / job", value: formatRate(detail ? detail.hourly_rate_usd : null) },
+        { label: "Cost per hour", value: formatRate(detail ? detail.hourly_rate_usd : null) },
         { label: "Cost so far", value: formatCurrency(detail ? detail.cost_to_date_usd : null) },
       ];
 

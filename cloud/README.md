@@ -33,17 +33,19 @@ pism-cloud deploy --stack-name pism-batch
 
 This builds and pushes CPU/GPU images to ECR, then deploys the CloudFormation stack.
 The stack creates a VPC, subnets, security group, S3 buckets, Batch queues, job definitions,
-a log group, and the DynamoDB table.
-ECR repositories (`pism-cpu`, `pism-gpu`) are created automatically if missing.
-Use `--vpc-cidr` and `--public-subnet-cidr-a/b` to override the default network ranges.
+a log group, and the DynamoDB table. ECR repositories (`pism-cpu`, `pism-gpu`) are created
+automatically if missing. Use `--vpc-cidr` and `--public-subnet-cidr-a/b` to override
+the default network ranges.
 
 ### 4) Upload inputs
 
 Use the `InputBucketName` output from `pism-cloud deploy` and upload inputs to:
 
 ```
-s3://<input-bucket>/<run-id>/
+s3://<input-bucket>/<prefix>/
 ```
+
+Use the same `<prefix>` value in your config under `inputs` (see examples below).
 
 To prepare and upload the standard Greenland inputs (requires Docker and an activated venv):
 
@@ -63,7 +65,7 @@ pism-cloud upload --source test/cases/haseloff/startSMALLablate.nc --prefix hase
 To upload your own inputs:
 
 ```
-pism-cloud upload --source /path/to/inputs --prefix <run-id>
+pism-cloud upload --source /path/to/inputs --prefix <inputs-prefix>
 ```
 
 If your stack name differs from `pism-batch`, add `--stack-name <name>`.
@@ -95,24 +97,22 @@ run_id: biis-run-0001
 compute:
   backend: aws-batch
   instance: c7i.4xlarge
-io:
-  input_prefix: biis
-  output_prefix: biis-run-0001
+inputs:
+  base: biis
 pism:
   args: >
-    --config {{INPUT_DIR}}/member-0001.cfg
+    --config {{INPUTS.base}}/member-0001.cfg
     --o {{OUTPUT_DIR}}/out-0001.nc
 ---
 run_id: biis-run-0002
 compute:
   backend: aws-batch
   instance: c7i.4xlarge
-io:
-  input_prefix: biis
-  output_prefix: biis-run-0002
+inputs:
+  base: biis
 pism:
   args: >
-    --config {{INPUT_DIR}}/member-0002.cfg
+    --config {{INPUTS.base}}/member-0002.cfg
     --o {{OUTPUT_DIR}}/out-0002.nc
 ```
 
@@ -132,22 +132,25 @@ Open `http://localhost:8080`.
 
 ## Configuration
 
-Set `io.input_prefix` and `io.output_prefix` to control the paths inside the buckets
-created by `pism-cloud deploy`. If you want to bypass stack outputs entirely, set
-`io.input_s3` and `io.output_s3` to full S3 URIs instead.
-Set either `compute.instance` or `compute.instance_types` to control instance selection.
+Set `inputs` to a map of input names to S3 prefixes or full S3 URIs. Prefixes are
+resolved under the input bucket created by `pism-cloud deploy`. Outputs are always
+written under `s3://<output-bucket>/<run_id>/`. Set `compute.instance` to control
+instance selection.
 
 `run_id` identifies a run in the dashboard. Each YAML document is one job, so every
-document should use a unique `run_id`.
+document should use a unique `run_id`; submissions fail if the run already exists.
+
+Outputs always land under `s3://<output-bucket>/<run_id>/`.
 
 Placeholders inside `pism.args` are expanded per job:
 
 - `{{INPUT_DIR}}` -> `/workspace/input`
 - `{{OUTPUT_DIR}}` -> `/workspace/output`
 - `{{RUN_ID}}`
+- `{{INPUTS.<name>}}` -> `/workspace/input/<name>`
 
 Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
-`s3://<output-bucket>/<output_prefix>/`.
+`s3://<output-bucket>/<run_id>/`.
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
@@ -166,6 +169,26 @@ pism-cloud build-images
 
 These Dockerfiles build PISM from source; expect longer build times and customize as needed.
 For other GPU types, set `--cuda-arch` when building images.
+
+## Minimal config schema
+
+```yaml
+run_id: <unique-run-id>
+
+compute:
+  backend: aws-batch
+  instance: c7i.4xlarge | hpc6a.48xlarge | g5.xlarge | <any AWS instance type>
+  # use_spot: true | false
+
+inputs:
+  <name>: <prefix-or-s3-uri>
+
+pism:
+  # executable: pismr | pism
+  args: >
+    --config {{INPUTS.<name>}}/config.cfg
+    --o {{OUTPUT_DIR}}/out.nc
+```
 
 ## Example smoke test
 

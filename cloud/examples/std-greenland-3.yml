@@ -5,14 +5,13 @@ compute:
   instance: c7i.4xlarge
   # use_spot: false
 
-io:
-  input_prefix: std-greenland
-  output_prefix: std-greenland-3
+inputs:
+  base: std-greenland
 
 pism:
   executable: pism
   args: >
-    -i {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc
+    -i {{INPUTS.base}}/pism_Greenland_5km_v1.1.nc
     -bootstrap
     -grid.registration corner
     -dx 10km
@@ -28,8 +27,8 @@ pism:
     -ys -10000
     -ye 0
     -surface given
-    -surface_given_file {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc
-    -front_retreat_file {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc
+    -surface_given_file {{INPUTS.base}}/pism_Greenland_5km_v1.1.nc
+    -front_retreat_file {{INPUTS.base}}/pism_Greenland_5km_v1.1.nc
     -sia_e 3.0
     -stress_balance ssa+sia
     -topg_to_phi

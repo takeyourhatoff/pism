@@ -5,14 +5,13 @@ compute:
   instance: c7i.4xlarge
   # use_spot: false
 
-io:
-  input_prefix: haseloff
-  output_prefix: haseloff-smoke-001
+inputs:
+  base: haseloff
 
 pism:
   executable: pism
   args: >
-    -i {{INPUT_DIR}}/startSMALLablate.nc
+    -i {{INPUTS.base}}/startSMALLablate.nc
     -bootstrap
     -Lz 3500
     -Mx 51

@@ -5,14 +5,13 @@ compute:
   instance: c7i.4xlarge
   # use_spot: false
 
-io:
-  input_prefix: std-greenland
-  output_prefix: std-greenland-4
+inputs:
+  base: std-greenland
 
 pism:
   executable: pism
   args: >
-    -i {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc
+    -i {{INPUTS.base}}/pism_Greenland_5km_v1.1.nc
     -bootstrap
     -grid.registration corner
     -dx 20km
@@ -27,16 +26,16 @@ pism:
     -grid.recompute_longitude_and_latitude false
     -ys -25000
     -ye 0
-    -regrid_file {{INPUT_DIR}}/g20km_10ka_hy.nc
+    -regrid_file {{INPUTS.base}}/g20km_10ka_hy.nc
     -regrid_vars litho_temp,thk,enthalpy,tillwat,basal_melt_rate_grounded
     -bed_def lc
     -atmosphere searise_greenland,delta_T,precip_scaling
     -surface pdd
-    -atmosphere_precip_scaling_file {{INPUT_DIR}}/pism_dT.nc
-    -atmosphere_delta_T_file {{INPUT_DIR}}/pism_dT.nc
+    -atmosphere_precip_scaling_file {{INPUTS.base}}/pism_dT.nc
+    -atmosphere_delta_T_file {{INPUTS.base}}/pism_dT.nc
     -sea_level constant,delta_sl
-    -ocean_delta_sl_file {{INPUT_DIR}}/pism_dSL.nc
-    -front_retreat_file {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc
+    -ocean_delta_sl_file {{INPUTS.base}}/pism_dSL.nc
+    -front_retreat_file {{INPUTS.base}}/pism_Greenland_5km_v1.1.nc
     -sia_e 3.0
     -stress_balance ssa+sia
     -topg_to_phi

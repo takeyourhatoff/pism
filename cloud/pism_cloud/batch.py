@@ -36,7 +36,19 @@ set -euo pipefail
 INPUT_DIR=/workspace/input
 OUTPUT_DIR=/workspace/output
 mkdir -p "$INPUT_DIR" "$OUTPUT_DIR"
-aws s3 sync "$INPUT_S3" "$INPUT_DIR"
+python3 - <<'PY'
+import json
+import os
+import subprocess
+
+inputs = json.loads(os.environ.get("INPUTS_JSON", "{}"))
+base = os.environ.get("INPUT_DIR", "/workspace/input")
+
+for name, uri in inputs.items():
+    dest = os.path.join(base, name)
+    os.makedirs(dest, exist_ok=True)
+    subprocess.run(["aws", "s3", "sync", uri, dest], check=True)
+PY
 cd "$OUTPUT_DIR"
 mpirun -n "$MPI_RANKS" "$PISM_EXECUTABLE" $PISM_ARGS
 aws s3 sync "$OUTPUT_DIR" "$OUTPUT_S3"
@@ -49,7 +61,7 @@ def build_overrides(
     memory_mib: int,
     mpi_ranks: int,
     gpus: int,
-    input_s3: str,
+    inputs_json: str,
     output_s3: str,
     pism_args: str,
     pism_executable: str,
@@ -67,7 +79,7 @@ def build_overrides(
         "resourceRequirements": resource_requirements,
         "environment": [
             {"name": "RUN_ID", "value": run_id},
-            {"name": "INPUT_S3", "value": input_s3},
+            {"name": "INPUTS_JSON", "value": inputs_json},
             {"name": "OUTPUT_S3", "value": output_s3},
             {"name": "MPI_RANKS", "value": str(mpi_ranks)},
             {"name": "PISM_ARGS", "value": pism_args},

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import yaml
 
@@ -16,7 +16,7 @@ INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.x
 class NormalizedConfig:
     run_id: str
     compute: Dict[str, Any]
-    io: Dict[str, Any]
+    inputs: Dict[str, str]
     pism: Dict[str, Any]
 
 
@@ -42,27 +42,6 @@ def _resolve_instance(instance: str | None) -> str:
     return INSTANCE_ALIASES.get(instance, instance)
 
 
-def _select_instance(candidates: Iterable[str]) -> str:
-    resolved = []
-    has_cpu = False
-    has_gpu = False
-    for candidate in candidates:
-        try:
-            spec = instance_spec(candidate)
-        except Exception:
-            continue
-        resolved.append((candidate, spec))
-        if spec.gpus > 0:
-            has_gpu = True
-        else:
-            has_cpu = True
-    if not resolved:
-        raise ValueError("No instance types resolved from compute.instance_types")
-    if has_cpu and has_gpu:
-        raise ValueError("compute.instance_types must not mix CPU and GPU instance types")
-    return resolved[0][0]
-
-
 def _load_documents(path: str) -> List[Tuple[int, Dict[str, Any]]]:
     with open(path, "r", encoding="utf-8") as handle:
         docs = list(yaml.safe_load_all(handle))
@@ -84,42 +63,36 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
 
     use_spot = bool(compute.get("use_spot", True))
     instance_value = compute.get("instance")
-    instance_types = compute.get("instance_types")
     if instance_value is None:
-        if instance_types is None:
-            raise ValueError(f"{source}: compute.instance or compute.instance_types is required")
-        if isinstance(instance_types, str):
-            candidates = [value.strip() for value in instance_types.split(",") if value.strip()]
-        else:
-            candidates = list(instance_types)
-        instance = _select_instance(candidates)
-    else:
-        instance = _resolve_instance(instance_value)
+        if compute.get("instance_types") is not None:
+            raise ValueError(
+                f"{source}: compute.instance_types is no longer supported; use compute.instance"
+            )
+        raise ValueError(f"{source}: compute.instance is required")
+    instance = _resolve_instance(instance_value)
 
     spec = instance_spec(instance)
 
     gpus = int(spec.gpus)
     mpi_ranks = int(gpus if gpus > 0 else spec.vcpus)
 
-    io_cfg = data.get("io", {})
-    input_s3 = io_cfg.get("input_s3")
-    output_s3 = io_cfg.get("output_s3")
-    input_prefix = io_cfg.get("input_prefix")
-    output_prefix = io_cfg.get("output_prefix")
+    inputs_cfg = data.get("inputs")
+    if inputs_cfg is None:
+        raise ValueError(f"{source}: inputs is required")
+    if not isinstance(inputs_cfg, dict) or not inputs_cfg:
+        raise ValueError(f"{source}: inputs must be a non-empty map")
 
-    if input_s3 is not None:
-        input_s3 = _ensure_s3_uri(input_s3, "io.input_s3")
-        input_prefix = None
-    else:
-        input_prefix = _normalize_prefix(
-            _require(input_prefix, f"{source}: io.input_prefix is required")
-        )
-
-    if output_s3 is not None:
-        output_s3 = _ensure_s3_uri(output_s3, "io.output_s3")
-        output_prefix = None
-    else:
-        output_prefix = _normalize_prefix(output_prefix or run_id)
+    normalized_inputs: Dict[str, str] = {}
+    for name, value in inputs_cfg.items():
+        if name is None or str(name).strip() == "":
+            raise ValueError(f"{source}: input name must not be empty")
+        raw = str(value).strip()
+        if not raw:
+            raise ValueError(f"{source}: inputs.{name} must not be empty")
+        if raw.startswith("s3://"):
+            normalized_inputs[str(name)] = _ensure_s3_uri(raw, f"{source}: inputs.{name}").rstrip("/")
+        else:
+            normalized_inputs[str(name)] = _normalize_prefix(raw)
 
     pism_cfg = data.get("pism", {})
     args = _require(pism_cfg.get("args"), f"{source}: pism.args is required")
@@ -135,18 +108,12 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
         "use_spot": use_spot,
     }
 
-    normalized_io = {
-        "input_s3": input_s3,
-        "output_s3": output_s3,
-        "input_prefix": input_prefix,
-        "output_prefix": output_prefix,
-    }
     normalized_pism = {"args": args, "executable": executable}
 
     return NormalizedConfig(
         run_id=run_id,
         compute=normalized_compute,
-        io=normalized_io,
+        inputs=normalized_inputs,
         pism=normalized_pism,
     )
 

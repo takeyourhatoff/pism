@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Dict
@@ -26,19 +27,22 @@ INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
 
 
-def render_args(template: str, run_id: str) -> str:
-    return (
+def render_args_with_inputs(template: str, run_id: str, input_names: list[str]) -> str:
+    rendered = (
         template.replace("{{RUN_ID}}", run_id)
         .replace("{{INPUT_DIR}}", INPUT_DIR)
         .replace("{{OUTPUT_DIR}}", OUTPUT_DIR)
     )
+    for name in input_names:
+        rendered = rendered.replace(f"{{{{INPUTS.{name}}}}}", f"{INPUT_DIR}/{name}")
+    return rendered
 
 
 def build_run_item(
     config: NormalizedConfig,
     job_queue: str,
     job_definition: str,
-    input_s3: str,
+    inputs_s3: Dict[str, str],
     output_s3: str,
 ) -> Dict[str, object]:
     return {
@@ -49,7 +53,7 @@ def build_run_item(
         "use_spot": config.compute["use_spot"],
         "job_queue": job_queue,
         "job_definition": job_definition,
-        "input_s3": input_s3,
+        "inputs": inputs_s3,
         "output_s3": output_s3,
         "pism_args": config.pism["args"],
         "mpi_ranks": config.compute["mpi_ranks"],
@@ -77,11 +81,33 @@ def submit(config_paths: list[str], stack_name: str) -> int:
     table = get_table()
 
     seen_run_ids = set()
+    try:
+        outputs = stack_outputs(stack_name)
+    except Exception as exc:
+        print(f"Stack lookup failed: {exc}", file=sys.stderr)
+        return 2
+
+    input_bucket = outputs.get("InputBucketName")
+    output_bucket = outputs.get("OutputBucketName")
+    if not input_bucket or not output_bucket:
+        print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
+        return 2
+
     for cfg in configs:
         if cfg.run_id in seen_run_ids:
             print(f"Config error: duplicate run_id {cfg.run_id}", file=sys.stderr)
             return 2
         seen_run_ids.add(cfg.run_id)
+
+    for cfg in configs:
+        try:
+            existing = get_run(table, cfg.run_id)
+        except Exception as exc:
+            print(f"Run lookup failed: {exc}", file=sys.stderr)
+            return 2
+        if existing:
+            print(f"Config error: run_id {cfg.run_id} already exists", file=sys.stderr)
+            return 2
 
     for cfg in configs:
         try:
@@ -91,35 +117,26 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             return 2
 
         job_definition = select_job_definition(cfg.compute["gpus"])
-        input_s3 = cfg.io.get("input_s3")
-        output_s3 = cfg.io.get("output_s3")
-        input_prefix = cfg.io.get("input_prefix")
-        output_prefix = cfg.io.get("output_prefix")
+        resolved_inputs: Dict[str, str] = {}
+        for name, value in cfg.inputs.items():
+            if value.startswith("s3://"):
+                resolved_inputs[name] = value
+            else:
+                resolved_inputs[name] = f"s3://{input_bucket}/{value}"
 
-        if input_s3 is None or output_s3 is None:
-            try:
-                outputs = stack_outputs(stack_name)
-            except Exception as exc:
-                print(f"Stack lookup failed: {exc}", file=sys.stderr)
-                return 2
-            input_bucket = outputs.get("InputBucketName")
-            output_bucket = outputs.get("OutputBucketName")
-            if not input_bucket or not output_bucket:
-                print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
-                return 2
+        output_s3 = f"s3://{output_bucket}/{cfg.run_id}"
 
-            if input_s3 is None:
-                input_s3 = f"s3://{input_bucket}/{input_prefix}"
-            if output_s3 is None:
-                output_s3 = f"s3://{output_bucket}/{output_prefix}"
-
-        rendered_args = render_args(cfg.pism["args"], cfg.run_id)
+        rendered_args = render_args_with_inputs(
+            cfg.pism["args"],
+            cfg.run_id,
+            list(cfg.inputs.keys()),
+        )
         overrides = build_overrides(
             vcpus=cfg.compute["vcpus"],
             memory_mib=cfg.compute["memory_mib"],
             mpi_ranks=cfg.compute["mpi_ranks"],
             gpus=cfg.compute["gpus"],
-            input_s3=input_s3,
+            inputs_json=json.dumps(resolved_inputs),
             output_s3=output_s3,
             pism_args=rendered_args,
             pism_executable=cfg.pism["executable"],
@@ -135,7 +152,7 @@ def submit(config_paths: list[str], stack_name: str) -> int:
 
         store_run(
             table,
-            build_run_item(cfg, job_queue, job_definition, input_s3, output_s3),
+            build_run_item(cfg, job_queue, job_definition, resolved_inputs, output_s3),
         )
         store_job(table, build_job_item(cfg.run_id, job_id, job_name))
 
