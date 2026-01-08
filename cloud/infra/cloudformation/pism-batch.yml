@@ -308,6 +308,25 @@ Resources:
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
         SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
 
+  GpuOnDemandComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName: pism-gpu-ondemand
+      Type: MANAGED
+      ServiceRole: !GetAtt BatchServiceRole.Arn
+      ComputeResources:
+        Type: EC2
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxVcpusGpu
+        DesiredvCpus: !Ref DesiredVcpusGpu
+        InstanceTypes: !Ref GpuInstanceTypes
+        Subnets:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+        SecurityGroupIds:
+          - !Ref BatchSecurityGroup
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+
   CpuSpotQueue:
     Type: AWS::Batch::JobQueue
     Properties:
@@ -337,6 +356,16 @@ Resources:
       ComputeEnvironmentOrder:
         - Order: 1
           ComputeEnvironment: !Ref GpuSpotComputeEnvironment
+
+  GpuOnDemandQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: pism-gpu-ondemand
+      State: ENABLED
+      Priority: 85
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref GpuOnDemandComputeEnvironment
 
   CpuJobDefinition:
     Type: AWS::Batch::JobDefinition
@@ -416,8 +445,8 @@ Resources:
 
 Outputs:
   BatchJobQueues:
-    Description: "Batch job queues (CPU spot, CPU on-demand, GPU spot)."
-    Value: !Sub "${CpuSpotQueue},${CpuOnDemandQueue},${GpuSpotQueue}"
+    Description: "Batch job queues (CPU spot, CPU on-demand, GPU spot, GPU on-demand)."
+    Value: !Sub "${CpuSpotQueue},${CpuOnDemandQueue},${GpuSpotQueue},${GpuOnDemandQueue}"
   BatchJobDefinitions:
     Description: "Batch job definitions (CPU, GPU)."
     Value: !Sub "${CpuJobDefinition},${GpuJobDefinition}"

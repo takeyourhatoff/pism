@@ -10,6 +10,7 @@ import boto3
 CPU_SPOT_QUEUE = os.environ.get("PISM_CPU_SPOT_QUEUE", "pism-cpu-spot")
 GPU_SPOT_QUEUE = os.environ.get("PISM_GPU_SPOT_QUEUE", "pism-gpu-spot")
 CPU_ONDEMAND_QUEUE = os.environ.get("PISM_CPU_ONDEMAND_QUEUE", "pism-cpu-ondemand")
+GPU_ONDEMAND_QUEUE = os.environ.get("PISM_GPU_ONDEMAND_QUEUE", "pism-gpu-ondemand")
 
 CPU_JOB_DEFINITION = os.environ.get("PISM_CPU_JOB_DEFINITION", "pism-cpu")
 GPU_JOB_DEFINITION = os.environ.get("PISM_GPU_JOB_DEFINITION", "pism-gpu")
@@ -21,9 +22,7 @@ def batch_client():
 
 def select_queue(gpus: int, use_spot: bool) -> str:
     if gpus > 0:
-        if not use_spot:
-            raise ValueError("GPU on-demand queue not configured; set use_spot to true")
-        return GPU_SPOT_QUEUE
+        return GPU_SPOT_QUEUE if use_spot else GPU_ONDEMAND_QUEUE
     return CPU_SPOT_QUEUE if use_spot else CPU_ONDEMAND_QUEUE
 
 

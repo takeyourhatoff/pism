@@ -91,9 +91,6 @@ def load_config(path: str) -> NormalizedConfig:
 
     spec = instance_spec(instance)
 
-    if spec.gpus > 0 and not use_spot:
-        raise ValueError("GPU on-demand is not configured; set compute.use_spot to true")
-
     gpus = int(compute.get("gpus", spec.gpus))
     mpi_ranks = int(compute.get("mpi_ranks", gpus if gpus > 0 else 1))
 

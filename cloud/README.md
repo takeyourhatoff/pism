@@ -179,6 +179,7 @@ Queues (required by the CLI):
 - `pism-cpu-spot`
 - `pism-gpu-spot`
 - `pism-cpu-ondemand`
+- `pism-gpu-ondemand`
 
 Job definitions:
 
@@ -187,13 +188,7 @@ Job definitions:
 
 Override these via environment variables:
 
-- `PISM_CPU_SPOT_QUEUE`, `PISM_GPU_SPOT_QUEUE`, `PISM_CPU_ONDEMAND_QUEUE`
+- `PISM_CPU_SPOT_QUEUE`, `PISM_GPU_SPOT_QUEUE`, `PISM_CPU_ONDEMAND_QUEUE`, `PISM_GPU_ONDEMAND_QUEUE`
 - `PISM_CPU_JOB_DEFINITION`, `PISM_GPU_JOB_DEFINITION`
 - `PISM_RUNS_TABLE` for DynamoDB
 - `PISM_LOG_GROUP` for the dashboard log links
-
-## Notes
-
-- GPU on-demand is not configured; GPU runs are Spot-only for now.
-- Ensure the container images include `aws` CLI for S3 sync.
-- One job is forced per instance by requesting full instance vCPU/memory.
