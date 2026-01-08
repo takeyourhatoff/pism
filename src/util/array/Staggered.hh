@@ -72,6 +72,12 @@ public:
   inline stencils::Star<double> star(int i, int j) const;
 };
 
+//! Staggered grid array supporting width=2 stencil computations.
+class Staggered2 : public Staggered {
+public:
+  Staggered2(std::shared_ptr<const Grid> grid, const std::string &name);
+};
+
 inline stencils::Star<double> Staggered1::star(int i, int j) const {
   const Staggered1 &self = *this;
 

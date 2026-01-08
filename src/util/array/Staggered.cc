@@ -66,6 +66,11 @@ Staggered1::Staggered1(std::shared_ptr<const Grid> grid, const std::string &name
   // empty
 }
 
+Staggered2::Staggered2(std::shared_ptr<const Grid> grid, const std::string &name)
+    : Staggered(grid, name, 2) {
+  // empty
+}
+
 std::array<double,2> absmax(const array::Staggered &input) {
 
   double z[2] = {0.0, 0.0};
