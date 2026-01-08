@@ -1,0 +1,310 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "PISM AWS Batch infrastructure (CPU/GPU queues, job definitions, DynamoDB)."
+
+Parameters:
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "Subnets for AWS Batch compute environments."
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: "Security groups for AWS Batch compute environments."
+  CpuInstanceTypes:
+    Type: CommaDelimitedList
+    Description: "CPU instance types for Batch."
+    Default: c7i.4xlarge,hpc6a.48xlarge
+  GpuInstanceTypes:
+    Type: CommaDelimitedList
+    Description: "GPU instance types for Batch."
+    Default: g5.xlarge
+  MaxVcpusCpu:
+    Type: Number
+    Description: "Max vCPUs for CPU compute environments."
+    Default: 512
+  MaxVcpusGpu:
+    Type: Number
+    Description: "Max vCPUs for GPU compute environments."
+    Default: 64
+  DesiredVcpusCpu:
+    Type: Number
+    Description: "Desired vCPUs for CPU compute environments."
+    Default: 0
+  DesiredVcpusGpu:
+    Type: Number
+    Description: "Desired vCPUs for GPU compute environments."
+    Default: 0
+  InputBucketArn:
+    Type: String
+    Description: "ARN of the S3 bucket holding inputs (e.g., arn:aws:s3:::pism-inputs)."
+  OutputBucketArn:
+    Type: String
+    Description: "ARN of the S3 bucket holding outputs (e.g., arn:aws:s3:::pism-results)."
+  CpuImage:
+    Type: String
+    Description: "Container image for CPU jobs."
+    Default: ghcr.io/pism/pism:cpu-latest
+  GpuImage:
+    Type: String
+    Description: "Container image for GPU jobs."
+    Default: ghcr.io/pism/pism:gpu-cuda12
+
+Resources:
+  BatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/batch/pism
+      RetentionInDays: 14
+
+  BatchServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pism-batch-service-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: batch.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBatchServiceRole
+
+  SpotFleetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pism-batch-spot-fleet-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: spotfleet.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2SpotFleetTaggingRole
+
+  EcsInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pism-batch-ecs-instance-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+
+  EcsInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: pism-batch-ecs-instance-profile
+      Roles:
+        - !Ref EcsInstanceRole
+
+  JobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pism-batch-job-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pism-batch-job-s3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Ref InputBucketArn
+                  - !Sub "${InputBucketArn}/*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:AbortMultipartUpload
+                Resource:
+                  - !Ref OutputBucketArn
+                  - !Sub "${OutputBucketArn}/*"
+
+  CpuSpotComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName: pism-cpu-spot
+      Type: MANAGED
+      ServiceRole: !GetAtt BatchServiceRole.Arn
+      ComputeResources:
+        Type: SPOT
+        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
+        BidPercentage: 100
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxVcpusCpu
+        DesiredvCpus: !Ref DesiredVcpusCpu
+        InstanceTypes: !Ref CpuInstanceTypes
+        Subnets: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+        SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
+
+  CpuOnDemandComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName: pism-cpu-ondemand
+      Type: MANAGED
+      ServiceRole: !GetAtt BatchServiceRole.Arn
+      ComputeResources:
+        Type: EC2
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxVcpusCpu
+        DesiredvCpus: !Ref DesiredVcpusCpu
+        InstanceTypes: !Ref CpuInstanceTypes
+        Subnets: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+
+  GpuSpotComputeEnvironment:
+    Type: AWS::Batch::ComputeEnvironment
+    Properties:
+      ComputeEnvironmentName: pism-gpu-spot
+      Type: MANAGED
+      ServiceRole: !GetAtt BatchServiceRole.Arn
+      ComputeResources:
+        Type: SPOT
+        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
+        BidPercentage: 100
+        MinvCpus: 0
+        MaxvCpus: !Ref MaxVcpusGpu
+        DesiredvCpus: !Ref DesiredVcpusGpu
+        InstanceTypes: !Ref GpuInstanceTypes
+        Subnets: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+        InstanceRole: !GetAtt EcsInstanceProfile.Arn
+        SpotIamFleetRole: !GetAtt SpotFleetRole.Arn
+
+  CpuSpotQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: pism-cpu-spot
+      State: ENABLED
+      Priority: 100
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref CpuSpotComputeEnvironment
+
+  CpuOnDemandQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: pism-cpu-ondemand
+      State: ENABLED
+      Priority: 80
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref CpuOnDemandComputeEnvironment
+
+  GpuSpotQueue:
+    Type: AWS::Batch::JobQueue
+    Properties:
+      JobQueueName: pism-gpu-spot
+      State: ENABLED
+      Priority: 90
+      ComputeEnvironmentOrder:
+        - Order: 1
+          ComputeEnvironment: !Ref GpuSpotComputeEnvironment
+
+  CpuJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: pism-cpu
+      Type: container
+      ContainerProperties:
+        Image: !Ref CpuImage
+        Command:
+          - bash
+          - -lc
+          - echo Override command set by pism-cloud
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "1"
+          - Type: MEMORY
+            Value: "2048"
+        JobRoleArn: !GetAtt JobRole.Arn
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref BatchLogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: pism
+      RetryStrategy:
+        Attempts: 3
+        EvaluateOnExit:
+          - OnStatusReason: "Host EC2*"
+            Action: RETRY
+
+  GpuJobDefinition:
+    Type: AWS::Batch::JobDefinition
+    Properties:
+      JobDefinitionName: pism-gpu
+      Type: container
+      ContainerProperties:
+        Image: !Ref GpuImage
+        Command:
+          - bash
+          - -lc
+          - echo Override command set by pism-cloud
+        ResourceRequirements:
+          - Type: VCPU
+            Value: "1"
+          - Type: MEMORY
+            Value: "2048"
+          - Type: GPU
+            Value: "1"
+        JobRoleArn: !GetAtt JobRole.Arn
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref BatchLogGroup
+            awslogs-region: !Ref AWS::Region
+            awslogs-stream-prefix: pism
+      RetryStrategy:
+        Attempts: 3
+        EvaluateOnExit:
+          - OnStatusReason: "Host EC2*"
+            Action: RETRY
+
+  RunsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: pism-runs
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: run_id
+          AttributeType: S
+        - AttributeName: sort_key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: run_id
+          KeyType: HASH
+        - AttributeName: sort_key
+          KeyType: RANGE
+
+Outputs:
+  BatchJobQueues:
+    Description: "Batch job queues (CPU spot, CPU on-demand, GPU spot)."
+    Value: !Sub "${CpuSpotQueue},${CpuOnDemandQueue},${GpuSpotQueue}"
+  BatchJobDefinitions:
+    Description: "Batch job definitions (CPU, GPU)."
+    Value: !Sub "${CpuJobDefinition},${GpuJobDefinition}"
+  CloudWatchLogGroup:
+    Description: "CloudWatch log group for Batch logs."
+    Value: !Ref BatchLogGroup
+  DynamoTable:
+    Description: "DynamoDB table for run metadata."
+    Value: !Ref RunsTable
