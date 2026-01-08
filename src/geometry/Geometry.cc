@@ -115,53 +115,55 @@ void Geometry::ensure_consistency(double ice_free_thickness_threshold) {
   auto grid = ice_thickness.grid();
   Config::ConstPtr config = grid->ctx()->config();
 
-  array::AccessScope list{&sea_level_elevation, &bed_elevation,
-      &ice_thickness, &ice_area_specific_volume,
-      &cell_type, &ice_surface_elevation};
-
-  // first ensure that ice_area_specific_volume is 0 if ice_thickness > 0.
   {
-    ParallelSection loop(grid->com);
-    try {
-      for (auto p = grid->points(); p; p.next()) {
-        const int i = p.i(), j = p.j();
+    array::AccessScope list{&sea_level_elevation, &bed_elevation,
+        &ice_thickness, &ice_area_specific_volume,
+        &cell_type, &ice_surface_elevation};
 
-        if (ice_thickness(i, j) < 0.0) {
-          throw RuntimeError::formatted(PISM_ERROR_LOCATION,
-                                        "H = %e (negative) at point i=%d, j=%d",
-                                        ice_thickness(i, j), i, j);
+    // first ensure that ice_area_specific_volume is 0 if ice_thickness > 0.
+    {
+      ParallelSection loop(grid->com);
+      try {
+        for (auto p = grid->points(); p; p.next()) {
+          const int i = p.i(), j = p.j();
+
+          if (ice_thickness(i, j) < 0.0) {
+            throw RuntimeError::formatted(PISM_ERROR_LOCATION,
+                                          "H = %e (negative) at point i=%d, j=%d",
+                                          ice_thickness(i, j), i, j);
+          }
+
+          if (ice_thickness(i, j) > 0.0 and ice_area_specific_volume(i, j) > 0.0) {
+            ice_thickness(i, j) += ice_area_specific_volume(i, j);
+            ice_area_specific_volume(i, j) = 0.0;
+          }
         }
+      } catch (...) {
+        loop.failed();
+      }
+      loop.check();
+    }
 
-        if (ice_thickness(i, j) > 0.0 and ice_area_specific_volume(i, j) > 0.0) {
-          ice_thickness(i, j) += ice_area_specific_volume(i, j);
-          ice_area_specific_volume(i, j) = 0.0;
+    // compute cell type and surface elevation
+    {
+      GeometryCalculator gc(*config);
+      gc.set_icefree_thickness(ice_free_thickness_threshold);
+
+      ParallelSection loop(grid->com);
+      try {
+        for (auto p = grid->points(); p; p.next()) {
+          const int i = p.i(), j = p.j();
+
+          int mask = 0;
+          gc.compute(sea_level_elevation(i, j), bed_elevation(i, j), ice_thickness(i, j),
+                     &mask, &ice_surface_elevation(i, j));
+          cell_type(i, j) = mask;
         }
+      } catch (...) {
+        loop.failed();
       }
-    } catch (...) {
-      loop.failed();
+      loop.check();
     }
-    loop.check();
-  }
-
-  // compute cell type and surface elevation
-  {
-    GeometryCalculator gc(*config);
-    gc.set_icefree_thickness(ice_free_thickness_threshold);
-
-    ParallelSection loop(grid->com);
-    try {
-      for (auto p = grid->points(); p; p.next()) {
-        const int i = p.i(), j = p.j();
-
-        int mask = 0;
-        gc.compute(sea_level_elevation(i, j), bed_elevation(i, j), ice_thickness(i, j),
-                   &mask, &ice_surface_elevation(i, j));
-        cell_type(i, j) = mask;
-      }
-    } catch (...) {
-      loop.failed();
-    }
-    loop.check();
   }
 
   ice_thickness.update_ghosts();

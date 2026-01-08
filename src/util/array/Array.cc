@@ -618,6 +618,11 @@ void  Array::update_ghosts() {
     return;
   }
 
+  if (std::getenv("PISM_DEBUG_GHOSTS")) {
+    m_impl->grid->ctx()->log()->message(
+        2, "update_ghosts %s access=%d\n", m_impl->name.c_str(), m_impl->access_counter);
+  }
+
   ierr = DMLocalToLocalBegin(*dm(), vec(), INSERT_VALUES, vec());
   PISM_CHK(ierr, "DMLocalToLocalBegin");
 

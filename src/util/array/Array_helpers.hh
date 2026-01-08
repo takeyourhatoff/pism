@@ -35,12 +35,13 @@ namespace details {
  */
 template <class V>
 void add(const V &x, double alpha, const V &y, V &result, bool scatter = true) {
+  {
+    array::AccessScope list{ &x, &y, &result };
+    for (auto p = result.grid()->points(); p; p.next()) {
+      const int i = p.i(), j = p.j();
 
-  array::AccessScope list{ &x, &y, &result };
-  for (auto p = result.grid()->points(); p; p.next()) {
-    const int i = p.i(), j = p.j();
-
-    result(i, j) = x(i, j) + y(i, j) * alpha;
+      result(i, j) = x(i, j) + y(i, j) * alpha;
+    }
   }
 
   if (scatter) {
@@ -52,13 +53,14 @@ void add(const V &x, double alpha, const V &y, V &result, bool scatter = true) {
 
 template <class V>
 void copy(const V &input, V &result, bool scatter = true) {
+  {
+    array::AccessScope list{ &input, &result };
 
-  array::AccessScope list{ &input, &result };
+    for (auto p = result.grid()->points(); p; p.next()) {
+      const int i = p.i(), j = p.j();
 
-  for (auto p = result.grid()->points(); p; p.next()) {
-    const int i = p.i(), j = p.j();
-
-    result(i, j) = input(i, j);
+      result(i, j) = input(i, j);
+    }
   }
 
   if (scatter) {

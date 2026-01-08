@@ -153,20 +153,22 @@ static void enthalpy_from_temperature_cold(EnthalpyConverter &EC,
                                            const array::Array3D &temperature,
                                            array::Array3D &enthalpy) {
 
-  array::AccessScope list{&temperature, &enthalpy, &thickness};
+  {
+    array::AccessScope list{&temperature, &enthalpy, &thickness};
 
-  for (auto p = grid.points(); p; p.next()) {
-    const int i = p.i(), j = p.j();
+    for (auto p = grid.points(); p; p.next()) {
+      const int i = p.i(), j = p.j();
 
-    const double *T_ij = temperature.get_column(i,j);
-    double *E_ij = enthalpy.get_column(i,j);
+      const double *T_ij = temperature.get_column(i,j);
+      double *E_ij = enthalpy.get_column(i,j);
 
-    for (unsigned int k=0; k<grid.Mz(); ++k) {
-      double depth = thickness(i,j) - grid.z(k);
-      E_ij[k] = EC.enthalpy_permissive(T_ij[k], 0.0,
-                                     EC.pressure(depth));
+      for (unsigned int k=0; k<grid.Mz(); ++k) {
+        double depth = thickness(i,j) - grid.z(k);
+        E_ij[k] = EC.enthalpy_permissive(T_ij[k], 0.0,
+                                       EC.pressure(depth));
+      }
+
     }
-
   }
 
   enthalpy.update_ghosts();
@@ -190,26 +192,27 @@ static void setInitStateF(Grid &grid,
   bed.set(0.0);
   mask.set(MASK_GROUNDED);
 
-  array::AccessScope list{&thickness, &enthalpy};
+  {
+    array::AccessScope list{&thickness, &enthalpy};
 
-  for (auto p = grid.points(); p; p.next()) {
-    const int i = p.i(), j = p.j();
+    for (auto p = grid.points(); p; p.next()) {
+      const int i = p.i(), j = p.j();
 
-    const double
-      r  = std::max(grid::radius(grid, i, j), 1.0), // avoid singularity at origin
-      Ts = Tmin + ST * r;
+      const double
+        r  = std::max(grid::radius(grid, i, j), 1.0), // avoid singularity at origin
+        Ts = Tmin + ST * r;
 
-    if (r > LforFG - 1.0) { // if (essentially) outside of sheet
-      thickness(i, j) = 0.0;
-      enthalpy.set_column(i, j, Ts);
-    } else {
-      TestFGParameters F = exactFG(0.0, r, grid.z(), 0.0);
+      if (r > LforFG - 1.0) { // if (essentially) outside of sheet
+        thickness(i, j) = 0.0;
+        enthalpy.set_column(i, j, Ts);
+      } else {
+        TestFGParameters F = exactFG(0.0, r, grid.z(), 0.0);
 
-      thickness(i, j) = F.H;
-      enthalpy.set_column(i, j, (F.T).data());
+        thickness(i, j) = F.H;
+        enthalpy.set_column(i, j, (F.T).data());
+      }
     }
   }
-
 
   thickness.update_ghosts();
 
