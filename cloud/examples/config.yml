@@ -7,6 +7,7 @@ compute:
   gpus: 1
   mpi_ranks: 1
   # use_spot: false
+  # instance_types: [c7i.4xlarge, hpc6a.48xlarge]
 
 cost:
   max_usd: 100
@@ -14,8 +15,8 @@ cost:
   # estimated_usd_per_hour: 0.85
 
 io:
-  input_s3: s3://pism-inputs/biis
-  output_s3: s3://pism-results/biis-test-001
+  input_s3: "s3://<input-bucket>/biis"
+  output_s3: "s3://<output-bucket>/biis-test-001"
 
 pism:
   args: "--config {{INPUT_DIR}}/biis.cfg --time.end 20000 --o {{OUTPUT_DIR}}/member-{{MEMBER_ID}}.nc"

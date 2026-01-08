@@ -17,20 +17,7 @@ Minimal, production-shaped tooling to run PISM ensembles as single-node AWS Batc
 - Python 3.9+.
 - Docker (for building images).
 
-### 2) Create S3 buckets
-
-```
-aws s3 mb s3://pism-inputs
-aws s3 mb s3://pism-results
-```
-
-Upload your inputs to:
-
-```
-s3://pism-inputs/<run-id>/
-```
-
-### 3) Install the CLI
+### 2) Install the CLI
 
 ```
 python -m venv .venv
@@ -38,19 +25,25 @@ source .venv/bin/activate
 pip install -e cloud
 ```
 
-### 4) Build images and deploy infrastructure
+### 3) Build images and deploy infrastructure
 
 ```
-pism-cloud deploy \
-  --subnet-ids subnet-abc,subnet-def \
-  --security-group-ids sg-123 \
-  --input-bucket-arn arn:aws:s3:::pism-inputs \
-  --output-bucket-arn arn:aws:s3:::pism-results
+pism-cloud deploy --stack-name pism-batch
 ```
 
 This builds and pushes CPU/GPU images to ECR, then deploys the CloudFormation stack.
-The stack creates Batch queues, job definitions, a log group, and the DynamoDB table.
+The stack creates a VPC, subnets, security group, S3 buckets, Batch queues, job definitions,
+a log group, and the DynamoDB table.
 ECR repositories (`pism-cpu`, `pism-gpu`) are created automatically if missing.
+Use `--vpc-cidr` and `--public-subnet-cidr-a/b` to override the default network ranges.
+
+### 4) Upload inputs
+
+Use the `InputBucketName` output from `pism-cloud deploy` and upload inputs to:
+
+```
+s3://<input-bucket>/<run-id>/
+```
 
 ### 5) Submit a run
 
@@ -73,6 +66,10 @@ pism-cloud dashboard --port 8080
 Open `http://localhost:8080`.
 
 ## Configuration
+
+Set `io.input_s3` and `io.output_s3` using the `InputBucketName` and `OutputBucketName`
+outputs from `pism-cloud deploy`.
+Set either `compute.instance` or `compute.instance_types` to control instance selection.
 
 Placeholders inside `pism.args` are expanded per job:
 
