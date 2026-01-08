@@ -4,8 +4,6 @@ ensemble_members: 2
 compute:
   backend: aws-batch
   instance: c7i.4xlarge
-  gpus: 0
-  mpi_ranks: 4
   # use_spot: false
 
 io:

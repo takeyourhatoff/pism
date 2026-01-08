@@ -43,22 +43,25 @@ def _resolve_instance(instance: str | None) -> str:
     return INSTANCE_ALIASES.get(instance, instance)
 
 
-def _select_instance(
-    candidates: Iterable[str],
-    requested_gpus: int | None,
-) -> str:
+def _select_instance(candidates: Iterable[str]) -> str:
+    resolved = []
+    has_cpu = False
+    has_gpu = False
     for candidate in candidates:
         try:
             spec = instance_spec(candidate)
         except Exception:
             continue
-        if requested_gpus is None:
-            return candidate
-        if requested_gpus == 0 and spec.gpus == 0:
-            return candidate
-        if requested_gpus > 0 and spec.gpus >= requested_gpus:
-            return candidate
-    raise ValueError("No instance type matches requested GPUs")
+        resolved.append((candidate, spec))
+        if spec.gpus > 0:
+            has_gpu = True
+        else:
+            has_cpu = True
+    if not resolved:
+        raise ValueError("No instance types resolved from compute.instance_types")
+    if has_cpu and has_gpu:
+        raise ValueError("compute.instance_types must not mix CPU and GPU instance types")
+    return resolved[0][0]
 
 
 def load_config(path: str) -> NormalizedConfig:
@@ -73,9 +76,6 @@ def load_config(path: str) -> NormalizedConfig:
         raise ValueError("compute.backend must be aws-batch")
 
     use_spot = bool(compute.get("use_spot", True))
-    requested_gpus_raw = compute.get("gpus")
-    requested_gpus = int(requested_gpus_raw) if requested_gpus_raw is not None else None
-
     instance_value = compute.get("instance")
     instance_types = compute.get("instance_types")
     if instance_value is None:
@@ -85,19 +85,14 @@ def load_config(path: str) -> NormalizedConfig:
             candidates = [value.strip() for value in instance_types.split(",") if value.strip()]
         else:
             candidates = list(instance_types)
-        instance = _select_instance(candidates, requested_gpus)
+        instance = _select_instance(candidates)
     else:
         instance = _resolve_instance(instance_value)
 
     spec = instance_spec(instance)
 
-    gpus = int(compute.get("gpus", spec.gpus))
-    mpi_ranks = int(compute.get("mpi_ranks", gpus if gpus > 0 else 1))
-
-    if spec.gpus > 0 and gpus == 0:
-        raise ValueError("GPU instance selected but gpus is set to 0")
-    if spec.gpus == 0 and gpus > 0:
-        raise ValueError("CPU instance selected but gpus > 0")
+    gpus = int(spec.gpus)
+    mpi_ranks = int(gpus if gpus > 0 else spec.vcpus)
 
     if gpus > 0 and mpi_ranks != gpus:
         raise ValueError("GPU jobs must use exactly 1 MPI rank per GPU")

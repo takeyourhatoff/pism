@@ -4,8 +4,6 @@ ensemble_members: 50
 compute:
   backend: aws-batch
   instance: g5.xlarge
-  gpus: 1
-  mpi_ranks: 1
   # use_spot: false
   # instance_types: [c7i.4xlarge, hpc6a.48xlarge]
 
