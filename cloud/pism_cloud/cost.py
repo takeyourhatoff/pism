@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
-from .catalog import INSTANCE_CATALOG
-
-SPOT_DISCOUNT_FACTOR = 0.4
-DEFAULT_SPOT_THRESHOLD_USD = 250.0
+from .aws import aws_region, on_demand_hourly_rate, spot_hourly_rate
 
 
 @dataclass(frozen=True)
@@ -22,13 +20,16 @@ def estimate_total_cost(
     hours_per_member: float,
     ensemble_members: int,
     use_spot: bool,
+    hourly_override: Optional[float] = None,
 ) -> CostEstimate:
-    if instance_type not in INSTANCE_CATALOG:
-        raise ValueError(f"Unknown instance type: {instance_type}")
-
-    hourly = INSTANCE_CATALOG[instance_type]["on_demand_usd_per_hour"]
-    if use_spot:
-        hourly *= SPOT_DISCOUNT_FACTOR
+    if hourly_override is not None:
+        hourly = float(hourly_override)
+    else:
+        region = aws_region()
+        if use_spot:
+            hourly = spot_hourly_rate(instance_type, region)
+        else:
+            hourly = on_demand_hourly_rate(instance_type, region)
 
     total = hourly * hours_per_member * ensemble_members
     return CostEstimate(hourly_rate_usd=hourly, total_usd=total, use_spot=use_spot)

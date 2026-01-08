@@ -7,8 +7,12 @@ from typing import Any, Dict
 
 import yaml
 
-from .catalog import CPU_FAMILIES, GPU_FAMILIES, INSTANCE_ALIASES, INSTANCE_CATALOG
-from .cost import DEFAULT_SPOT_THRESHOLD_USD, estimate_total_cost
+from .aws import instance_spec
+from .cost import estimate_total_cost
+
+DEFAULT_CPU_INSTANCE_TYPES = ["c7i.4xlarge", "hpc6a.48xlarge"]
+DEFAULT_GPU_INSTANCE_TYPES = ["g5.xlarge"]
+INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.xlarge"}
 
 
 @dataclass(frozen=True)
@@ -34,41 +38,33 @@ def _ensure_s3_uri(value: str, field_name: str) -> str:
     return value
 
 
-def _resolve_instance(instance: str | None, gpus: int) -> str:
+def _resolve_instance(instance: str | None) -> str:
     if instance is None:
-        return "g5.xlarge" if gpus > 0 else "c7i.4xlarge"
-
-    if instance in INSTANCE_ALIASES:
-        return INSTANCE_ALIASES[instance]
-    if instance in INSTANCE_CATALOG:
-        return instance
-
-    raise ValueError(
-        f"Unknown instance '{instance}'. Supported: {', '.join(INSTANCE_CATALOG)}"
-    )
-
-
-def _infer_use_spot(explicit: bool | None, max_usd: float, threshold: float) -> bool:
-    if explicit is not None:
-        return bool(explicit)
-    return max_usd < threshold
+        raise ValueError("Instance type not specified")
+    return INSTANCE_ALIASES.get(instance, instance)
 
 
 def _select_instance_for_budget(
-    gpus: int,
+    candidates: list[str],
     use_spot: bool,
     max_usd: float,
     hours: float,
     ensemble_members: int,
+    hourly_override: float | None,
 ) -> str:
-    if gpus > 0:
-        candidates = ["g5.xlarge"]
-    else:
-        candidates = ["c7i.4xlarge", "hpc6a.48xlarge"]
-
     affordable = []
     for candidate in candidates:
-        estimate = estimate_total_cost(candidate, hours, ensemble_members, use_spot)
+        try:
+            instance_spec(candidate)
+        except Exception:
+            continue
+        estimate = estimate_total_cost(
+            candidate,
+            hours,
+            ensemble_members,
+            use_spot,
+            hourly_override=hourly_override,
+        )
         if estimate.total_usd <= max_usd:
             affordable.append((estimate.total_usd, candidate))
 
@@ -93,31 +89,43 @@ def load_config(path: str) -> NormalizedConfig:
     cost = data.get("cost", {})
     max_usd = float(_require(cost.get("max_usd"), "cost.max_usd is required"))
     hours = float(cost.get("estimated_hours_per_member", 1.0))
-    spot_threshold = float(cost.get("spot_threshold_usd", DEFAULT_SPOT_THRESHOLD_USD))
-    explicit_spot = compute.get("use_spot")
-    use_spot = _infer_use_spot(explicit_spot, max_usd, spot_threshold)
+    hourly_override = cost.get("estimated_usd_per_hour")
+    if hourly_override is not None:
+        hourly_override = float(hourly_override)
 
+    use_spot = bool(compute.get("use_spot", True))
     requested_gpus = int(compute.get("gpus", 0) or 0)
+
     instance_value = compute.get("instance")
+    instance_types = compute.get("instance_types")
     if instance_value is None:
+        if hourly_override is not None:
+            raise ValueError("cost.estimated_usd_per_hour requires compute.instance")
+        if instance_types is None:
+            instance_types = (
+                DEFAULT_GPU_INSTANCE_TYPES if requested_gpus > 0 else DEFAULT_CPU_INSTANCE_TYPES
+            )
+        if isinstance(instance_types, str):
+            candidates = [value.strip() for value in instance_types.split(",") if value.strip()]
+        else:
+            candidates = list(instance_types)
         instance = _select_instance_for_budget(
-            requested_gpus, use_spot, max_usd, hours, ensemble_members
+            candidates, use_spot, max_usd, hours, ensemble_members, hourly_override
         )
     else:
-        instance = _resolve_instance(instance_value, requested_gpus)
-    instance_spec = INSTANCE_CATALOG[instance]
+        instance = _resolve_instance(instance_value)
 
-    if instance_spec["gpus"] > 0 and explicit_spot is None:
-        use_spot = True
-    if instance_spec["gpus"] > 0 and explicit_spot is False:
+    spec = instance_spec(instance)
+
+    if spec.gpus > 0 and not use_spot:
         raise ValueError("GPU on-demand is not configured; set compute.use_spot to true")
 
-    gpus = int(compute.get("gpus", instance_spec["gpus"]))
+    gpus = int(compute.get("gpus", spec.gpus))
     mpi_ranks = int(compute.get("mpi_ranks", gpus if gpus > 0 else 1))
 
-    if instance_spec["gpus"] > 0 and gpus == 0:
+    if spec.gpus > 0 and gpus == 0:
         raise ValueError("GPU instance selected but gpus is set to 0")
-    if instance_spec["gpus"] == 0 and gpus > 0:
+    if spec.gpus == 0 and gpus > 0:
         raise ValueError("CPU instance selected but gpus > 0")
 
     if gpus > 0 and mpi_ranks != gpus:
@@ -125,15 +133,16 @@ def load_config(path: str) -> NormalizedConfig:
 
     if mpi_ranks < 1:
         raise ValueError("mpi_ranks must be >= 1")
-    if mpi_ranks > instance_spec["vcpus"]:
+    if mpi_ranks > spec.vcpus:
         raise ValueError("mpi_ranks exceeds instance vCPU count")
 
-    if instance_spec["family"] in GPU_FAMILIES and gpus < 1:
-        raise ValueError("GPU instance requires gpus >= 1")
-    if instance_spec["family"] in CPU_FAMILIES and gpus != 0:
-        raise ValueError("CPU instance requires gpus = 0")
-
-    estimate = estimate_total_cost(instance, hours, ensemble_members, use_spot)
+    estimate = estimate_total_cost(
+        instance,
+        hours,
+        ensemble_members,
+        use_spot,
+        hourly_override=hourly_override,
+    )
 
     if estimate.total_usd > max_usd:
         raise ValueError(
@@ -154,8 +163,8 @@ def load_config(path: str) -> NormalizedConfig:
     normalized_compute = {
         "backend": "aws-batch",
         "instance": instance,
-        "vcpus": instance_spec["vcpus"],
-        "memory_mib": instance_spec["memory_mib"],
+        "vcpus": spec.vcpus,
+        "memory_mib": spec.memory_mib,
         "gpus": gpus,
         "mpi_ranks": mpi_ranks,
         "use_spot": use_spot,
@@ -164,7 +173,7 @@ def load_config(path: str) -> NormalizedConfig:
     normalized_cost = {
         "max_usd": max_usd,
         "estimated_hours_per_member": hours,
-        "spot_threshold_usd": spot_threshold,
+        "estimated_usd_per_hour": hourly_override,
     }
 
     normalized_io = {"input_s3": input_s3, "output_s3": output_s3}

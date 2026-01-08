@@ -17,3 +17,6 @@ pism-cloud = "pism_cloud.cli:main"
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["pism_cloud"]

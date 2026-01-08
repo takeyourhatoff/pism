@@ -7,8 +7,6 @@ from typing import Dict, List
 
 import boto3
 
-from .catalog import INSTANCE_CATALOG, GPU_FAMILIES
-
 CPU_SPOT_QUEUE = os.environ.get("PISM_CPU_SPOT_QUEUE", "pism-cpu-spot")
 GPU_SPOT_QUEUE = os.environ.get("PISM_GPU_SPOT_QUEUE", "pism-gpu-spot")
 CPU_ONDEMAND_QUEUE = os.environ.get("PISM_CPU_ONDEMAND_QUEUE", "pism-cpu-ondemand")
@@ -21,18 +19,16 @@ def batch_client():
     return boto3.client("batch")
 
 
-def select_queue(instance_type: str, use_spot: bool) -> str:
-    family = INSTANCE_CATALOG[instance_type]["family"]
-    if family in GPU_FAMILIES:
+def select_queue(gpus: int, use_spot: bool) -> str:
+    if gpus > 0:
         if not use_spot:
             raise ValueError("GPU on-demand queue not configured; set use_spot to true")
         return GPU_SPOT_QUEUE
     return CPU_SPOT_QUEUE if use_spot else CPU_ONDEMAND_QUEUE
 
 
-def select_job_definition(instance_type: str) -> str:
-    family = INSTANCE_CATALOG[instance_type]["family"]
-    return GPU_JOB_DEFINITION if family in GPU_FAMILIES else CPU_JOB_DEFINITION
+def select_job_definition(gpus: int) -> str:
+    return GPU_JOB_DEFINITION if gpus > 0 else CPU_JOB_DEFINITION
 
 
 def build_job_command() -> List[str]:
@@ -50,7 +46,8 @@ aws s3 sync "$OUTPUT_DIR" "$OUTPUT_S3/$MEMBER_ID"
 
 
 def build_overrides(
-    instance_type: str,
+    vcpus: int,
+    memory_mib: int,
     mpi_ranks: int,
     gpus: int,
     input_s3: str,
@@ -60,10 +57,9 @@ def build_overrides(
     run_id: str,
     member_id: str,
 ) -> Dict[str, object]:
-    instance_spec = INSTANCE_CATALOG[instance_type]
     resource_requirements = [
-        {"type": "VCPU", "value": str(instance_spec["vcpus"])},
-        {"type": "MEMORY", "value": str(instance_spec["memory_mib"])},
+        {"type": "VCPU", "value": str(vcpus)},
+        {"type": "MEMORY", "value": str(memory_mib)},
     ]
     if gpus > 0:
         resource_requirements.append({"type": "GPU", "value": str(gpus)})

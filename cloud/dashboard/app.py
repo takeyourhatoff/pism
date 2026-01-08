@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 from typing import Dict, List
 
-import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from pism_cloud.aws import aws_region
 from pism_cloud.batch import describe_jobs, summarize_status
 from pism_cloud.dynamo import get_table, list_jobs, list_runs
 
@@ -19,11 +19,6 @@ TEMPLATES = Jinja2Templates(
 )
 
 app = FastAPI()
-
-
-def aws_region() -> str:
-    session = boto3.session.Session()
-    return session.region_name or os.environ.get("AWS_REGION", "us-east-1")
 
 
 def log_url(log_stream: str) -> str:

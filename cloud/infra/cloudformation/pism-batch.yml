@@ -41,11 +41,9 @@ Parameters:
   CpuImage:
     Type: String
     Description: "Container image for CPU jobs."
-    Default: ghcr.io/pism/pism:cpu-latest
   GpuImage:
     Type: String
     Description: "Container image for GPU jobs."
-    Default: ghcr.io/pism/pism:gpu-cuda12
 
 Resources:
   BatchLogGroup:

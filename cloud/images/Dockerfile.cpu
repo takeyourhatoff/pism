@@ -1,0 +1,34 @@
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    cmake \
+    curl \
+    git \
+    libgsl-dev \
+    libnetcdf-dev \
+    libnetcdf-c++4-dev \
+    libopenmpi-dev \
+    libpetsc-dev \
+    openmpi-bin \
+    pkg-config \
+    python3 \
+    awscli \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/pism
+COPY . /opt/pism
+
+RUN cmake -S . -B build \
+        -DPism_BUILD_PYTHON_BINDINGS=OFF \
+        -DPism_BUILD_TESTS=OFF \
+    && cmake --build build -j$(nproc) \
+    && cmake --install build --prefix /opt/pism-install
+
+ENV PATH="/opt/pism-install/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/pism-install/lib:${LD_LIBRARY_PATH}"
+
+WORKDIR /workspace
