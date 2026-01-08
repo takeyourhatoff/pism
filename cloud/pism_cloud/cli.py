@@ -168,6 +168,11 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             job_definition=job_definition,
             overrides=overrides,
             timeout_seconds=timeout_seconds,
+            tags={
+                "PismRunId": cfg.run_id,
+                "PismInstanceType": cfg.compute["instance"],
+                "PismSpot": "true" if cfg.compute["use_spot"] else "false",
+            },
         )
 
         store_run(

@@ -168,6 +168,8 @@ Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
+Jobs are tagged with `PismRunId`, `PismInstanceType`, and `PismSpot` for cost allocation.
+
 ## Container images
 
 Default Dockerfiles live in `cloud/images/`:

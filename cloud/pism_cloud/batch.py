@@ -252,6 +252,7 @@ def submit_job(
     job_definition: str,
     overrides: Dict[str, object],
     timeout_seconds: int | None = None,
+    tags: Dict[str, str] | None = None,
 ) -> Tuple[str, str]:
     client = batch_client()
     job_name = f"pism-{run_id}"
@@ -263,9 +264,9 @@ def submit_job(
     }
     if timeout_seconds is not None:
         payload["timeout"] = {"attemptDurationSeconds": int(timeout_seconds)}
-    response = client.submit_job(
-        **payload,
-    )
+    if tags:
+        payload["tags"] = {str(k): str(v) for k, v in tags.items()}
+    response = client.submit_job(**payload)
     return response["jobId"], job_name
 
 
