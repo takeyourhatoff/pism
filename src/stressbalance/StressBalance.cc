@@ -17,6 +17,9 @@
 // Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "pism/stressbalance/StressBalance.hh"
+
+#include <cmath>
+#include <cstdlib>
 #include "pism/stressbalance/ShallowStressBalance.hh"
 #include "pism/stressbalance/SSB_Modifier.hh"
 #include "pism/util/EnthalpyConverter.hh"
@@ -287,6 +290,16 @@ void StressBalance::compute_vertical_velocity(const array::CellType1 &mask,
   const bool use_upstream_fd = m_config->get_string("stress_balance.vertical_velocity_approximation") == "upstream";
 
 #if Pism_USE_CUDA_SIA
+  if (std::getenv("PISM_DEBUG_CUDA_STRESSBALANCE")) {
+    m_grid->ctx()->log()->message(
+        2,
+        "StressBalance CUDA vertical_velocity: mask=%d u=%d v=%d result=%d basal=%d\n",
+        cuda::vec_is_cuda(mask),
+        cuda::vec_is_cuda(u),
+        cuda::vec_is_cuda(v),
+        cuda::vec_is_cuda(result),
+        basal_melt_rate ? cuda::vec_is_cuda(*basal_melt_rate) : 1);
+  }
   if (cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(u) && cuda::vec_is_cuda(v) &&
       cuda::vec_is_cuda(result) &&
       (!basal_melt_rate || cuda::vec_is_cuda(*basal_melt_rate))) {
@@ -542,6 +555,18 @@ void StressBalance::compute_volumetric_strain_heating(const Inputs &inputs) {
     e_to_a_power = pow(enhancement_factor,-1.0/n);
 
 #if Pism_USE_CUDA_SIA
+  if (std::getenv("PISM_DEBUG_CUDA_STRESSBALANCE")) {
+    m_grid->ctx()->log()->message(
+        2,
+        "StressBalance CUDA strain_heating: mask=%d enthalpy=%d thickness=%d u=%d v=%d sigma=%d flow=%s\n",
+        cuda::vec_is_cuda(mask),
+        cuda::vec_is_cuda(*enthalpy),
+        cuda::vec_is_cuda(thickness),
+        cuda::vec_is_cuda(u),
+        cuda::vec_is_cuda(v),
+        cuda::vec_is_cuda(m_strain_heating),
+        flow_law.name().c_str());
+  }
   if (cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(*enthalpy) &&
       cuda::vec_is_cuda(thickness) && cuda::vec_is_cuda(u) &&
       cuda::vec_is_cuda(v) && cuda::vec_is_cuda(m_strain_heating)) {
@@ -577,11 +602,12 @@ void StressBalance::compute_volumetric_strain_heating(const Inputs &inputs) {
       const double g = m_config->get_number("constants.standard_gravity");
       const double p_air = m_config->get_number("surface.pressure");
 
+      const int use_cbrt = (std::abs(n - 3.0) < 1e-12) ? 1 : 0;
       cuda::compute_volumetric_strain_heating(mask, u, v, thickness, *enthalpy,
                                               m_strain_heating,
                                               xs, ys, xm, ym, Mz, z.data(),
                                               m_grid->dx(), m_grid->dy(),
-                                              exponent, e_to_a_power,
+                                              exponent, use_cbrt, e_to_a_power,
                                               flow_law_mode,
                                               A_cold, A_warm, Q_cold, Q_warm, T_crit,
                                               gas_const, n, T_melting, beta, c_i, T_0,

@@ -426,6 +426,7 @@ struct StrainHeatingPB {
   double dx;
   double dy;
   double exponent;
+  int use_cbrt;
   double e_to_a_power;
   int flow_law_mode;
   double A_cold;
@@ -498,7 +499,12 @@ struct StrainHeatingPB {
       }
       const double T_use = T_pa;
       const double softness = pb_softness(T_use, A, Q, gas_const);
-      const double hardness = pow(softness, -1.0 / n);
+      double hardness = 0.0;
+      if (use_cbrt) {
+        hardness = 1.0 / cbrt(softness);
+      } else {
+        hardness = pow(softness, -1.0 / n);
+      }
 
       const double u_x = D_x * (west * (u(i, j, k) - u(i - 1, j, k)) +
                                 east * (u(i + 1, j, k) - u(i, j, k)));
@@ -526,7 +532,11 @@ struct StrainHeatingPB {
       }
 
       const double D2 = strain_heating_invariant(u_x, u_y, u_z, v_x, v_y, v_z);
-      sigma(i, j, k) = 2.0 * e_to_a_power * hardness * pow(D2, exponent);
+      if (use_cbrt) {
+        sigma(i, j, k) = 2.0 * e_to_a_power * hardness * cbrt(D2 * D2);
+      } else {
+        sigma(i, j, k) = 2.0 * e_to_a_power * hardness * pow(D2, exponent);
+      }
     }
 
     for (int k = ks + 1; k < Mz; ++k) {
@@ -575,6 +585,7 @@ void compute_volumetric_strain_heating(const array::CellType1 &mask,
                                        const double *z,
                                        double dx, double dy,
                                        double exponent,
+                                       int use_cbrt,
                                        double e_to_a_power,
                                        int flow_law_mode,
                                        double A_cold, double A_warm,
@@ -592,7 +603,8 @@ void compute_volumetric_strain_heating(const array::CellType1 &mask,
   CudaArrayWriteView sigma_view(strain_heating);
 
   StrainHeatingPB functor{mask_view.view, u_view.view, v_view.view, thk_view.view, enth_view.view,
-                          sigma_view.view, g_z_device, Mz, dx, dy, exponent, e_to_a_power,
+                          sigma_view.view, g_z_device, Mz, dx, dy, exponent, use_cbrt,
+                          e_to_a_power,
                           flow_law_mode, A_cold, A_warm, Q_cold, Q_warm, T_crit, gas_const, n,
                           T_melting, beta, c_i, T_0, rho_i, g, p_air};
   launch_2d(functor, xs, ys, xm, ym, 0);
@@ -619,7 +631,7 @@ void compute_volumetric_strain_heating(const array::CellType1 &, const array::Ar
                                        const array::Array3D &, array::Array3D &,
                                        int, int, int, int, int,
                                        const double *, double, double,
-                                       double, double, int,
+                                       double, int, double, int,
                                        double, double, double, double, double,
                                        double, double,
                                        double, double, double,
