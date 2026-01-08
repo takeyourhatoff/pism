@@ -1,6 +1,6 @@
 # PISM Cloud (AWS Batch)
 
-Minimal, production-shaped tooling to run PISM ensembles as single-node AWS Batch jobs.
+Minimal, production-shaped tooling to run PISM batch jobs as single-node AWS Batch jobs.
 
 ## Repository layout
 
@@ -78,6 +78,44 @@ pism-cloud submit cloud/examples/haseloff.yml
 
 If your stack name differs from `pism-batch`, add `--stack-name <name>`.
 
+To submit multiple jobs in one command, pass multiple config files or use a
+multi-document YAML (each document is one job). Each document should use a unique
+`run_id`.
+
+```
+pism-cloud submit configs/member-1.yml configs/member-2.yml
+```
+
+```
+pism-cloud submit configs/run.yml
+```
+
+```yaml
+run_id: biis-run-0001
+compute:
+  backend: aws-batch
+  instance: c7i.4xlarge
+io:
+  input_prefix: biis
+  output_prefix: biis-run-0001
+pism:
+  args: >
+    --config {{INPUT_DIR}}/member-0001.cfg
+    --o {{OUTPUT_DIR}}/out-0001.nc
+---
+run_id: biis-run-0002
+compute:
+  backend: aws-batch
+  instance: c7i.4xlarge
+io:
+  input_prefix: biis
+  output_prefix: biis-run-0002
+pism:
+  args: >
+    --config {{INPUT_DIR}}/member-0002.cfg
+    --o {{OUTPUT_DIR}}/out-0002.nc
+```
+
 ### 6) Watch status
 
 ```
@@ -99,15 +137,17 @@ created by `pism-cloud deploy`. If you want to bypass stack outputs entirely, se
 `io.input_s3` and `io.output_s3` to full S3 URIs instead.
 Set either `compute.instance` or `compute.instance_types` to control instance selection.
 
+`run_id` identifies a run in the dashboard. Each YAML document is one job, so every
+document should use a unique `run_id`.
+
 Placeholders inside `pism.args` are expanded per job:
 
 - `{{INPUT_DIR}}` -> `/workspace/input`
 - `{{OUTPUT_DIR}}` -> `/workspace/output`
 - `{{RUN_ID}}`
-- `{{MEMBER_ID}}`
 
 Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
-`s3://<output-bucket>/<output_prefix>/<member-id>/`.
+`s3://<output-bucket>/<output_prefix>/`.
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
@@ -130,7 +170,7 @@ For other GPU types, set `--cuda-arch` when building images.
 ## Example smoke test
 
 The `cloud/examples/haseloff.yml` config runs a small CPU job using the bundled Haseloff
-input file. Use it to validate the end-to-end path before running larger ensembles.
+input file. Use it to validate the end-to-end path before running larger batches.
 
 ## Standard Greenland runs (1-4)
 
@@ -164,7 +204,7 @@ SOURCE_PREFIX=std-greenland-2 DEST_PREFIX=std-greenland \
   cloud/examples/std-greenland/stage_output.sh
 ```
 
-Use `STACK_NAME=<name>` or `MEMBER_ID=<id>` to override defaults.
+Use `STACK_NAME=<name>` to override the defaults.
 
 4. Submit run 4:
 

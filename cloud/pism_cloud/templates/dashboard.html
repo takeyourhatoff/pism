@@ -227,7 +227,7 @@
   <header>
     <div>
       <h1>PISM Cloud</h1>
-      <p>Ensemble runs on AWS Batch, summarized for scientists.</p>
+      <p>Batch runs summarized for scientists.</p>
     </div>
     <div class="muted" id="refresh-status">Refreshing...</div>
   </header>
@@ -308,7 +308,7 @@
         card.className = "run-card" + (run.run_id === selectedRun ? " active" : "");
         card.innerHTML = `
           <h3>${run.run_id}</h3>
-          <span>${run.ensemble_members} members - ${run.instance_type} - ${run.use_spot ? "spot" : "on-demand"}</span>
+          <span>${run.instance_type} - ${run.use_spot ? "spot" : "on-demand"}</span>
         `;
         card.onclick = () => selectRun(run.run_id);
         runsEl.appendChild(card);
@@ -320,7 +320,6 @@
       if (!run) return;
 
       const items = [
-        { label: "Members", value: run.ensemble_members },
         { label: "Instance", value: run.instance_type },
         { label: "Cost per hour / job", value: formatRate(detail ? detail.hourly_rate_usd : null) },
         { label: "Cost so far", value: formatCurrency(detail ? detail.cost_to_date_usd : null) },
@@ -378,7 +377,7 @@
       renderRuns(runs);
       if (run && detail) {
         runTitle.textContent = run.run_id;
-        runSubtitle.textContent = `${run.ensemble_members} members on ${run.instance_type}`;
+        runSubtitle.textContent = `Instance: ${run.instance_type}`;
         renderMetrics(run, detail);
         renderJobs(detail);
       }

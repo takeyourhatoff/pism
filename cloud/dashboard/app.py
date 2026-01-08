@@ -47,7 +47,6 @@ async def runs() -> List[Dict[str, object]]:
             {
                 "run_id": item.get("run_id"),
                 "created_at": item.get("created_at"),
-                "ensemble_members": item.get("ensemble_members"),
                 "instance_type": item.get("instance_type"),
                 "use_spot": item.get("use_spot"),
             }

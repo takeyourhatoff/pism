@@ -1,4 +1,4 @@
-"""CLI for submitting PISM ensembles to AWS Batch."""
+"""CLI for submitting PISM runs to AWS Batch."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from .batch import (
     describe_jobs,
     select_job_definition,
     select_queue,
-    submit_jobs,
+    submit_job,
     summarize_status,
 )
-from .config import NormalizedConfig, load_config
+from .config import NormalizedConfig, load_configs
 from .dynamo import get_run, get_table, list_jobs, list_runs, store_job, store_run, utc_now
 from .images import build_and_push, repo_root
 from .infra import deploy_stack, stack_outputs
@@ -26,10 +26,9 @@ INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
 
 
-def render_args(template: str, run_id: str, member_id: str) -> str:
+def render_args(template: str, run_id: str) -> str:
     return (
         template.replace("{{RUN_ID}}", run_id)
-        .replace("{{MEMBER_ID}}", member_id)
         .replace("{{INPUT_DIR}}", INPUT_DIR)
         .replace("{{OUTPUT_DIR}}", OUTPUT_DIR)
     )
@@ -46,7 +45,6 @@ def build_run_item(
         "run_id": config.run_id,
         "sort_key": "RUN",
         "created_at": utc_now(),
-        "ensemble_members": config.ensemble_members,
         "instance_type": config.compute["instance"],
         "use_spot": config.compute["use_spot"],
         "job_queue": job_queue,
@@ -59,86 +57,91 @@ def build_run_item(
     }
 
 
-def build_job_item(run_id: str, member_id: str, job_id: str, job_name: str) -> Dict[str, object]:
+def build_job_item(run_id: str, job_id: str, job_name: str) -> Dict[str, object]:
     return {
         "run_id": run_id,
-        "sort_key": f"JOB#{member_id}",
-        "member_id": member_id,
+        "sort_key": "JOB",
         "job_id": job_id,
         "job_name": job_name,
         "status": "SUBMITTED",
     }
 
 
-def submit(config_path: str, stack_name: str) -> int:
+def submit(config_paths: list[str], stack_name: str) -> int:
     try:
-        config = load_config(config_path)
+        configs = load_configs(config_paths)
     except ValueError as exc:
         print(f"Config error: {exc}", file=sys.stderr)
         return 2
 
-    try:
-        job_queue = select_queue(config.compute["gpus"], config.compute["use_spot"])
-    except ValueError as exc:
-        print(f"Queue selection error: {exc}", file=sys.stderr)
-        return 2
+    table = get_table()
 
-    job_definition = select_job_definition(config.compute["gpus"])
-    member_ids = [f"{i + 1:04d}" for i in range(config.ensemble_members)]
+    seen_run_ids = set()
+    for cfg in configs:
+        if cfg.run_id in seen_run_ids:
+            print(f"Config error: duplicate run_id {cfg.run_id}", file=sys.stderr)
+            return 2
+        seen_run_ids.add(cfg.run_id)
 
-    input_s3 = config.io.get("input_s3")
-    output_s3 = config.io.get("output_s3")
-    input_prefix = config.io.get("input_prefix")
-    output_prefix = config.io.get("output_prefix")
-
-    if input_s3 is None or output_s3 is None:
+    for cfg in configs:
         try:
-            outputs = stack_outputs(stack_name)
-        except Exception as exc:
-            print(f"Stack lookup failed: {exc}", file=sys.stderr)
-            return 2
-        input_bucket = outputs.get("InputBucketName")
-        output_bucket = outputs.get("OutputBucketName")
-        if not input_bucket or not output_bucket:
-            print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
+            job_queue = select_queue(cfg.compute["gpus"], cfg.compute["use_spot"])
+        except ValueError as exc:
+            print(f"Queue selection error: {exc}", file=sys.stderr)
             return 2
 
-        if input_s3 is None:
-            input_s3 = f"s3://{input_bucket}/{input_prefix}"
-        if output_s3 is None:
-            output_s3 = f"s3://{output_bucket}/{output_prefix}"
+        job_definition = select_job_definition(cfg.compute["gpus"])
+        input_s3 = cfg.io.get("input_s3")
+        output_s3 = cfg.io.get("output_s3")
+        input_prefix = cfg.io.get("input_prefix")
+        output_prefix = cfg.io.get("output_prefix")
 
-    def overrides_builder(member_id: str) -> Dict[str, object]:
-        rendered_args = render_args(config.pism["args"], config.run_id, member_id)
-        return build_overrides(
-            vcpus=config.compute["vcpus"],
-            memory_mib=config.compute["memory_mib"],
-            mpi_ranks=config.compute["mpi_ranks"],
-            gpus=config.compute["gpus"],
+        if input_s3 is None or output_s3 is None:
+            try:
+                outputs = stack_outputs(stack_name)
+            except Exception as exc:
+                print(f"Stack lookup failed: {exc}", file=sys.stderr)
+                return 2
+            input_bucket = outputs.get("InputBucketName")
+            output_bucket = outputs.get("OutputBucketName")
+            if not input_bucket or not output_bucket:
+                print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
+                return 2
+
+            if input_s3 is None:
+                input_s3 = f"s3://{input_bucket}/{input_prefix}"
+            if output_s3 is None:
+                output_s3 = f"s3://{output_bucket}/{output_prefix}"
+
+        rendered_args = render_args(cfg.pism["args"], cfg.run_id)
+        overrides = build_overrides(
+            vcpus=cfg.compute["vcpus"],
+            memory_mib=cfg.compute["memory_mib"],
+            mpi_ranks=cfg.compute["mpi_ranks"],
+            gpus=cfg.compute["gpus"],
             input_s3=input_s3,
             output_s3=output_s3,
             pism_args=rendered_args,
-            pism_executable=config.pism["executable"],
-            run_id=config.run_id,
-            member_id=member_id,
+            pism_executable=cfg.pism["executable"],
+            run_id=cfg.run_id,
         )
 
-    job_ids = submit_jobs(
-        run_id=config.run_id,
-        member_ids=member_ids,
-        job_queue=job_queue,
-        job_definition=job_definition,
-        overrides_builder=overrides_builder,
-    )
+        job_id, job_name = submit_job(
+            run_id=cfg.run_id,
+            job_queue=job_queue,
+            job_definition=job_definition,
+            overrides=overrides,
+        )
 
-    table = get_table()
-    store_run(table, build_run_item(config, job_queue, job_definition, input_s3, output_s3))
-    for member_id, job_id in job_ids.items():
-        job_name = f"pism-{config.run_id}-{member_id}"
-        store_job(table, build_job_item(config.run_id, member_id, job_id, job_name))
+        store_run(
+            table,
+            build_run_item(cfg, job_queue, job_definition, input_s3, output_s3),
+        )
+        store_job(table, build_job_item(cfg.run_id, job_id, job_name))
 
-    print(f"Submitted run {config.run_id} ({config.ensemble_members} jobs)")
-    print(f"Queue: {job_queue}")
+        print(f"Submitted run {cfg.run_id} (1 job)")
+        print(f"Queue: {job_queue}")
+
     return 0
 
 
@@ -227,9 +230,8 @@ def list_runs_cmd() -> int:
 
     for run in sorted(runs, key=lambda item: item.get("created_at", "")):
         print(
-            "{run_id} members={members} instance={instance} spot={spot}".format(
+            "{run_id} instance={instance} spot={spot}".format(
                 run_id=run.get("run_id"),
-                members=run.get("ensemble_members"),
                 instance=run.get("instance_type"),
                 spot=run.get("use_spot"),
             )
@@ -352,8 +354,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pism-cloud", description="PISM AWS Batch runner")
     subcommands = parser.add_subparsers(dest="command")
 
-    submit_parser = subcommands.add_parser("submit", help="Submit an ensemble run")
-    submit_parser.add_argument("config", help="Path to config.yml")
+    submit_parser = subcommands.add_parser("submit", help="Submit one or more runs")
+    submit_parser.add_argument("config", nargs="+", help="Path(s) to config.yml")
     submit_parser.add_argument("--stack-name", default="pism-batch")
 
     status_parser = subcommands.add_parser("status", help="Show run status")

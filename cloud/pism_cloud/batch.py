@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import boto3
 
@@ -39,7 +39,7 @@ mkdir -p "$INPUT_DIR" "$OUTPUT_DIR"
 aws s3 sync "$INPUT_S3" "$INPUT_DIR"
 cd "$OUTPUT_DIR"
 mpirun -n "$MPI_RANKS" "$PISM_EXECUTABLE" $PISM_ARGS
-aws s3 sync "$OUTPUT_DIR" "$OUTPUT_S3/$MEMBER_ID"
+aws s3 sync "$OUTPUT_DIR" "$OUTPUT_S3"
 """.strip()
     return ["bash", "-lc", script]
 
@@ -54,7 +54,6 @@ def build_overrides(
     pism_args: str,
     pism_executable: str,
     run_id: str,
-    member_id: str,
 ) -> Dict[str, object]:
     resource_requirements = [
         {"type": "VCPU", "value": str(vcpus)},
@@ -68,7 +67,6 @@ def build_overrides(
         "resourceRequirements": resource_requirements,
         "environment": [
             {"name": "RUN_ID", "value": run_id},
-            {"name": "MEMBER_ID", "value": member_id},
             {"name": "INPUT_S3", "value": input_s3},
             {"name": "OUTPUT_S3", "value": output_s3},
             {"name": "MPI_RANKS", "value": str(mpi_ranks)},
@@ -78,25 +76,21 @@ def build_overrides(
     }
 
 
-def submit_jobs(
+def submit_job(
     run_id: str,
-    member_ids: List[str],
     job_queue: str,
     job_definition: str,
-    overrides_builder,
-) -> Dict[str, str]:
+    overrides: Dict[str, object],
+) -> Tuple[str, str]:
     client = batch_client()
-    job_ids: Dict[str, str] = {}
-    for member_id in member_ids:
-        job_name = f"pism-{run_id}-{member_id}"
-        response = client.submit_job(
-            jobName=job_name,
-            jobQueue=job_queue,
-            jobDefinition=job_definition,
-            containerOverrides=overrides_builder(member_id),
-        )
-        job_ids[member_id] = response["jobId"]
-    return job_ids
+    job_name = f"pism-{run_id}"
+    response = client.submit_job(
+        jobName=job_name,
+        jobQueue=job_queue,
+        jobDefinition=job_definition,
+        containerOverrides=overrides,
+    )
+    return response["jobId"], job_name
 
 
 def describe_jobs(job_ids: List[str]) -> List[Dict[str, object]]:

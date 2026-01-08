@@ -1,5 +1,4 @@
 run_id: std-greenland-2
-ensemble_members: 1
 
 compute:
   backend: aws-batch
