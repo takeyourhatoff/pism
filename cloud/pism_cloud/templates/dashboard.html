@@ -276,6 +276,11 @@
       return `$${Number(value).toFixed(2)}`;
     }
 
+    function formatRate(value) {
+      if (value === null || value === undefined) return "-";
+      return `$${Number(value).toFixed(2)}/hr`;
+    }
+
     function setRefreshing(state) {
       refreshStatus.textContent = state ? "Refreshing..." : "Up to date";
     }
@@ -317,8 +322,8 @@
       const items = [
         { label: "Members", value: run.ensemble_members },
         { label: "Instance", value: run.instance_type },
-        { label: "Estimated cost", value: formatCurrency(run.estimated_total_cost) },
-        { label: "Budget cap", value: formatCurrency(run.cost_max_usd) },
+        { label: "Cost per hour / job", value: formatRate(detail ? detail.hourly_rate_usd : null) },
+        { label: "Cost so far", value: formatCurrency(detail ? detail.cost_to_date_usd : null) },
       ];
 
       items.forEach((item) => {

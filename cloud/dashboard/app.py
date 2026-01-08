@@ -11,7 +11,8 @@ from fastapi.templating import Jinja2Templates
 
 from pism_cloud.aws import aws_region
 from pism_cloud.batch import describe_jobs, summarize_status
-from pism_cloud.dynamo import get_table, list_jobs, list_runs
+from pism_cloud.dynamo import get_run, get_table, list_jobs, list_runs
+from pism_cloud.runtime import hourly_rate, summarize_costs
 
 LOG_GROUP = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
 TEMPLATES = Jinja2Templates(
@@ -47,8 +48,6 @@ async def runs() -> List[Dict[str, object]]:
                 "run_id": item.get("run_id"),
                 "created_at": item.get("created_at"),
                 "ensemble_members": item.get("ensemble_members"),
-                "estimated_total_cost": item.get("estimated_total_cost"),
-                "cost_max_usd": item.get("cost_max_usd"),
                 "instance_type": item.get("instance_type"),
                 "use_spot": item.get("use_spot"),
             }
@@ -63,9 +62,25 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     if not jobs:
         raise HTTPException(status_code=404, detail="Run not found")
 
+    run_item = get_run(table, run_id) or {}
     job_ids = [job["job_id"] for job in jobs]
     batch_jobs = describe_jobs(job_ids)
     summary = summarize_status(batch_jobs)
+
+    hourly_rate_usd = None
+    cost_to_date_usd = None
+    running_rate_usd = None
+    instance_type = run_item.get("instance_type")
+    use_spot = run_item.get("use_spot")
+    if instance_type and use_spot is not None:
+        try:
+            rate = hourly_rate(str(instance_type), bool(use_spot))
+            snapshot = summarize_costs(batch_jobs, rate)
+            hourly_rate_usd = snapshot.hourly_rate_usd
+            cost_to_date_usd = snapshot.cost_to_date_usd
+            running_rate_usd = snapshot.running_rate_usd
+        except Exception:
+            pass
 
     job_details = []
     for job in batch_jobs:
@@ -81,4 +96,11 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         )
 
     job_details.sort(key=lambda item: item.get("job_name", ""))
-    return {"run_id": run_id, "summary": summary, "jobs": job_details}
+    return {
+        "run_id": run_id,
+        "summary": summary,
+        "jobs": job_details,
+        "hourly_rate_usd": hourly_rate_usd,
+        "cost_to_date_usd": cost_to_date_usd,
+        "running_rate_usd": running_rate_usd,
+    }

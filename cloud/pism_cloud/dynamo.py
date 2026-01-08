@@ -55,3 +55,8 @@ def list_jobs(table, run_id: str) -> List[Dict[str, Any]]:
             break
         params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
     return [item for item in items if item.get("sort_key", "").startswith("JOB#")]
+
+
+def get_run(table, run_id: str) -> Dict[str, Any] | None:
+    response = table.get_item(Key={"run_id": run_id, "sort_key": "RUN"})
+    return response.get("Item")

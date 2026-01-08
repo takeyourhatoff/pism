@@ -1,0 +1,17 @@
+run_id: std-greenland-2
+ensemble_members: 1
+
+compute:
+  backend: aws-batch
+  instance: c7i.4xlarge
+  gpus: 0
+  mpi_ranks: 8
+  # use_spot: false
+
+io:
+  input_prefix: std-greenland
+  output_prefix: std-greenland-2
+
+pism:
+  executable: pism
+  args: "-i {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc -bootstrap -grid.registration corner -dx 20km -dy 20km -Mz 101 -Mbz 11 -z_spacing equal -Lz 4000 -Lbz 2000 -skip -skip_max 10 -grid.recompute_longitude_and_latitude false -ys -10000 -ye 0 -surface given -surface_given_file {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc -front_retreat_file {{INPUT_DIR}}/pism_Greenland_5km_v1.1.nc -sia_e 3.0 -stress_balance ssa+sia -topg_to_phi -phi_min 15.0 -phi_max 40.0 -topg_min -300.0 -topg_max 700.0 -pseudo_plastic -pseudo_plastic_q 0.5 -till_effective_fraction_overburden 0.02 -tauc_slippery_grounding_lines -ts_file {{OUTPUT_DIR}}/ts_g20km_10ka_hy.nc -ts_times -10000:yearly:0 -extra_file {{OUTPUT_DIR}}/ex_g20km_10ka_hy.nc -extra_times -10000:100:0 -extra_vars diffusivity,temppabase,tempicethk_basal,bmelt,tillwat,velsurf_mag,mask,thk,topg,usurf,hardav,velbase_mag,tauc -o {{OUTPUT_DIR}}/g20km_10ka_hy.nc"

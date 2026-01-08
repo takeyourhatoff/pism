@@ -45,11 +45,38 @@ Use the `InputBucketName` output from `pism-cloud deploy` and upload inputs to:
 s3://<input-bucket>/<run-id>/
 ```
 
+To prepare and upload the standard Greenland inputs (requires Docker and an activated venv):
+
+```
+cloud/examples/std-greenland/prepare_inputs.sh
+```
+
+Use `STACK_NAME=<name>` and `PREFIX=<name>` to override the defaults.
+This script runs the upstream `preprocess.sh` in a temporary Docker container.
+
+To upload the Haseloff smoke-test input:
+
+```
+pism-cloud upload --source test/cases/haseloff/startSMALLablate.nc --prefix haseloff
+```
+
+To upload your own inputs:
+
+```
+pism-cloud upload --source /path/to/inputs --prefix <run-id>
+```
+
+If your stack name differs from `pism-batch`, add `--stack-name <name>`.
+
 ### 5) Submit a run
 
 ```
 pism-cloud submit cloud/examples/config.yml
+# or
+pism-cloud submit cloud/examples/haseloff.yml
 ```
+
+If your stack name differs from `pism-batch`, add `--stack-name <name>`.
 
 ### 6) Watch status
 
@@ -67,8 +94,9 @@ Open `http://localhost:8080`.
 
 ## Configuration
 
-Set `io.input_s3` and `io.output_s3` using the `InputBucketName` and `OutputBucketName`
-outputs from `pism-cloud deploy`.
+Set `io.input_prefix` and `io.output_prefix` to control the paths inside the buckets
+created by `pism-cloud deploy`. If you want to bypass stack outputs entirely, set
+`io.input_s3` and `io.output_s3` to full S3 URIs instead.
 Set either `compute.instance` or `compute.instance_types` to control instance selection.
 
 Placeholders inside `pism.args` are expanded per job:
@@ -79,7 +107,7 @@ Placeholders inside `pism.args` are expanded per job:
 - `{{MEMBER_ID}}`
 
 Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
-`io.output_s3/<member-id>/`.
+`s3://<output-bucket>/<output_prefix>/<member-id>/`.
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
@@ -99,12 +127,50 @@ pism-cloud build-images
 These Dockerfiles build PISM from source; expect longer build times and customize as needed.
 For other GPU types, set `--cuda-arch` when building images.
 
-## Cost policy
+## Example smoke test
 
-- Spot is the default; set `compute.use_spot: false` to force CPU on-demand.
-- Estimated costs are pulled from AWS Pricing and spot history at submit time.
-- Set `cost.estimated_usd_per_hour` to override pricing if needed (requires `compute.instance`).
-- If the estimate exceeds `cost.max_usd`, submission fails fast.
+The `cloud/examples/haseloff.yml` config runs a small CPU job using the bundled Haseloff
+input file. Use it to validate the end-to-end path before running larger ensembles.
+
+## Standard Greenland runs (1-4)
+
+The following configs mirror the manual's standard Greenland runs:
+
+- `cloud/examples/std-greenland-1.yml`
+- `cloud/examples/std-greenland-2.yml`
+- `cloud/examples/std-greenland-3.yml`
+- `cloud/examples/std-greenland-4.yml`
+
+Workflow:
+
+1. Prepare inputs once:
+
+```
+cloud/examples/std-greenland/prepare_inputs.sh
+```
+
+2. Submit runs 1-3:
+
+```
+pism-cloud submit cloud/examples/std-greenland-1.yml
+pism-cloud submit cloud/examples/std-greenland-2.yml
+pism-cloud submit cloud/examples/std-greenland-3.yml
+```
+
+3. After run 2 completes, stage its output for run 4:
+
+```
+SOURCE_PREFIX=std-greenland-2 DEST_PREFIX=std-greenland \
+  cloud/examples/std-greenland/stage_output.sh
+```
+
+Use `STACK_NAME=<name>` or `MEMBER_ID=<id>` to override defaults.
+
+4. Submit run 4:
+
+```
+pism-cloud submit cloud/examples/std-greenland-4.yml
+```
 
 ## Batch queues and job definitions
 
@@ -131,4 +197,3 @@ Override these via environment variables:
 - GPU on-demand is not configured; GPU runs are Spot-only for now.
 - Ensure the container images include `aws` CLI for S3 sync.
 - One job is forced per instance by requesting full instance vCPU/memory.
-- Cost estimation calls the AWS Pricing API (`pricing:GetProducts`).

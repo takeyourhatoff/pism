@@ -56,3 +56,10 @@ def deploy_stack(
     response = client.describe_stacks(StackName=stack_name)
     outputs = response["Stacks"][0].get("Outputs", [])
     return {item["OutputKey"]: item["OutputValue"] for item in outputs}
+
+
+def stack_outputs(stack_name: str) -> Dict[str, str]:
+    client = boto3.client("cloudformation")
+    response = client.describe_stacks(StackName=stack_name)
+    outputs = response["Stacks"][0].get("Outputs", [])
+    return {item["OutputKey"]: item["OutputValue"] for item in outputs}

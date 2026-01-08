@@ -1,0 +1,17 @@
+run_id: haseloff-smoke-001
+ensemble_members: 2
+
+compute:
+  backend: aws-batch
+  instance: c7i.4xlarge
+  gpus: 0
+  mpi_ranks: 4
+  # use_spot: false
+
+io:
+  input_prefix: haseloff
+  output_prefix: haseloff-smoke-001
+
+pism:
+  executable: pism
+  args: "-i {{INPUT_DIR}}/startSMALLablate.nc -bootstrap -Lz 3500 -Mx 51 -My 51 -Mz 61 -y 1 -no_temp -o {{OUTPUT_DIR}}/out-{{MEMBER_ID}}.nc"

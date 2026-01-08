@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
 
 import yaml
 
 from .aws import instance_spec
-from .cost import estimate_total_cost
 
 INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.xlarge"}
 
@@ -18,10 +17,8 @@ class NormalizedConfig:
     run_id: str
     ensemble_members: int
     compute: Dict[str, Any]
-    cost: Dict[str, Any]
     io: Dict[str, Any]
     pism: Dict[str, Any]
-    cost_estimate: Dict[str, Any]
 
 
 def _require(value: Any, message: str) -> Any:
@@ -36,41 +33,32 @@ def _ensure_s3_uri(value: str, field_name: str) -> str:
     return value
 
 
+def _normalize_prefix(value: str) -> str:
+    return value.strip("/")
+
+
 def _resolve_instance(instance: str | None) -> str:
     if instance is None:
         raise ValueError("Instance type not specified")
     return INSTANCE_ALIASES.get(instance, instance)
 
 
-def _select_instance_for_budget(
-    candidates: list[str],
-    use_spot: bool,
-    max_usd: float,
-    hours: float,
-    ensemble_members: int,
-    hourly_override: float | None,
+def _select_instance(
+    candidates: Iterable[str],
+    requested_gpus: int | None,
 ) -> str:
-    affordable = []
     for candidate in candidates:
         try:
-            instance_spec(candidate)
+            spec = instance_spec(candidate)
         except Exception:
             continue
-        estimate = estimate_total_cost(
-            candidate,
-            hours,
-            ensemble_members,
-            use_spot,
-            hourly_override=hourly_override,
-        )
-        if estimate.total_usd <= max_usd:
-            affordable.append((estimate.total_usd, candidate))
-
-    if not affordable:
-        raise ValueError("No instance type fits within cost.max_usd")
-
-    affordable.sort(key=lambda item: item[0])
-    return affordable[0][1]
+        if requested_gpus is None:
+            return candidate
+        if requested_gpus == 0 and spec.gpus == 0:
+            return candidate
+        if requested_gpus > 0 and spec.gpus >= requested_gpus:
+            return candidate
+    raise ValueError("No instance type matches requested GPUs")
 
 
 def load_config(path: str) -> NormalizedConfig:
@@ -84,30 +72,20 @@ def load_config(path: str) -> NormalizedConfig:
     if compute.get("backend") != "aws-batch":
         raise ValueError("compute.backend must be aws-batch")
 
-    cost = data.get("cost", {})
-    max_usd = float(_require(cost.get("max_usd"), "cost.max_usd is required"))
-    hours = float(cost.get("estimated_hours_per_member", 1.0))
-    hourly_override = cost.get("estimated_usd_per_hour")
-    if hourly_override is not None:
-        hourly_override = float(hourly_override)
-
     use_spot = bool(compute.get("use_spot", True))
-    requested_gpus = int(compute.get("gpus", 0) or 0)
+    requested_gpus_raw = compute.get("gpus")
+    requested_gpus = int(requested_gpus_raw) if requested_gpus_raw is not None else None
 
     instance_value = compute.get("instance")
     instance_types = compute.get("instance_types")
     if instance_value is None:
-        if hourly_override is not None:
-            raise ValueError("cost.estimated_usd_per_hour requires compute.instance")
         if instance_types is None:
             raise ValueError("compute.instance or compute.instance_types is required")
         if isinstance(instance_types, str):
             candidates = [value.strip() for value in instance_types.split(",") if value.strip()]
         else:
             candidates = list(instance_types)
-        instance = _select_instance_for_budget(
-            candidates, use_spot, max_usd, hours, ensemble_members, hourly_override
-        )
+        instance = _select_instance(candidates, requested_gpus)
     else:
         instance = _resolve_instance(instance_value)
 
@@ -132,25 +110,23 @@ def load_config(path: str) -> NormalizedConfig:
     if mpi_ranks > spec.vcpus:
         raise ValueError("mpi_ranks exceeds instance vCPU count")
 
-    estimate = estimate_total_cost(
-        instance,
-        hours,
-        ensemble_members,
-        use_spot,
-        hourly_override=hourly_override,
-    )
-
-    if estimate.total_usd > max_usd:
-        raise ValueError(
-            f"Estimated cost {estimate.total_usd:.2f} exceeds max_usd {max_usd:.2f}"
-        )
-
     io_cfg = data.get("io", {})
-    input_s3 = _ensure_s3_uri(_require(io_cfg.get("input_s3"), "io.input_s3 is required"), "io.input_s3")
-    output_s3 = _ensure_s3_uri(
-        _require(io_cfg.get("output_s3"), "io.output_s3 is required"),
-        "io.output_s3",
-    )
+    input_s3 = io_cfg.get("input_s3")
+    output_s3 = io_cfg.get("output_s3")
+    input_prefix = io_cfg.get("input_prefix")
+    output_prefix = io_cfg.get("output_prefix")
+
+    if input_s3 is not None:
+        input_s3 = _ensure_s3_uri(input_s3, "io.input_s3")
+        input_prefix = None
+    else:
+        input_prefix = _normalize_prefix(_require(input_prefix, "io.input_prefix is required"))
+
+    if output_s3 is not None:
+        output_s3 = _ensure_s3_uri(output_s3, "io.output_s3")
+        output_prefix = None
+    else:
+        output_prefix = _normalize_prefix(output_prefix or run_id)
 
     pism_cfg = data.get("pism", {})
     args = _require(pism_cfg.get("args"), "pism.args is required")
@@ -166,27 +142,18 @@ def load_config(path: str) -> NormalizedConfig:
         "use_spot": use_spot,
     }
 
-    normalized_cost = {
-        "max_usd": max_usd,
-        "estimated_hours_per_member": hours,
-        "estimated_usd_per_hour": hourly_override,
+    normalized_io = {
+        "input_s3": input_s3,
+        "output_s3": output_s3,
+        "input_prefix": input_prefix,
+        "output_prefix": output_prefix,
     }
-
-    normalized_io = {"input_s3": input_s3, "output_s3": output_s3}
     normalized_pism = {"args": args, "executable": executable}
-
-    cost_estimate = {
-        "hourly_rate_usd": estimate.hourly_rate_usd,
-        "total_usd": estimate.total_usd,
-        "use_spot": estimate.use_spot,
-    }
 
     return NormalizedConfig(
         run_id=run_id,
         ensemble_members=ensemble_members,
         compute=normalized_compute,
-        cost=normalized_cost,
         io=normalized_io,
         pism=normalized_pism,
-        cost_estimate=cost_estimate,
     )

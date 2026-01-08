@@ -63,8 +63,7 @@ def on_demand_hourly_rate(instance_type: str, region: Optional[str] = None) -> f
     price_list = response.get("PriceList", [])
     if not price_list:
         raise ValueError(
-            "Unable to fetch on-demand pricing from AWS. "
-            "Set cost.estimated_usd_per_hour in the config to override."
+            "Unable to fetch on-demand pricing from AWS."
         )
 
     data = json.loads(price_list[0])
@@ -77,8 +76,7 @@ def on_demand_hourly_rate(instance_type: str, region: Optional[str] = None) -> f
                 return float(price_per_unit["USD"])
 
     raise ValueError(
-        "Unable to parse on-demand pricing. "
-        "Set cost.estimated_usd_per_hour in the config to override."
+        "Unable to parse on-demand pricing."
     )
 
 
@@ -100,8 +98,7 @@ def spot_hourly_rate(instance_type: str, region: Optional[str] = None) -> float:
     history = response.get("SpotPriceHistory", [])
     if not history:
         raise ValueError(
-            "Unable to fetch spot pricing from AWS. "
-            "Set cost.estimated_usd_per_hour in the config to override."
+            "Unable to fetch spot pricing from AWS."
         )
 
     latest_by_az = {}
@@ -114,8 +111,7 @@ def spot_hourly_rate(instance_type: str, region: Optional[str] = None) -> float:
 
     if not latest_by_az:
         raise ValueError(
-            "Unable to compute spot pricing from AWS. "
-            "Set cost.estimated_usd_per_hour in the config to override."
+            "Unable to compute spot pricing from AWS."
         )
 
     prices = [price for _, price in latest_by_az.values()]

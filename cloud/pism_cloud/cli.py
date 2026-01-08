@@ -16,9 +16,11 @@ from .batch import (
     summarize_status,
 )
 from .config import NormalizedConfig, load_config
-from .dynamo import get_table, list_jobs, list_runs, store_job, store_run, utc_now
+from .dynamo import get_run, get_table, list_jobs, list_runs, store_job, store_run, utc_now
 from .images import build_and_push, repo_root
-from .infra import deploy_stack
+from .infra import deploy_stack, stack_outputs
+from .runtime import hourly_rate, job_costs, summarize_costs
+from .s3 import upload_path
 
 INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
@@ -37,6 +39,8 @@ def build_run_item(
     config: NormalizedConfig,
     job_queue: str,
     job_definition: str,
+    input_s3: str,
+    output_s3: str,
 ) -> Dict[str, object]:
     return {
         "run_id": config.run_id,
@@ -47,16 +51,11 @@ def build_run_item(
         "use_spot": config.compute["use_spot"],
         "job_queue": job_queue,
         "job_definition": job_definition,
-        "input_s3": config.io["input_s3"],
-        "output_s3": config.io["output_s3"],
+        "input_s3": input_s3,
+        "output_s3": output_s3,
         "pism_args": config.pism["args"],
         "mpi_ranks": config.compute["mpi_ranks"],
         "gpus": config.compute["gpus"],
-        "cost_max_usd": config.cost["max_usd"],
-        "estimated_hours_per_member": config.cost["estimated_hours_per_member"],
-        "estimated_usd_per_hour": config.cost.get("estimated_usd_per_hour"),
-        "estimated_total_cost": config.cost_estimate["total_usd"],
-        "estimated_hourly_rate": config.cost_estimate["hourly_rate_usd"],
     }
 
 
@@ -71,7 +70,7 @@ def build_job_item(run_id: str, member_id: str, job_id: str, job_name: str) -> D
     }
 
 
-def submit(config_path: str) -> int:
+def submit(config_path: str, stack_name: str) -> int:
     try:
         config = load_config(config_path)
     except ValueError as exc:
@@ -87,6 +86,28 @@ def submit(config_path: str) -> int:
     job_definition = select_job_definition(config.compute["gpus"])
     member_ids = [f"{i + 1:04d}" for i in range(config.ensemble_members)]
 
+    input_s3 = config.io.get("input_s3")
+    output_s3 = config.io.get("output_s3")
+    input_prefix = config.io.get("input_prefix")
+    output_prefix = config.io.get("output_prefix")
+
+    if input_s3 is None or output_s3 is None:
+        try:
+            outputs = stack_outputs(stack_name)
+        except Exception as exc:
+            print(f"Stack lookup failed: {exc}", file=sys.stderr)
+            return 2
+        input_bucket = outputs.get("InputBucketName")
+        output_bucket = outputs.get("OutputBucketName")
+        if not input_bucket or not output_bucket:
+            print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
+            return 2
+
+        if input_s3 is None:
+            input_s3 = f"s3://{input_bucket}/{input_prefix}"
+        if output_s3 is None:
+            output_s3 = f"s3://{output_bucket}/{output_prefix}"
+
     def overrides_builder(member_id: str) -> Dict[str, object]:
         rendered_args = render_args(config.pism["args"], config.run_id, member_id)
         return build_overrides(
@@ -94,8 +115,8 @@ def submit(config_path: str) -> int:
             memory_mib=config.compute["memory_mib"],
             mpi_ranks=config.compute["mpi_ranks"],
             gpus=config.compute["gpus"],
-            input_s3=config.io["input_s3"],
-            output_s3=config.io["output_s3"],
+            input_s3=input_s3,
+            output_s3=output_s3,
             pism_args=rendered_args,
             pism_executable=config.pism["executable"],
             run_id=config.run_id,
@@ -111,14 +132,13 @@ def submit(config_path: str) -> int:
     )
 
     table = get_table()
-    store_run(table, build_run_item(config, job_queue, job_definition))
+    store_run(table, build_run_item(config, job_queue, job_definition, input_s3, output_s3))
     for member_id, job_id in job_ids.items():
         job_name = f"pism-{config.run_id}-{member_id}"
         store_job(table, build_job_item(config.run_id, member_id, job_id, job_name))
 
     print(f"Submitted run {config.run_id} ({config.ensemble_members} jobs)")
     print(f"Queue: {job_queue}")
-    print(f"Estimated total cost: ${config.cost_estimate['total_usd']:.2f}")
     return 0
 
 
@@ -128,6 +148,13 @@ def status(run_id: str) -> int:
     if not jobs:
         print(f"Run {run_id} not found")
         return 1
+
+    run_item = get_run(table, run_id)
+    instance_type = None
+    use_spot = None
+    if run_item:
+        instance_type = run_item.get("instance_type")
+        use_spot = run_item.get("use_spot")
 
     job_ids = [job["job_id"] for job in jobs]
     batch_jobs = describe_jobs(job_ids)
@@ -139,12 +166,36 @@ def status(run_id: str) -> int:
             **summary
         )
     )
+    if instance_type and use_spot is not None:
+        try:
+            rate = hourly_rate(str(instance_type), bool(use_spot))
+            snapshot = summarize_costs(batch_jobs, rate)
+            print(
+                "Cost per hour: ${rate:.2f}/hr per job | Running cost per hour: ${running:.2f}/hr | Cost so far: ${total:.2f}".format(
+                    rate=snapshot.hourly_rate_usd,
+                    running=snapshot.running_rate_usd,
+                    total=snapshot.cost_to_date_usd,
+                )
+            )
+            cost_by_job = job_costs(batch_jobs, rate)
+        except Exception as exc:
+            print(f"Cost per hour unavailable: {exc}", file=sys.stderr)
+            cost_by_job = {}
+    else:
+        cost_by_job = {}
+
     for job in batch_jobs:
+        job_id = str(job.get("jobId") or "")
+        cost_value = cost_by_job.get(job_id)
+        cost_suffix = ""
+        if cost_value is not None and cost_value > 0:
+            cost_suffix = f" cost=${cost_value:.2f}"
         print(
-            "{name} {status} {status_reason}".format(
+            "{name} {status} {status_reason}{cost}".format(
                 name=job.get("jobName"),
                 status=job.get("status"),
                 status_reason=job.get("statusReason", ""),
+                cost=cost_suffix,
             )
         )
     return 0
@@ -176,10 +227,10 @@ def list_runs_cmd() -> int:
 
     for run in sorted(runs, key=lambda item: item.get("created_at", "")):
         print(
-            "{run_id} members={members} est_cost=${cost:.2f} spot={spot}".format(
+            "{run_id} members={members} instance={instance} spot={spot}".format(
                 run_id=run.get("run_id"),
                 members=run.get("ensemble_members"),
-                cost=float(run.get("estimated_total_cost", 0.0)),
+                instance=run.get("instance_type"),
                 spot=run.get("use_spot"),
             )
         )
@@ -261,12 +312,49 @@ def dashboard(args: argparse.Namespace) -> int:
     return 0
 
 
+def upload_inputs(args: argparse.Namespace) -> int:
+    if not args.source:
+        print("--source is required", file=sys.stderr)
+        return 2
+
+    source = Path(args.source)
+
+    if args.prefix is None:
+        print("--prefix is required", file=sys.stderr)
+        return 2
+
+    try:
+        outputs = stack_outputs(args.stack_name)
+    except Exception as exc:
+        print(f"Stack lookup failed: {exc}", file=sys.stderr)
+        return 2
+
+    bucket = outputs.get("InputBucketName")
+    if not bucket:
+        print("InputBucketName not found in stack outputs", file=sys.stderr)
+        return 2
+
+    dest = f"s3://{bucket}/{args.prefix}"
+
+    try:
+        upload_path(source, dest)
+    except ValueError as exc:
+        print(f"Upload error: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Uploaded {source} to {dest}")
+    return 0
+
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pism-cloud", description="PISM AWS Batch runner")
     subcommands = parser.add_subparsers(dest="command")
 
     submit_parser = subcommands.add_parser("submit", help="Submit an ensemble run")
     submit_parser.add_argument("config", help="Path to config.yml")
+    submit_parser.add_argument("--stack-name", default="pism-batch")
 
     status_parser = subcommands.add_parser("status", help="Show run status")
     status_parser.add_argument("run_id")
@@ -309,6 +397,10 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard_parser.add_argument("--host", default="0.0.0.0")
     dashboard_parser.add_argument("--port", type=int, default=8080)
 
+    upload_parser = subcommands.add_parser("upload", help="Upload input data to the stack input bucket")
+    upload_parser.add_argument("--stack-name", default="pism-batch")
+    upload_parser.add_argument("--source", default=None)
+    upload_parser.add_argument("--prefix", default=None)
     return parser
 
 
@@ -317,7 +409,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "submit":
-        return submit(args.config)
+        return submit(args.config, args.stack_name)
     if args.command == "status":
         return status(args.run_id)
     if args.command == "cancel":
@@ -330,6 +422,8 @@ def main() -> int:
         return deploy(args)
     if args.command == "dashboard":
         return dashboard(args)
+    if args.command == "upload":
+        return upload_inputs(args)
 
     parser.print_help()
     return 1
