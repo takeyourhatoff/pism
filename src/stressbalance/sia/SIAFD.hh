@@ -70,28 +70,29 @@ protected:
   virtual DiagnosticList diagnostics_impl() const;
 
   virtual void compute_surface_gradient(const Inputs &inputs,
-                                        array::Staggered1 &h_x,
-                                        array::Staggered1 &h_y);
+                                        array::Staggered &h_x,
+                                        array::Staggered &h_y);
 
   virtual void surface_gradient_eta(const array::Scalar2 &ice_thickness,
                                     const array::Scalar2 &bed_elevation,
-                                    array::Staggered1 &h_x,
-                                    array::Staggered1 &h_y);
+                                    array::Staggered &h_x,
+                                    array::Staggered &h_y);
   virtual void surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevation,
                                          const array::CellType2 &cell_type,
-                                         array::Staggered1 &h_x,
-                                         array::Staggered1 &h_y);
+                                         array::Staggered &h_x,
+                                         array::Staggered &h_y);
   virtual void surface_gradient_mahaffy(const array::Scalar &ice_surface_elevation,
-                                        array::Staggered1 &h_x,
-                                        array::Staggered1 &h_y);
+                                        array::Staggered &h_x,
+                                        array::Staggered &h_y);
 
   virtual void compute_diffusivity(bool full_update,
                                    const Geometry &geometry,
                                    const array::Array3D *enthalpy,
                                    const array::Array3D *age,
-                                   const array::Staggered1 &h_x,
-                                   const array::Staggered1 &h_y,
-                                   array::Staggered1 &result);
+                                   array::Staggered &h_x,
+                                   array::Staggered &h_y,
+                                   array::Staggered1 &result,
+                                   bool fuse_mahaffy);
 
   virtual void compute_diffusive_flux(const array::Staggered &h_x, const array::Staggered &h_y,
                                       const array::Staggered &diffusivity,
@@ -107,6 +108,12 @@ protected:
 
   bool interglacial(double accumulation_time) const;
   void ensure_geometry_ghosts(const Geometry &geometry);
+  bool can_use_cuda_diffusivity(const Geometry &geometry,
+                                const array::Array3D *enthalpy,
+                                const array::Array3D *age,
+                                const array::Staggered &h_x,
+                                const array::Staggered &h_y,
+                                const array::Staggered1 &result) const;
 
   const unsigned int m_stencil_width;
 
@@ -114,7 +121,8 @@ protected:
   array::Scalar2 m_work_2d_0;
   array::Scalar2 m_work_2d_1;
   //! temporary storage for the surface gradient and the diffusivity
-  array::Staggered1 m_h_x, m_h_y, m_D;
+  array::Staggered2 m_h_x, m_h_y;
+  array::Staggered1 m_D;
   //! temporary storage for delta on the staggered grid
   array::Array3D m_delta_0;
   array::Array3D m_delta_1;
@@ -127,6 +135,7 @@ protected:
   // profiling
   int m_event_sia;
   bool m_I_valid;
+  bool m_diffusive_flux_valid = false;
   bool m_geometry_ghosts_valid = false;
 
   // unit conversion

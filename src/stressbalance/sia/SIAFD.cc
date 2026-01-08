@@ -131,6 +131,7 @@ void SIAFD::init() {
 void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, bool full_update) {
   m_I_valid = false;
   m_geometry_ghosts_valid = false;
+  m_diffusive_flux_valid = false;
 
   // Check if the smoothed bed computed by BedSmoother is out of date and
   // recompute if necessary.
@@ -141,13 +142,22 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
   }
 
   profiling().begin("sia.gradient");
-  compute_surface_gradient(inputs, m_h_x, m_h_y);
+  const std::string gradient_method =
+      m_config->get_string("stress_balance.sia.surface_gradient_method");
+  const bool fuse_mahaffy =
+      (gradient_method == "mahaffy") &&
+      can_use_cuda_diffusivity(*inputs.geometry, inputs.enthalpy, inputs.age, m_h_x, m_h_y, m_D);
+  if (!fuse_mahaffy) {
+    compute_surface_gradient(inputs, m_h_x, m_h_y);
+  }
   profiling().end("sia.gradient");
 
   profiling().begin("sia.flux");
   compute_diffusivity(full_update, *inputs.geometry, inputs.enthalpy, inputs.age, m_h_x, m_h_y,
-                      m_D);
-  compute_diffusive_flux(m_h_x, m_h_y, m_D, m_diffusive_flux);
+                      m_D, fuse_mahaffy);
+  if (!m_diffusive_flux_valid) {
+    compute_diffusive_flux(m_h_x, m_h_y, m_D, m_diffusive_flux);
+  }
   profiling().end("sia.flux");
 
   if (full_update) {
@@ -196,8 +206,8 @@ void SIAFD::update(const array::Vector &sliding_velocity, const Inputs &inputs, 
   \param[out] h_x the X-component of the surface gradient, on the staggered grid
   \param[out] h_y the Y-component of the surface gradient, on the staggered grid
 */
-void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered1 &h_x,
-                                     array::Staggered1 &h_y) {
+void SIAFD::compute_surface_gradient(const Inputs &inputs, array::Staggered &h_x,
+                                     array::Staggered &h_y) {
   ensure_geometry_ghosts(*inputs.geometry);
 
   const std::string method = m_config->get_string("stress_balance.sia.surface_gradient_method");
@@ -247,10 +257,61 @@ void SIAFD::ensure_geometry_ghosts(const Geometry &geometry) {
 #endif
 }
 
+bool SIAFD::can_use_cuda_diffusivity(const Geometry &geometry,
+                                     const array::Array3D *enthalpy,
+                                     const array::Array3D *age,
+                                     const array::Staggered &h_x,
+                                     const array::Staggered &h_y,
+                                     const array::Staggered1 &result) const {
+#if Pism_USE_CUDA_SIA
+  (void)age;
+  if (enthalpy == nullptr) {
+    return false;
+  }
+  const bool compute_grain_size_using_age =
+      m_config->get_flag("stress_balance.sia.grain_size_age_coupling");
+  const bool e_age_coupling = m_config->get_flag("stress_balance.sia.e_age_coupling");
+  if (compute_grain_size_using_age || e_age_coupling) {
+    return false;
+  }
+
+  if (!cuda::vec_is_cuda(geometry.ice_surface_elevation) ||
+      !cuda::vec_is_cuda(geometry.ice_thickness) ||
+      !cuda::vec_is_cuda(geometry.bed_elevation) ||
+      !cuda::vec_is_cuda(geometry.cell_type)) {
+    return false;
+  }
+
+  if (!cuda::vec_is_cuda(m_work_2d_0) || !cuda::vec_is_cuda(m_work_2d_1) ||
+      !cuda::vec_is_cuda(h_x) || !cuda::vec_is_cuda(h_y) ||
+      !cuda::vec_is_cuda(result) || !cuda::vec_is_cuda(m_diffusive_flux) ||
+      !cuda::vec_is_cuda(*enthalpy) ||
+      !cuda::vec_is_cuda(m_delta_0) || !cuda::vec_is_cuda(m_delta_1) ||
+      !cuda::vec_is_cuda(m_work_3d_0) || !cuda::vec_is_cuda(m_work_3d_1)) {
+    return false;
+  }
+
+  const std::string flow_law = m_config->get_string("stress_balance.sia.flow_law");
+  if (flow_law != "pb" && flow_law != "arr" && flow_law != "arrwarm") {
+    return false;
+  }
+
+  return true;
+#else
+  (void)geometry;
+  (void)enthalpy;
+  (void)age;
+  (void)h_x;
+  (void)h_y;
+  (void)result;
+  return false;
+#endif
+}
+
 //! \brief Compute the ice surface gradient using the eta-transformation.
 void SIAFD::surface_gradient_eta(const array::Scalar2 &ice_thickness,
-                                 const array::Scalar2 &bed_elevation, array::Staggered1 &h_x,
-                                 array::Staggered1 &h_y) {
+                                 const array::Scalar2 &bed_elevation, array::Staggered &h_x,
+                                 array::Staggered &h_y) {
   const double n = m_flow_law->exponent(), // presumably 3.0
       etapow     = (2.0 * n + 2.0) / n,    // = 8/3 if n = 3
       invpow = 1.0 / etapow, dinvpow = (-n - 2.0) / (2.0 * n + 2.0);
@@ -319,7 +380,7 @@ void SIAFD::surface_gradient_eta(const array::Scalar2 &ice_thickness,
 //! \brief Compute the ice surface gradient using the Mary Anne Mahaffy method;
 //! see [\ref Mahaffy].
 void SIAFD::surface_gradient_mahaffy(const array::Scalar &ice_surface_elevation,
-                                     array::Staggered1 &h_x, array::Staggered1 &h_y) {
+                                     array::Staggered &h_x, array::Staggered &h_y) {
   const double dx = m_grid->dx(), dy = m_grid->dy(); // convenience
 
   const array::Scalar &h = ice_surface_elevation;
@@ -405,11 +466,12 @@ void SIAFD::surface_gradient_mahaffy(const array::Scalar &ice_surface_elevation,
  * mask, and bed to compute values at all grid points including width=1 ghosts,
  * then the second loop uses width=1 stencil to compute local values. (In other
  * words, a purely local computation would require width=3 stencil of surface,
- * mask, and bed fields.)
+ * mask, and bed fields.) The CUDA path computes the secondary step on the
+ * width=1 ghost region using width=2 storage to avoid a ghost exchange.
  */
 void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevation,
-                                      const array::CellType2 &cell_type, array::Staggered1 &h_x,
-                                      array::Staggered1 &h_y) {
+                                      const array::CellType2 &cell_type, array::Staggered &h_x,
+                                      array::Staggered &h_y) {
   const double dx         = m_grid->dx(),
                dy         = m_grid->dy(); // convenience
   const array::Scalar2 &h = ice_surface_elevation;
@@ -426,17 +488,20 @@ void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevatio
 #if Pism_USE_CUDA_SIA
   if (cuda::vec_is_cuda(h) && cuda::vec_is_cuda(mask) && cuda::vec_is_cuda(w_i) &&
       cuda::vec_is_cuda(w_j) && cuda::vec_is_cuda(h_x) && cuda::vec_is_cuda(h_y)) {
+    if (h_x.stencil_width() < 2 || h_y.stencil_width() < 2) {
+      // GPU Haseloff gradients compute ghost values locally and require width=2 storage.
+      goto cpu_path;
+    }
     if (!m_geometry_ghosts_valid) {
       const_cast<array::Scalar2 &>(h).update_ghosts();
       const_cast<array::CellType2 &>(mask).update_ghosts();
       m_geometry_ghosts_valid = true;
     }
     cuda::surface_gradient_haseloff(h, mask, w_i, w_j, h_x, h_y, xs, ys, xm, ym, dx, dy);
-    h_x.update_ghosts();
-    h_y.update_ghosts();
     return;
   }
 #endif
+cpu_path:
 
   assert(mask.stencil_width() >= 2);
   assert(h.stencil_width() >= 2);
@@ -530,14 +595,13 @@ void SIAFD::surface_gradient_haseloff(const array::Scalar2 &ice_surface_elevatio
  */
 void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
                                 const array::Array3D *enthalpy, const array::Array3D *age,
-                                const array::Staggered1 &h_x, const array::Staggered1 &h_y,
-                                array::Staggered1 &result) {
+                                array::Staggered &h_x, array::Staggered &h_y,
+                                array::Staggered1 &result,
+                                bool fuse_mahaffy) {
   array::Scalar2 &thk_smooth = m_work_2d_0, &theta = m_work_2d_1;
 
   array::Array3D *delta[] = { &m_delta_0, &m_delta_1 };
   array::Array3D *I[]     = { &m_work_3d_0, &m_work_3d_1 };
-
-  ensure_geometry_ghosts(geometry);
 
   const double current_time = time().current(),
                D_limit      = m_config->get_number("stress_balance.sia.max_diffusivity");
@@ -548,11 +612,17 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
              limit_diffusivity = m_config->get_flag("stress_balance.sia.limit_diffusivity"),
              use_age           = compute_grain_size_using_age or e_age_coupling;
 
+#if !Pism_USE_CUDA_SIA
+  (void)fuse_mahaffy;
+#endif
+
   rheology::grain_size_vostok gs_vostok;
 
   // get "theta" from Schoof (2003) bed smoothness calculation and the
   // thickness relative to the smoothed bed; each array::Scalar involved must
   // have stencil width WIDE_GHOSTS for this too work
+  ensure_geometry_ghosts(geometry);
+
   m_bed_smoother->theta(geometry.ice_surface_elevation, theta, false);
 
   m_bed_smoother->smoothed_thk(geometry.ice_surface_elevation, geometry.ice_thickness,
@@ -589,6 +659,8 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
     const int ghosts = 1;
     const int periodic_x = (m_grid->periodicity() & grid::X_PERIODIC) ? 1 : 0;
     const int periodic_y = (m_grid->periodicity() & grid::Y_PERIODIC) ? 1 : 0;
+    const double dx = m_grid->dx();
+    const double dy = m_grid->dy();
 
     const double A_cold = m_config->get_number("flow_law.Paterson_Budd.A_cold");
     const double A_warm = m_config->get_number("flow_law.Paterson_Budd.A_warm");
@@ -607,21 +679,18 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
 
     double D_max_local = 0.0;
     int high_diffusivity_counter_local = 0;
-    for (int o = 0; o < 2; ++o) {
-      double D_max_o = 0.0;
-      int high_count_o = 0;
-      const int gpu_full_update = full_update ? 1 : 0;
-      const int gpu_compute_I = full_update ? 1 : 0;
-      cuda::compute_diffusivity_pb(thk_smooth, theta, h_x, h_y, *enthalpy, result, *delta[o], *I[o],
-                                   xs, ys, xm, ym, Mx, My, ghosts, o, gpu_full_update, gpu_compute_I,
-                                   flow_law_mode,
-                                   periodic_x, periodic_y, limit_diffusivity ? 1 : 0,
-                                   D_limit, m_e_factor, A_cold, A_warm, Q_cold, Q_warm, T_crit,
-                                   gas_const, n, T_melting, beta, c_i, T_0, rho_i, g, p_air,
-                                   &D_max_o, &high_count_o);
-      D_max_local = std::max(D_max_local, D_max_o);
-      high_diffusivity_counter_local += high_count_o;
-    }
+    const int gpu_full_update = full_update ? 1 : 0;
+    const int gpu_compute_I = full_update ? 1 : 0;
+    const int gpu_compute_mahaffy = fuse_mahaffy ? 1 : 0;
+    cuda::compute_diffusivity_pb_both(thk_smooth, theta, geometry.ice_surface_elevation,
+                                      h_x, h_y, *enthalpy,
+                                      result, m_diffusive_flux, *delta[0], *delta[1], *I[0], *I[1],
+                                      xs, ys, xm, ym, Mx, My, ghosts, gpu_full_update, gpu_compute_I,
+                                      gpu_compute_mahaffy, dx, dy, flow_law_mode,
+                                      periodic_x, periodic_y, limit_diffusivity ? 1 : 0,
+                                      D_limit, m_e_factor, A_cold, A_warm, Q_cold, Q_warm, T_crit,
+                                      gas_const, n, T_melting, beta, c_i, T_0, rho_i, g, p_air,
+                                      &D_max_local, &high_diffusivity_counter_local);
 
     m_D_max = GlobalMax(m_grid->com, D_max_local);
     high_diffusivity_counter_local = GlobalSum(m_grid->com, high_diffusivity_counter_local);
@@ -641,6 +710,7 @@ void SIAFD::compute_diffusivity(bool full_update, const Geometry &geometry,
                      D_limit, high_diffusivity_counter_local);
     }
     m_I_valid = full_update;
+    m_diffusive_flux_valid = true;
     return;
   }
 #endif
