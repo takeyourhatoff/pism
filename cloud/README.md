@@ -35,7 +35,8 @@ This builds and pushes CPU/GPU images to ECR, then deploys the CloudFormation st
 The stack creates a VPC, subnets, security group, S3 buckets, Batch queues, job definitions,
 a log group, and the DynamoDB table. ECR repositories (`pism-cpu`, `pism-gpu`) are created
 automatically if missing. Use `--vpc-cidr` and `--public-subnet-cidr-a/b` to override
-the default network ranges.
+the default network ranges. Spot defaults to `SPOT_PRICE_CAPACITY_OPTIMIZED`; override
+with `--spot-allocation-strategy SPOT_CAPACITY_OPTIMIZED` for fewer interruptions.
 
 ### 4) Upload inputs
 
@@ -142,6 +143,17 @@ document should use a unique `run_id`; submissions fail if the run already exist
 
 Outputs always land under `s3://<output-bucket>/<run_id>/`.
 
+Set `budget_usd` to enable an automatic safety timeout. The CLI converts the budget
+into a job timeout using the current on-demand or spot hourly rate for the instance
+type and passes that timeout to AWS Batch. This guards against runaway jobs, but
+does not include queue time or data transfer costs.
+
+Checkpointing is always enabled. The job wrapper syncs outputs every 10 minutes and
+handles SIGTERM so PISM writes its last model state to the `-o` output file before the
+container exits. On retry, the wrapper looks for the existing `-o` file in S3, downloads
+it, replaces any `-i` argument with that file, and drops `-bootstrap` so the job resumes.
+The output file must live under `{{OUTPUT_DIR}}`.
+
 Placeholders inside `pism.args` are expanded per job:
 
 - `{{INPUT_DIR}}` -> `/workspace/input`
@@ -174,6 +186,7 @@ For other GPU types, set `--cuda-arch` when building images.
 
 ```yaml
 run_id: <unique-run-id>
+budget_usd: 50
 
 compute:
   backend: aws-batch

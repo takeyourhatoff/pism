@@ -44,8 +44,9 @@ def build_run_item(
     job_definition: str,
     inputs_s3: Dict[str, str],
     output_s3: str,
+    timeout_seconds: int | None,
 ) -> Dict[str, object]:
-    return {
+    item: Dict[str, object] = {
         "run_id": config.run_id,
         "sort_key": "RUN",
         "created_at": utc_now(),
@@ -59,6 +60,11 @@ def build_run_item(
         "mpi_ranks": config.compute["mpi_ranks"],
         "gpus": config.compute["gpus"],
     }
+    if config.budget_usd is not None:
+        item["budget_usd"] = config.budget_usd
+    if timeout_seconds is not None:
+        item["timeout_seconds"] = timeout_seconds
+    return item
 
 
 def build_job_item(run_id: str, job_id: str, job_name: str) -> Dict[str, object]:
@@ -131,6 +137,19 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             cfg.run_id,
             list(cfg.inputs.keys()),
         )
+
+        timeout_seconds = None
+        if cfg.budget_usd is not None:
+            try:
+                rate = hourly_rate(str(cfg.compute["instance"]), bool(cfg.compute["use_spot"]))
+            except Exception as exc:
+                print(f"Budget error: unable to fetch pricing for {cfg.compute['instance']}: {exc}", file=sys.stderr)
+                return 2
+            if rate <= 0:
+                print(f"Budget error: invalid hourly rate for {cfg.compute['instance']}", file=sys.stderr)
+                return 2
+            budget_hours = cfg.budget_usd / rate
+            timeout_seconds = max(60, int(budget_hours * 3600))
         overrides = build_overrides(
             vcpus=cfg.compute["vcpus"],
             memory_mib=cfg.compute["memory_mib"],
@@ -148,16 +167,30 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             job_queue=job_queue,
             job_definition=job_definition,
             overrides=overrides,
+            timeout_seconds=timeout_seconds,
         )
 
         store_run(
             table,
-            build_run_item(cfg, job_queue, job_definition, resolved_inputs, output_s3),
+            build_run_item(
+                cfg,
+                job_queue,
+                job_definition,
+                resolved_inputs,
+                output_s3,
+                timeout_seconds,
+            ),
         )
         store_job(table, build_job_item(cfg.run_id, job_id, job_name))
 
         print(f"Submitted run {cfg.run_id} (1 job)")
         print(f"Queue: {job_queue}")
+        if cfg.budget_usd is not None:
+            if timeout_seconds is not None:
+                hours = timeout_seconds / 3600.0
+                print(f"Budget guard: ${cfg.budget_usd:.2f} (~{hours:.2f}h timeout)")
+            else:
+                print(f"Budget guard: ${cfg.budget_usd:.2f}")
 
     return 0
 
@@ -203,6 +236,16 @@ def status(run_id: str) -> int:
             cost_by_job = {}
     else:
         cost_by_job = {}
+
+    if run_item:
+        budget = run_item.get("budget_usd")
+        timeout_seconds = run_item.get("timeout_seconds")
+        if budget is not None:
+            if timeout_seconds:
+                hours = float(timeout_seconds) / 3600.0
+                print(f"Budget guard: ${float(budget):.2f} (~{hours:.2f}h timeout)")
+            else:
+                print(f"Budget guard: ${float(budget):.2f}")
 
     for job in batch_jobs:
         job_id = str(job.get("jobId") or "")
@@ -310,6 +353,8 @@ def deploy(args: argparse.Namespace) -> int:
         parameters["PublicSubnetCidrA"] = args.public_subnet_cidr_a
     if args.public_subnet_cidr_b:
         parameters["PublicSubnetCidrB"] = args.public_subnet_cidr_b
+    if args.spot_allocation_strategy:
+        parameters["SpotAllocationStrategy"] = args.spot_allocation_strategy
 
     outputs = deploy_stack(args.stack_name, template_path, parameters)
     print("Stack deployed")
@@ -407,6 +452,11 @@ def build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--vpc-cidr", default=None)
     deploy_parser.add_argument("--public-subnet-cidr-a", default=None)
     deploy_parser.add_argument("--public-subnet-cidr-b", default=None)
+    deploy_parser.add_argument(
+        "--spot-allocation-strategy",
+        default=None,
+        choices=["SPOT_PRICE_CAPACITY_OPTIMIZED", "SPOT_CAPACITY_OPTIMIZED"],
+    )
     deploy_parser.add_argument("--no-build-images", dest="build_images", action="store_false")
     deploy_parser.add_argument("--cpu-image", default=None)
     deploy_parser.add_argument("--gpu-image", default=None)

@@ -38,6 +38,13 @@ Parameters:
     Type: Number
     Description: "Desired vCPUs for GPU compute environments."
     Default: 0
+  SpotAllocationStrategy:
+    Type: String
+    Description: "Spot allocation strategy for Batch compute environments."
+    Default: SPOT_PRICE_CAPACITY_OPTIMIZED
+    AllowedValues:
+      - SPOT_PRICE_CAPACITY_OPTIMIZED
+      - SPOT_CAPACITY_OPTIMIZED
   CpuImage:
     Type: String
     Description: "Container image for CPU jobs."
@@ -253,7 +260,7 @@ Resources:
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
         Type: SPOT
-        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
+        AllocationStrategy: !Ref SpotAllocationStrategy
         BidPercentage: 100
         MinvCpus: 0
         MaxvCpus: !Ref MaxVcpusCpu
@@ -294,7 +301,7 @@ Resources:
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
         Type: SPOT
-        AllocationStrategy: SPOT_CAPACITY_OPTIMIZED
+        AllocationStrategy: !Ref SpotAllocationStrategy
         BidPercentage: 100
         MinvCpus: 0
         MaxvCpus: !Ref MaxVcpusGpu

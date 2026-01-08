@@ -18,6 +18,7 @@ class NormalizedConfig:
     compute: Dict[str, Any]
     inputs: Dict[str, str]
     pism: Dict[str, Any]
+    budget_usd: float | None
 
 
 def _require(value: Any, message: str) -> Any:
@@ -57,6 +58,16 @@ def _load_documents(path: str) -> List[Tuple[int, Dict[str, Any]]]:
 
 def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
     run_id = _require(data.get("run_id"), f"{source}: run_id is required")
+    budget_raw = data.get("budget_usd")
+    budget_usd = None
+    if budget_raw is not None:
+        try:
+            budget_usd = float(budget_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{source}: budget_usd must be a number") from exc
+        if budget_usd <= 0:
+            raise ValueError(f"{source}: budget_usd must be greater than zero")
+
     compute = data.get("compute", {})
     if compute.get("backend") != "aws-batch":
         raise ValueError(f"{source}: compute.backend must be aws-batch")
@@ -115,6 +126,7 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
         compute=normalized_compute,
         inputs=normalized_inputs,
         pism=normalized_pism,
+        budget_usd=budget_usd,
     )
 
 

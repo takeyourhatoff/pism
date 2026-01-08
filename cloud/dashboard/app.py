@@ -71,6 +71,8 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     running_rate_usd = None
     instance_type = run_item.get("instance_type")
     use_spot = run_item.get("use_spot")
+    budget_usd = run_item.get("budget_usd")
+    timeout_seconds = run_item.get("timeout_seconds")
     if instance_type and use_spot is not None:
         try:
             rate = hourly_rate(str(instance_type), bool(use_spot))
@@ -102,4 +104,6 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         "hourly_rate_usd": hourly_rate_usd,
         "cost_to_date_usd": cost_to_date_usd,
         "running_rate_usd": running_rate_usd,
+        "budget_usd": budget_usd,
+        "timeout_seconds": timeout_seconds,
     }
