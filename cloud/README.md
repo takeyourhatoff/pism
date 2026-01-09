@@ -188,6 +188,8 @@ pism-cloud build-images
 ```
 
 These Dockerfiles build PISM from source; expect longer build times and customize as needed.
+If Docker Buildx is available, `pism-cloud` uses a local cache under
+`~/.cache/pism-cloud/docker/` to speed up rebuilds.
 For other GPU types, set `--cuda-arch` when building images.
 
 ## Minimal config schema

@@ -20,6 +20,66 @@ def ensure_docker() -> None:
         raise RuntimeError("docker is required but was not found in PATH")
 
 
+def buildx_available() -> bool:
+    try:
+        subprocess.run(
+            ["docker", "buildx", "version"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return True
+
+
+def buildx_driver() -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["docker", "buildx", "inspect", "--bootstrap"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith("Driver:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def ensure_buildx_builder() -> bool:
+    driver = buildx_driver()
+    if driver == "docker-container":
+        return True
+    if not driver:
+        return False
+    name = "pism-cloud"
+    result = subprocess.run(
+        ["docker", "buildx", "create", "--name", name, "--driver", "docker-container", "--use"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+    if "already exists" in result.stderr.lower():
+        try:
+            subprocess.run(["docker", "buildx", "use", name], check=True)
+            subprocess.run(["docker", "buildx", "inspect", "--bootstrap"], check=True)
+        except subprocess.CalledProcessError:
+            return False
+        return True
+    return False
+
+
+def build_cache_dir(dockerfile: Path) -> Path:
+    safe_name = dockerfile.name.replace(".", "-")
+    return Path.home() / ".cache" / "pism-cloud" / "docker" / safe_name
+
+
 def ecr_client(region: Optional[str] = None):
     return boto3.client("ecr", region_name=region)
 
@@ -55,14 +115,33 @@ def build_image(
     build_args: Optional[dict[str, str]] = None,
 ) -> None:
     ensure_docker()
-    command = [
-        "docker",
-        "build",
-        "-f",
-        str(dockerfile),
-        "-t",
-        image_uri,
-    ]
+    use_buildx = buildx_available() and ensure_buildx_builder()
+    if use_buildx:
+        cache_dir = build_cache_dir(dockerfile)
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        command = [
+            "docker",
+            "buildx",
+            "build",
+            "--load",
+            "-f",
+            str(dockerfile),
+            "-t",
+            image_uri,
+            "--cache-from",
+            f"type=local,src={cache_dir}",
+            "--cache-to",
+            f"type=local,dest={cache_dir},mode=max",
+        ]
+    else:
+        command = [
+            "docker",
+            "build",
+            "-f",
+            str(dockerfile),
+            "-t",
+            image_uri,
+        ]
     for key, value in (build_args or {}).items():
         command.extend(["--build-arg", f"{key}={value}"])
     command.append(str(context))

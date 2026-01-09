@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.2.0-devel-ubuntu22.04
+FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS build
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_ARCH=sm_86
@@ -8,15 +8,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     cmake \
     curl \
+    gfortran \
     git \
+    libfftw3-dev \
     libgsl-dev \
     libnetcdf-dev \
     libnetcdf-c++4-dev \
+    netcdf-bin \
     libopenmpi-dev \
+    libudunits2-dev \
     openmpi-bin \
     pkg-config \
     python3 \
-    awscli \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
@@ -24,7 +27,7 @@ RUN git clone -b release --depth=1 https://gitlab.com/petsc/petsc.git
 
 WORKDIR /opt/petsc
 RUN ./configure \
-      --prefix=/opt/petsc \
+      --prefix=/opt/petsc-install \
       --with-cc=mpicc \
       --with-cxx=mpicxx \
       --with-fc=mpifort \
@@ -38,10 +41,9 @@ RUN ./configure \
     && make all -j$(nproc) \
     && make install
 
-ENV PETSC_DIR=/opt/petsc
+ENV PETSC_DIR=/opt/petsc-install
 ENV PETSC_ARCH=""
-ENV PATH="/opt/petsc/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/petsc/lib:${LD_LIBRARY_PATH}"
+ENV PKG_CONFIG_PATH="/opt/petsc-install/lib/pkgconfig"
 
 WORKDIR /opt/pism
 COPY . /opt/pism
@@ -53,7 +55,34 @@ RUN cmake -S . -B build \
     && cmake --build build -j$(nproc) \
     && cmake --install build --prefix /opt/pism-install
 
-ENV PATH="/opt/pism-install/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/pism-install/lib:${LD_LIBRARY_PATH}"
+FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04 AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libfftw3-double3 \
+    libgfortran5 \
+    libgsl27 \
+    libhdf5-103-1 \
+    libhdf5-hl-100 \
+    libnetcdf19 \
+    libnetcdf-c++4-1 \
+    libopenmpi3 \
+    openmpi-bin \
+    libquadmath0 \
+    libudunits2-0 \
+    libxml2 \
+    python3 \
+    awscli \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /opt/petsc-install /opt/petsc-install
+COPY --from=build /opt/pism-install /opt/pism-install
+
+ENV PETSC_DIR=/opt/petsc-install
+ENV PETSC_ARCH=""
+ENV PATH="/opt/petsc-install/bin:/opt/pism-install/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/petsc-install/lib:/opt/pism-install/lib:/usr/local/cuda/lib64"
 
 WORKDIR /workspace

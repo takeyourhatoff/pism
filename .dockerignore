@@ -1,0 +1,16 @@
+.git
+**/.git
+build
+build-*
+cmake-build*
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache
+**/.mypy_cache
+**/.cache
+**/.venv
+**/venv
+node_modules
+dist
