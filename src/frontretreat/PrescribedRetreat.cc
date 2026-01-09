@@ -71,7 +71,8 @@ void PrescribedRetreat::update(double t, double dt, array::Scalar &ice_thickness
       ice_area_specific_volume(i, j) = 0.0;
       ice_thickness(i, j)            = 0.0;
     } else if (f < 1.0 - eps) {
-      ice_area_specific_volume(i, j) = ice_thickness(i, j) * f;
+      const double total_thickness = ice_thickness(i, j) + ice_area_specific_volume(i, j);
+      ice_area_specific_volume(i, j) = total_thickness * f;
       ice_thickness(i, j)            = 0.0;
     } else {
       // M == 1.0: do nothing
