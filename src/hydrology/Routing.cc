@@ -890,8 +890,6 @@ void Routing::update_impl(double t, double dt, const Inputs& inputs) {
     advective_fluxes(m_Vstag, m_W, m_Qstag);
     profiling().end("routing_flux");
 
-    m_Qstag_average.add(hdt, m_Qstag);
-
     {
       const double
         dt_cfl    = max_timestep_W_cfl(),
@@ -901,6 +899,8 @@ void Routing::update_impl(double t, double dt, const Inputs& inputs) {
       hdt = std::min(hdt, dt_cfl);
       hdt = std::min(hdt, dt_diff_w);
     }
+
+    m_Qstag_average.add(hdt, m_Qstag);
 
     m_log->message(3, "  hydrology step %05d, dt = %f s\n", step_counter, hdt);
 
