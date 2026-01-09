@@ -9,7 +9,14 @@ from typing import Iterable, Tuple
 RUN_TIME_RE = re.compile(
     r"\* Run time:\s*\[([+-]?\d+(?:\.\d+)?)\s+[^,]+,\s*([+-]?\d+(?:\.\d+)?)\s+[^\]]+\]"
 )
+RUN_TIME_DATE_RE = re.compile(
+    r"\* Run time:\s*\[([+-]?\d+-\d{2}-\d{2}\s+\d+(?:\.\d+)?h)\s*,\s*"
+    r"([+-]?\d+-\d{2}-\d{2}\s+\d+(?:\.\d+)?h)\s*\]"
+)
 S_LINE_RE = re.compile(r"^S\s+([^:\s]+):")
+S_DATE_RE = re.compile(r"^S\s+([+-]?\d+)-(\d{2})-(\d{2})\s+(\d+(?:\.\d+)?)h:")
+DATE_TIME_TOKEN_RE = re.compile(r"([+-]?\d+)-(\d{2})-(\d{2})\s+(\d+(?:\.\d+)?)h")
+MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 
 @dataclass(frozen=True)
@@ -24,17 +31,55 @@ class ProgressEstimate:
     wall_seconds: float
 
 
+def _date_parts_to_years(
+    year_str: str,
+    month_str: str,
+    day_str: str,
+    hour_str: str,
+) -> float | None:
+    try:
+        year = int(year_str)
+        month = int(month_str)
+        day = int(day_str)
+        hour = float(hour_str)
+    except ValueError:
+        return None
+    if month < 1 or month > 12:
+        return None
+    month_len = MONTH_LENGTHS[month - 1]
+    if day < 1 or day > month_len:
+        return None
+    if hour < 0 or hour >= 24:
+        return None
+    day_of_year = sum(MONTH_LENGTHS[: month - 1]) + day
+    return year + ((day_of_year - 1) + hour / 24.0) / 365.0
+
+
+def _parse_date_time_token(token: str) -> float | None:
+    match = DATE_TIME_TOKEN_RE.search(token.strip())
+    if not match:
+        return None
+    return _date_parts_to_years(*match.groups())
+
+
 def _parse_run_time(lines: Iterable[str]) -> tuple[float, float] | None:
     for line in lines:
         match = RUN_TIME_RE.search(line)
+        if match:
+            try:
+                start = float(match.group(1))
+                end = float(match.group(2))
+            except ValueError:
+                start = None
+                end = None
+            if start is not None and end is not None and end != start:
+                return start, end
+        match = RUN_TIME_DATE_RE.search(line)
         if not match:
             continue
-        try:
-            start = float(match.group(1))
-            end = float(match.group(2))
-        except ValueError:
-            continue
-        if end == start:
+        start = _parse_date_time_token(match.group(1))
+        end = _parse_date_time_token(match.group(2))
+        if start is None or end is None or end == start:
             continue
         return start, end
     return None
@@ -43,12 +88,18 @@ def _parse_run_time(lines: Iterable[str]) -> tuple[float, float] | None:
 def _parse_model_time(line: str) -> float | None:
     match = S_LINE_RE.match(line.strip())
     if not match:
-        return None
+        date_match = S_DATE_RE.match(line.strip())
+        if not date_match:
+            return None
+        return _date_parts_to_years(*date_match.groups())
     token = match.group(1)
     try:
         return float(token)
     except ValueError:
-        return None
+        date_match = S_DATE_RE.match(line.strip())
+        if not date_match:
+            return None
+        return _date_parts_to_years(*date_match.groups())
 
 
 def estimate_progress(

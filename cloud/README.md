@@ -128,7 +128,8 @@ pism-cloud status biis-test-001
 Status prints a progress bar, ETA, and estimated total cost once logs are available.
 If `budget_usd` is set and the estimate exceeds the budget by ~20% after at least
 15 minutes, the run is cancelled.
-ETA is only available when PISM logs numeric model years (not calendar dates).
+ETA is available when PISM logs a `* Run time:` line plus `S ...` progress lines
+(numeric years or calendar dates).
 
 ### 7) Launch the dashboard
 

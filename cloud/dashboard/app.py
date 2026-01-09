@@ -208,7 +208,7 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         log_stream = running_job.get("container", {}).get("logStreamName")
         if log_stream:
             try:
-                events = fetch_log_events(LOG_GROUP, log_stream)
+                events = fetch_log_events(LOG_GROUP, log_stream, include_head=True)
                 progress = estimate_progress(events)
                 if progress:
                     progress_percent = progress.progress_fraction * 100.0

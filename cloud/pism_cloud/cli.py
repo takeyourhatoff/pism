@@ -263,7 +263,7 @@ def status(run_id: str) -> int:
         if log_stream:
             log_group = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
             try:
-                events = fetch_log_events(log_group, log_stream)
+                events = fetch_log_events(log_group, log_stream, include_head=True)
                 progress = estimate_progress(events)
             except Exception as exc:
                 print(f"ETA unavailable: {exc}", file=sys.stderr)
