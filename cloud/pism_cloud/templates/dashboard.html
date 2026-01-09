@@ -539,9 +539,26 @@
       if (!run || !detail) return;
 
       const isRunning = detail.summary && detail.summary.running > 0;
-      const statusLine = detail.summary
-        ? `queued ${detail.summary.queued} / running ${detail.summary.running} / succeeded ${detail.summary.succeeded} / failed ${detail.summary.failed}`
-        : "-";
+      const summary = detail.summary;
+      let statusLine = "-";
+      if (summary) {
+        if (summary.running > 0) {
+          statusLine = "RUNNING";
+        } else if (summary.queued > 0) {
+          statusLine = "QUEUED";
+        } else if (summary.failed > 0) {
+          statusLine = "FAILED";
+        } else if (summary.succeeded > 0) {
+          statusLine = "SUCCEEDED";
+        }
+      }
+      const statusReason =
+        detail.jobs && detail.jobs.length && detail.jobs[0].status_reason
+          ? detail.jobs[0].status_reason
+          : null;
+      if (statusReason) {
+        statusLine = `${statusLine} (${statusReason})`;
+      }
       const actualInstance = detail.actual_instance_type
         ? `${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
         : "-";
