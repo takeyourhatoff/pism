@@ -55,7 +55,7 @@ static Vector3 column(const double A[3][3], size_t k) {
 
 // dot product of a vector and a [dx, dy, dz] vector in Germ
 static double dot(const Vector3 &v, const Germ &a) {
-  return a.dx * v.x + a.dy * v.y + a.dz + v.z;
+  return a.dx * v.x + a.dy * v.y + a.dz * v.z;
 }
 
 //! Invert a 3x3 matrix
