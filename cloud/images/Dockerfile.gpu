@@ -49,6 +49,7 @@ WORKDIR /opt/pism
 COPY . /opt/pism
 
 RUN cmake -S . -B build \
+        -DCMAKE_INSTALL_PREFIX=/opt/pism-install \
         -DPism_BUILD_PYTHON_BINDINGS=OFF \
         -DPism_BUILD_TESTS=OFF \
         -DPism_USE_CUDA_SIA=ON \

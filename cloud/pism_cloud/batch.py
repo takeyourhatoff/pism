@@ -196,8 +196,12 @@ def handle_term(signum, frame) -> None:
 signal.signal(signal.SIGTERM, handle_term)
 signal.signal(signal.SIGINT, handle_term)
 
-cmd = ["mpirun", "-n", str(MPI_RANKS), PISM_EXECUTABLE] + args_tokens
-proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+mpi_env = os.environ.copy()
+mpi_env.setdefault("OMPI_ALLOW_RUN_AS_ROOT", "1")
+mpi_env.setdefault("OMPI_ALLOW_RUN_AS_ROOT_CONFIRM", "1")
+mpi_host = f"localhost:{MPI_RANKS}"
+cmd = ["mpirun", "--host", mpi_host, "-n", str(MPI_RANKS), PISM_EXECUTABLE] + args_tokens
+proc = subprocess.Popen(cmd, env=mpi_env, preexec_fn=os.setsid)
 exit_code = proc.wait()
 
 stop_event.set()
