@@ -367,21 +367,6 @@
         <h3>PISM Args</h3>
         <pre class="args" id="args"></pre>
       </div>
-      <div class="section">
-        <h3>Jobs</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Job</th>
-              <th>Status</th>
-              <th>Reason</th>
-              <th>Logs</th>
-            </tr>
-          </thead>
-          <tbody id="jobs"></tbody>
-        </table>
-        <div class="empty" id="jobs-empty">No jobs loaded.</div>
-      </div>
     </section>
   </div>
 
@@ -395,8 +380,6 @@
     const inputsEl = document.getElementById("inputs");
     const outputsEl = document.getElementById("outputs");
     const argsEl = document.getElementById("args");
-    const jobsBody = document.getElementById("jobs");
-    const jobsEmpty = document.getElementById("jobs-empty");
     const refreshStatus = document.getElementById("refresh-status");
 
     let selectedRun = null;
@@ -570,6 +553,12 @@
         { label: "Actual instance", value: actualInstance },
         { label: "Spot", value: run.use_spot ? "yes" : "no" },
       ];
+      const logUrl = detail.jobs && detail.jobs.length ? detail.jobs[0].log_url : null;
+      summaryItems.push({
+        label: "Logs",
+        value: logUrl ? `<a href="${logUrl}" target="_blank">CloudWatch</a>` : "-",
+        html: true,
+      });
 
       const costItems = [
         { label: isRunning ? "Run time (so far)" : "Run time", value: formatDuration(detail.runtime_seconds) },
@@ -583,26 +572,6 @@
 
       renderKeyValueTable(summaryEl, summaryItems);
       renderKeyValueTable(costsEl, costItems);
-    }
-
-    function renderJobs(detail) {
-      jobsBody.innerHTML = "";
-      if (!detail || !detail.jobs.length) {
-        jobsEmpty.style.display = "block";
-        return;
-      }
-      jobsEmpty.style.display = "none";
-      detail.jobs.forEach((job) => {
-        const tr = document.createElement("tr");
-        const statusClass = job.status === "FAILED" ? "status-label status-failed" : "status-label";
-        tr.innerHTML = `
-          <td>${job.job_name}</td>
-          <td><span class="${statusClass}">${job.status}</span></td>
-          <td class="muted">${job.status_reason || ""}</td>
-          <td>${job.log_url ? `<a href="${job.log_url}" target="_blank">logs</a>` : "-"}</td>
-        `;
-        jobsBody.appendChild(tr);
-      });
     }
 
     function renderRunDetails(run, detail) {
@@ -753,7 +722,6 @@
           : "";
         runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
         renderSummary(run, detail);
-        renderJobs(detail);
         renderRunDetails(run, detail);
       }
       setRefreshing(false);
@@ -773,7 +741,6 @@
             : "";
           runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
           renderSummary(run, detail);
-          renderJobs(detail);
           renderRunDetails(run, detail);
         } else if (!run) {
           selectedRun = null;
