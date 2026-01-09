@@ -128,6 +128,17 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     job_details.sort(key=lambda item: item.get("job_name", ""))
     return {
         "run_id": run_id,
+        "created_at": run_item.get("created_at"),
+        "instance_type": run_item.get("instance_type"),
+        "use_spot": run_item.get("use_spot"),
+        "job_queue": run_item.get("job_queue"),
+        "job_definition": run_item.get("job_definition"),
+        "inputs": run_item.get("inputs", {}),
+        "output_s3": run_item.get("output_s3"),
+        "pism_args": run_item.get("pism_args"),
+        "pism_executable": run_item.get("pism_executable"),
+        "mpi_ranks": run_item.get("mpi_ranks"),
+        "gpus": run_item.get("gpus"),
         "summary": summary,
         "jobs": job_details,
         "hourly_rate_usd": hourly_rate_usd,

@@ -147,6 +147,33 @@
       flex-wrap: wrap;
     }
 
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+    }
+
+    .detail-item {
+      padding: 12px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+    }
+
+    .detail-item h4 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .detail-item p {
+      margin: 0;
+      font-size: 14px;
+      word-break: break-word;
+    }
+
     .status-pill {
       padding: 8px 12px;
       border-radius: 999px;
@@ -208,6 +235,19 @@
       text-align: center;
     }
 
+    pre.args {
+      margin: 0;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
@@ -242,6 +282,15 @@
       </div>
       <div class="metric-grid" id="metrics"></div>
       <div class="status-bar" id="status-bar"></div>
+      <div class="detail-grid" id="run-detail"></div>
+      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
+        <h3 style="margin: 0 0 10px;">Inputs</h3>
+        <div id="inputs"></div>
+      </div>
+      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
+        <h3 style="margin: 0 0 10px;">PISM Args</h3>
+        <pre class="args" id="args"></pre>
+      </div>
       <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
         <table>
           <thead>
@@ -265,11 +314,29 @@
     const runSubtitle = document.getElementById("run-subtitle");
     const metricsEl = document.getElementById("metrics");
     const statusBar = document.getElementById("status-bar");
+    const runDetail = document.getElementById("run-detail");
+    const inputsEl = document.getElementById("inputs");
+    const argsEl = document.getElementById("args");
     const jobsBody = document.getElementById("jobs");
     const jobsEmpty = document.getElementById("jobs-empty");
     const refreshStatus = document.getElementById("refresh-status");
 
     let selectedRun = null;
+
+    function getRunFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("run");
+    }
+
+    function setRunInUrl(runId) {
+      const url = new URL(window.location.href);
+      if (runId) {
+        url.searchParams.set("run", runId);
+      } else {
+        url.searchParams.delete("run");
+      }
+      window.history.replaceState({}, "", url.toString());
+    }
 
     function formatCurrency(value) {
       if (value === null || value === undefined) return "-";
@@ -295,6 +362,26 @@
         return `${hours}h${String(minutes).padStart(2, "0")}m`;
       }
       return `${minutes}m`;
+    }
+
+    function formatArgs(args) {
+      if (!args) return "";
+      const tokens = args.trim().split(/\s+/);
+      if (!tokens.length) return "";
+      const lines = [];
+      let current = "";
+      tokens.forEach((token) => {
+        if (token.startsWith("-")) {
+          if (current) lines.push(current);
+          current = token;
+        } else if (current) {
+          current += ` ${token}`;
+        } else {
+          current = token;
+        }
+      });
+      if (current) lines.push(current);
+      return lines.join("\n");
     }
 
     function setRefreshing(state) {
@@ -395,8 +482,51 @@
       });
     }
 
+    function renderRunDetails(run, detail) {
+      runDetail.innerHTML = "";
+      inputsEl.innerHTML = "";
+      argsEl.textContent = "";
+      if (!run || !detail) return;
+
+      const items = [
+        { label: "Run ID", value: run.run_id },
+        { label: "Created", value: detail.created_at || run.created_at || "-" },
+        { label: "Instance", value: run.instance_type },
+        { label: "Spot", value: run.use_spot ? "yes" : "no" },
+        { label: "Queue", value: detail.job_queue || "-" },
+        { label: "Job Definition", value: detail.job_definition || "-" },
+        { label: "MPI Ranks", value: detail.mpi_ranks ?? "-" },
+        { label: "GPUs", value: detail.gpus ?? "-" },
+        { label: "Output", value: detail.output_s3 || "-" },
+        { label: "Executable", value: detail.pism_executable || "-" },
+      ];
+
+      items.forEach((item) => {
+        const div = document.createElement("div");
+        div.className = "detail-item";
+        div.innerHTML = `<h4>${item.label}</h4><p>${item.value}</p>`;
+        runDetail.appendChild(div);
+      });
+
+      const inputs = detail.inputs || {};
+      const entries = Object.entries(inputs);
+      if (!entries.length) {
+        inputsEl.innerHTML = '<div class="empty">No inputs listed.</div>';
+      } else {
+        entries.forEach(([name, value]) => {
+          const row = document.createElement("div");
+          row.className = "detail-item";
+          row.innerHTML = `<h4>${name}</h4><p>${value}</p>`;
+          inputsEl.appendChild(row);
+        });
+      }
+
+      argsEl.textContent = formatArgs(detail.pism_args);
+    }
+
     async function selectRun(runId) {
       selectedRun = runId;
+      setRunInUrl(runId);
       setRefreshing(true);
       const [runs, detail] = await Promise.all([fetchRuns(), fetchRunDetail(runId)]);
       const run = runs.find((item) => item.run_id === runId);
@@ -406,6 +536,7 @@
         runSubtitle.textContent = `Instance: ${run.instance_type}`;
         renderMetrics(run, detail);
         renderJobs(detail);
+        renderRunDetails(run, detail);
       }
       setRefreshing(false);
     }
@@ -420,12 +551,21 @@
         if (run && detail) {
           renderMetrics(run, detail);
           renderJobs(detail);
+          renderRunDetails(run, detail);
+        } else if (!run) {
+          selectedRun = null;
+          setRunInUrl(null);
         }
       }
       setRefreshing(false);
     }
 
-    refresh();
+    const initialRun = getRunFromUrl();
+    if (initialRun) {
+      selectRun(initialRun);
+    } else {
+      refresh();
+    }
     setInterval(refresh, 15000);
   </script>
 </body>

@@ -60,6 +60,7 @@ def build_run_item(
         "inputs": inputs_s3,
         "output_s3": output_s3,
         "pism_args": config.pism["args"],
+        "pism_executable": config.pism["executable"],
         "mpi_ranks": config.compute["mpi_ranks"],
         "gpus": config.compute["gpus"],
     }
