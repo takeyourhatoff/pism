@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any, Dict, List
 
 import boto3
@@ -25,12 +26,24 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_numbers(value: Any) -> Any:
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {key: _normalize_numbers(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_normalize_numbers(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_normalize_numbers(item) for item in value)
+    return value
+
+
 def store_run(table, run: Dict[str, Any]) -> None:
-    table.put_item(Item=run)
+    table.put_item(Item=_normalize_numbers(run))
 
 
 def store_job(table, job: Dict[str, Any]) -> None:
-    table.put_item(Item=job)
+    table.put_item(Item=_normalize_numbers(job))
 
 
 def list_runs(table) -> List[Dict[str, Any]]:
