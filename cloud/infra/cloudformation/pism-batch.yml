@@ -14,6 +14,22 @@ Parameters:
     Type: String
     Description: "CIDR block for public subnet B."
     Default: 10.0.2.0/24
+  PublicSubnetCidrC:
+    Type: String
+    Description: "CIDR block for public subnet C."
+    Default: 10.0.3.0/24
+  PublicSubnetCidrD:
+    Type: String
+    Description: "CIDR block for public subnet D."
+    Default: 10.0.4.0/24
+  PublicSubnetCidrE:
+    Type: String
+    Description: "CIDR block for public subnet E."
+    Default: 10.0.5.0/24
+  PublicSubnetCidrF:
+    Type: String
+    Description: "CIDR block for public subnet F."
+    Default: 10.0.6.0/24
   CpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "CPU instance types for Batch."
@@ -51,6 +67,80 @@ Parameters:
   GpuImage:
     Type: String
     Description: "Container image for GPU jobs."
+
+Mappings:
+  RegionAzCount:
+    af-south-1:
+      Count: "3"
+    ap-east-1:
+      Count: "3"
+    ap-northeast-1:
+      Count: "4"
+    ap-northeast-2:
+      Count: "4"
+    ap-northeast-3:
+      Count: "3"
+    ap-south-1:
+      Count: "3"
+    ap-south-2:
+      Count: "3"
+    ap-southeast-1:
+      Count: "3"
+    ap-southeast-2:
+      Count: "3"
+    ap-southeast-3:
+      Count: "3"
+    ca-central-1:
+      Count: "3"
+    ca-west-1:
+      Count: "3"
+    eu-central-1:
+      Count: "3"
+    eu-central-2:
+      Count: "3"
+    eu-north-1:
+      Count: "3"
+    eu-south-1:
+      Count: "2"
+    eu-south-2:
+      Count: "2"
+    eu-west-1:
+      Count: "3"
+    eu-west-2:
+      Count: "3"
+    eu-west-3:
+      Count: "3"
+    il-central-1:
+      Count: "3"
+    me-central-1:
+      Count: "3"
+    me-south-1:
+      Count: "3"
+    sa-east-1:
+      Count: "3"
+    us-east-1:
+      Count: "6"
+    us-east-2:
+      Count: "3"
+    us-west-1:
+      Count: "2"
+    us-west-2:
+      Count: "4"
+
+Conditions:
+  HasAzC: !Or
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "3"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "4"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "5"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "6"]
+  HasAzD: !Or
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "4"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "5"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "6"]
+  HasAzE: !Or
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "5"]
+    - !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "6"]
+  HasAzF: !Equals [!FindInMap [RegionAzCount, !Ref AWS::Region, Count], "6"]
 
 Resources:
   BatchLogGroup:
@@ -120,6 +210,54 @@ Resources:
         - Key: Name
           Value: pism-batch-public-b
 
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Condition: HasAzC
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrC
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-c
+
+  PublicSubnetD:
+    Type: AWS::EC2::Subnet
+    Condition: HasAzD
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrD
+      AvailabilityZone: !Select [3, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-d
+
+  PublicSubnetE:
+    Type: AWS::EC2::Subnet
+    Condition: HasAzE
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrE
+      AvailabilityZone: !Select [4, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-e
+
+  PublicSubnetF:
+    Type: AWS::EC2::Subnet
+    Condition: HasAzF
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidrF
+      AvailabilityZone: !Select [5, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: pism-batch-public-f
+
   PublicSubnetRouteTableAssociationA:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -130,6 +268,34 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasAzC
+    Properties:
+      SubnetId: !Ref PublicSubnetC
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociationD:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasAzD
+    Properties:
+      SubnetId: !Ref PublicSubnetD
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociationE:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasAzE
+    Properties:
+      SubnetId: !Ref PublicSubnetE
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetRouteTableAssociationF:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: HasAzF
+    Properties:
+      SubnetId: !Ref PublicSubnetF
       RouteTableId: !Ref PublicRouteTable
 
   BatchSecurityGroup:
@@ -266,9 +432,34 @@ Resources:
         MaxvCpus: !Ref MaxVcpusCpu
         DesiredvCpus: !Ref DesiredVcpusCpu
         InstanceTypes: !Ref CpuInstanceTypes
-        Subnets:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+        Subnets: !If
+          - HasAzF
+          - - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+            - !Ref PublicSubnetC
+            - !Ref PublicSubnetD
+            - !Ref PublicSubnetE
+            - !Ref PublicSubnetF
+          - !If
+              - HasAzE
+              - - !Ref PublicSubnetA
+                - !Ref PublicSubnetB
+                - !Ref PublicSubnetC
+                - !Ref PublicSubnetD
+                - !Ref PublicSubnetE
+              - !If
+                  - HasAzD
+                  - - !Ref PublicSubnetA
+                    - !Ref PublicSubnetB
+                    - !Ref PublicSubnetC
+                    - !Ref PublicSubnetD
+                  - !If
+                      - HasAzC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
+                        - !Ref PublicSubnetC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
         SecurityGroupIds:
           - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
@@ -286,9 +477,34 @@ Resources:
         MaxvCpus: !Ref MaxVcpusCpu
         DesiredvCpus: !Ref DesiredVcpusCpu
         InstanceTypes: !Ref CpuInstanceTypes
-        Subnets:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+        Subnets: !If
+          - HasAzF
+          - - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+            - !Ref PublicSubnetC
+            - !Ref PublicSubnetD
+            - !Ref PublicSubnetE
+            - !Ref PublicSubnetF
+          - !If
+              - HasAzE
+              - - !Ref PublicSubnetA
+                - !Ref PublicSubnetB
+                - !Ref PublicSubnetC
+                - !Ref PublicSubnetD
+                - !Ref PublicSubnetE
+              - !If
+                  - HasAzD
+                  - - !Ref PublicSubnetA
+                    - !Ref PublicSubnetB
+                    - !Ref PublicSubnetC
+                    - !Ref PublicSubnetD
+                  - !If
+                      - HasAzC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
+                        - !Ref PublicSubnetC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
         SecurityGroupIds:
           - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
@@ -307,9 +523,34 @@ Resources:
         MaxvCpus: !Ref MaxVcpusGpu
         DesiredvCpus: !Ref DesiredVcpusGpu
         InstanceTypes: !Ref GpuInstanceTypes
-        Subnets:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+        Subnets: !If
+          - HasAzF
+          - - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+            - !Ref PublicSubnetC
+            - !Ref PublicSubnetD
+            - !Ref PublicSubnetE
+            - !Ref PublicSubnetF
+          - !If
+              - HasAzE
+              - - !Ref PublicSubnetA
+                - !Ref PublicSubnetB
+                - !Ref PublicSubnetC
+                - !Ref PublicSubnetD
+                - !Ref PublicSubnetE
+              - !If
+                  - HasAzD
+                  - - !Ref PublicSubnetA
+                    - !Ref PublicSubnetB
+                    - !Ref PublicSubnetC
+                    - !Ref PublicSubnetD
+                  - !If
+                      - HasAzC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
+                        - !Ref PublicSubnetC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
         SecurityGroupIds:
           - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
@@ -327,9 +568,34 @@ Resources:
         MaxvCpus: !Ref MaxVcpusGpu
         DesiredvCpus: !Ref DesiredVcpusGpu
         InstanceTypes: !Ref GpuInstanceTypes
-        Subnets:
-          - !Ref PublicSubnetA
-          - !Ref PublicSubnetB
+        Subnets: !If
+          - HasAzF
+          - - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+            - !Ref PublicSubnetC
+            - !Ref PublicSubnetD
+            - !Ref PublicSubnetE
+            - !Ref PublicSubnetF
+          - !If
+              - HasAzE
+              - - !Ref PublicSubnetA
+                - !Ref PublicSubnetB
+                - !Ref PublicSubnetC
+                - !Ref PublicSubnetD
+                - !Ref PublicSubnetE
+              - !If
+                  - HasAzD
+                  - - !Ref PublicSubnetA
+                    - !Ref PublicSubnetB
+                    - !Ref PublicSubnetC
+                    - !Ref PublicSubnetD
+                  - !If
+                      - HasAzC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
+                        - !Ref PublicSubnetC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
         SecurityGroupIds:
           - !Ref BatchSecurityGroup
         InstanceRole: !GetAtt EcsInstanceProfile.Arn
@@ -474,7 +740,36 @@ Outputs:
     Value: !Ref Vpc
   PublicSubnetIds:
     Description: "Public subnets for Batch compute."
-    Value: !Sub "${PublicSubnetA},${PublicSubnetB}"
+    Value: !Join
+      - ","
+      - !If
+          - HasAzF
+          - - !Ref PublicSubnetA
+            - !Ref PublicSubnetB
+            - !Ref PublicSubnetC
+            - !Ref PublicSubnetD
+            - !Ref PublicSubnetE
+            - !Ref PublicSubnetF
+          - !If
+              - HasAzE
+              - - !Ref PublicSubnetA
+                - !Ref PublicSubnetB
+                - !Ref PublicSubnetC
+                - !Ref PublicSubnetD
+                - !Ref PublicSubnetE
+              - !If
+                  - HasAzD
+                  - - !Ref PublicSubnetA
+                    - !Ref PublicSubnetB
+                    - !Ref PublicSubnetC
+                    - !Ref PublicSubnetD
+                  - !If
+                      - HasAzC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
+                        - !Ref PublicSubnetC
+                      - - !Ref PublicSubnetA
+                        - !Ref PublicSubnetB
   BatchSecurityGroupId:
     Description: "Security group for Batch compute."
     Value: !Ref BatchSecurityGroup
