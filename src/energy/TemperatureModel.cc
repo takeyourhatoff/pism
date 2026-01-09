@@ -177,8 +177,10 @@ void TemperatureModel::update_impl(double t, double dt, const Inputs &inputs) {
     ice_density        = m_config->get_number("constants.ice.density"),
     ice_c              = m_config->get_number("constants.ice.specific_heat_capacity"),
     L                  = m_config->get_number("constants.fresh_water.latent_heat_of_fusion"),
+    water_density      = m_config->get_number("constants.fresh_water.density"),
     melting_point_temp = m_config->get_number("constants.fresh_water.melting_point_temperature"),
     beta_CC_grad       = m_config->get_number("constants.ice.beta_Clausius_Clapeyron") * ice_density * m_config->get_number("constants.standard_gravity");
+  const double water_to_ice_ratio = water_density / ice_density;
 
   const bool allow_above_melting = m_config->get_flag("energy.allow_temperature_above_melting");
 
@@ -258,7 +260,8 @@ void TemperatureModel::update_impl(double t, double dt, const Inputs &inputs) {
       }       // end of "if there are enough points in ice to bother ..."
 
       // prepare for melting/refreezing
-      double bwatnew = till_water_thickness(i,j);
+      const double bwat_initial = till_water_thickness(i, j) * water_to_ice_ratio;
+      double bwatnew = bwat_initial;
 
       // insert solution for generic ice segments
       for (int k=1; k <= ks; k++) {
@@ -341,7 +344,7 @@ void TemperatureModel::update_impl(double t, double dt, const Inputs &inputs) {
         //   (subglacial water freezes-on); note this rate is calculated
         //   *before* limiting or other nontrivial modelling of bwat,
         //   which is Hydrology's job
-        m_basal_melt_rate(i,j) = (bwatnew - till_water_thickness(i,j)) / dt;
+        m_basal_melt_rate(i, j) = (bwatnew - bwat_initial) / dt;
       } // end of the grounded case
     }
   } catch (...) {
