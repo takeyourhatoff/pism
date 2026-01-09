@@ -595,11 +595,16 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
     return;
   }
 
+  const auto &cell_type = inputs.geometry->cell_type;
+
   array::AccessScope list{&m_node_type,
+      &cell_type,
       &inputs.geometry->ice_thickness,
       &inputs.geometry->bed_elevation,
       &inputs.geometry->sea_level_elevation,
       &m_boundary_integral};
+
+  const bool cfbc_use_land = m_config->get_flag("stress_balance.ssa.dirichlet_bc");
 
   // Iterate over the elements.
   const int
@@ -669,6 +674,29 @@ void SSAFEM::cache_residual_cfbc(const Inputs &inputs) {
                    node_type[n1] == NODE_BOUNDARY)) {
             // not a boundary side; skip it
             continue;
+          }
+
+          {
+            const auto normal = E->normal(s);
+            const int di = (normal.u > 0.0) ? 1 : (normal.u < 0.0 ? -1 : 0);
+            const int dj = (normal.v > 0.0) ? 1 : (normal.v < 0.0 ? -1 : 0);
+
+            if (di != 0 or dj != 0) {
+              int i0 = 0, j0 = 0, i1 = 0, j1 = 0;
+              E->local_to_global(n0, i0, j0);
+              E->local_to_global(n1, i1, j1);
+
+              const bool ocean_side =
+                  cell_type.ice_free_ocean(i0 + di, j0 + dj) ||
+                  cell_type.ice_free_ocean(i1 + di, j1 + dj);
+              const bool ice_free_side =
+                  cell_type.ice_free(i0 + di, j0 + dj) ||
+                  cell_type.ice_free(i1 + di, j1 + dj);
+
+              if (cfbc_use_land ? !ice_free_side : !ocean_side) {
+                continue;
+              }
+            }
           }
 
           for (unsigned int q = 0; q < Nq; ++q) {
