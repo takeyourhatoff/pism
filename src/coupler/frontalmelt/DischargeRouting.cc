@@ -76,6 +76,7 @@ void DischargeRouting::initialize(const array::Scalar &theta) {
 void DischargeRouting::update_impl(const FrontalMeltInputs &inputs, double t, double dt) {
 
   m_theta_ocean->update(t, dt);
+  m_theta_ocean->average(t, dt);
 
   FrontalMeltPhysics physics(*m_config);
 
