@@ -24,7 +24,7 @@ from .infra import deploy_stack, stack_outputs
 from .logs import fetch_log_events
 from .progress import estimate_progress
 from .runtime import hourly_rate, job_costs, summarize_costs
-from .s3 import upload_path
+from .s3 import upload_path, upload_text
 
 INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
@@ -154,6 +154,7 @@ def submit(config_paths: list[str], stack_name: str) -> int:
                 return 2
             budget_hours = cfg.budget_usd / rate
             timeout_seconds = max(60, int(budget_hours * 3600))
+        args_s3 = upload_text(rendered_args, output_s3, "pism_args.txt")
         overrides = build_overrides(
             vcpus=cfg.compute["vcpus"],
             memory_mib=cfg.compute["memory_mib"],
@@ -161,7 +162,8 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             gpus=cfg.compute["gpus"],
             inputs_json=json.dumps(resolved_inputs),
             output_s3=output_s3,
-            pism_args=rendered_args,
+            pism_args="",
+            pism_args_s3=args_s3,
             pism_executable=cfg.pism["executable"],
             run_id=cfg.run_id,
         )

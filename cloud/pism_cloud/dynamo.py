@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
 
+from .aws import aws_region
 DEFAULT_TABLE_NAME = "pism-runs"
 
 
@@ -18,7 +19,7 @@ def table_name() -> str:
 
 
 def get_table():
-    resource = boto3.resource("dynamodb")
+    resource = boto3.resource("dynamodb", region_name=aws_region())
     return resource.Table(table_name())
 
 

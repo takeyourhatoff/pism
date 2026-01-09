@@ -78,6 +78,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     awscli \
     && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /opt/pism-cloud
+COPY cloud/images/run_job.py /opt/pism-cloud/run_job.py
+
 COPY --from=build /opt/petsc-install /opt/petsc-install
 COPY --from=build /opt/pism-install /opt/pism-install
 

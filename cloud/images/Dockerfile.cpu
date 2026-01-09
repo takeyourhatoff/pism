@@ -53,6 +53,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     awscli \
     && rm -rf /var/lib/apt/lists/*
 
+RUN mkdir -p /opt/pism-cloud
+COPY cloud/images/run_job.py /opt/pism-cloud/run_job.py
+
 COPY --from=build /opt/pism-install /opt/pism-install
 
 ENV PATH="/opt/pism-install/bin:${PATH}"
