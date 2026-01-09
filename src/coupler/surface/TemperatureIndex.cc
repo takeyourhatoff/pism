@@ -274,7 +274,7 @@ void TemperatureIndex::update_impl(const Geometry &geometry, double t, double dt
 
   if (fausto_greve != nullptr) {
     const array::Scalar
-      *longitude        = &geometry.latitude,
+      *longitude        = &geometry.longitude,
       *surface_altitude = &geometry.ice_surface_elevation;
 
     fausto_greve->update_temp_mj(*surface_altitude, *latitude, *longitude);
