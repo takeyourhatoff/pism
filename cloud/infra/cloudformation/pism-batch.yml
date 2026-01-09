@@ -17,7 +17,7 @@ Parameters:
   CpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "CPU instance types for Batch."
-    Default: c7i.4xlarge,hpc6a.48xlarge
+    Default: c7i.4xlarge
   GpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "GPU instance types for Batch."
