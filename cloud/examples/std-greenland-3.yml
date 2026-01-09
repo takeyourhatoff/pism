@@ -1,4 +1,5 @@
 run_id: std-greenland-3
+budget_usd: 100
 
 compute:
   backend: aws-batch
