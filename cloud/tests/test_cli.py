@@ -38,11 +38,11 @@ from pism_cloud.cli import INPUT_DIR, OUTPUT_DIR, render_args_with_inputs
 class CliTests(unittest.TestCase):
     def test_render_args_with_inputs(self) -> None:
         rendered = render_args_with_inputs(
-            "--in {{INPUTS.base}}/a.nc --o {{OUTPUT_DIR}}/out-{{RUN_ID}}.nc",
-            "run-123",
+            "--in {{INPUTS.base}}/a.nc --o {{OUTPUT_DIR}}/out-{{JOB_NAME}}.nc",
+            "job-123",
             ["base"],
         )
         self.assertEqual(
             rendered,
-            f"--in {INPUT_DIR}/base/a.nc --o {OUTPUT_DIR}/out-run-123.nc",
+            f"--in {INPUT_DIR}/base/a.nc --o {OUTPUT_DIR}/out-job-123.nc",
         )

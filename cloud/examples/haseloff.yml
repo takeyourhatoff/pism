@@ -1,4 +1,4 @@
-run_id: haseloff-smoke-001
+job_name: haseloff-smoke-001
 
 compute:
   backend: aws-batch
@@ -19,4 +19,4 @@ pism:
     -Mz 61
     -y 1
     -no_temp
-    -o {{OUTPUT_DIR}}/out-{{RUN_ID}}.nc
+    -o {{OUTPUT_DIR}}/out-{{JOB_NAME}}.nc

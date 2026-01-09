@@ -1,4 +1,4 @@
-"""DynamoDB helpers for run metadata."""
+"""DynamoDB helpers for job metadata."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from decimal import Decimal
 from typing import Any, Dict, List
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Attr
 
 from .aws import aws_region
-DEFAULT_TABLE_NAME = "pism-runs"
+DEFAULT_TABLE_NAME = "pism-jobs"
 
 
 def table_name() -> str:
-    return os.environ.get("PISM_RUNS_TABLE", DEFAULT_TABLE_NAME)
+    return os.environ.get("PISM_JOBS_TABLE", DEFAULT_TABLE_NAME)
 
 
 def get_table():
@@ -39,17 +39,13 @@ def _normalize_numbers(value: Any) -> Any:
     return value
 
 
-def store_run(table, run: Dict[str, Any]) -> None:
-    table.put_item(Item=_normalize_numbers(run))
-
-
 def store_job(table, job: Dict[str, Any]) -> None:
     table.put_item(Item=_normalize_numbers(job))
 
 
-def list_runs(table) -> List[Dict[str, Any]]:
+def list_jobs(table) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
-    params = {"FilterExpression": Attr("sort_key").eq("RUN")}
+    params = {"FilterExpression": Attr("sort_key").eq("JOB")}
     while True:
         response = table.scan(**params)
         items.extend(response.get("Items", []))
@@ -59,18 +55,6 @@ def list_runs(table) -> List[Dict[str, Any]]:
     return items
 
 
-def list_jobs(table, run_id: str) -> List[Dict[str, Any]]:
-    items: List[Dict[str, Any]] = []
-    params = {"KeyConditionExpression": Key("run_id").eq(run_id)}
-    while True:
-        response = table.query(**params)
-        items.extend(response.get("Items", []))
-        if "LastEvaluatedKey" not in response:
-            break
-        params["ExclusiveStartKey"] = response["LastEvaluatedKey"]
-    return [item for item in items if item.get("sort_key") == "JOB"]
-
-
-def get_run(table, run_id: str) -> Dict[str, Any] | None:
-    response = table.get_item(Key={"run_id": run_id, "sort_key": "RUN"})
+def get_job(table, job_name: str) -> Dict[str, Any] | None:
+    response = table.get_item(Key={"job_name": job_name, "sort_key": "JOB"})
     return response.get("Item")

@@ -1,4 +1,4 @@
-run_id: std-greenland-2
+job_name: std-greenland-2
 budget_usd: 100
 
 compute:

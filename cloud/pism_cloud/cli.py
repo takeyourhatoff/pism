@@ -1,4 +1,4 @@
-"""CLI for submitting PISM runs to AWS Batch."""
+"""CLI for submitting PISM jobs to AWS Batch."""
 
 from __future__ import annotations
 
@@ -15,10 +15,9 @@ from .batch import (
     select_job_definition,
     select_queue,
     submit_job,
-    summarize_status,
 )
 from .config import NormalizedConfig, load_configs
-from .dynamo import get_run, get_table, list_jobs, list_runs, store_job, store_run, utc_now
+from .dynamo import get_job, get_table, list_jobs, store_job, utc_now
 from .images import build_and_push, repo_root
 from .infra import deploy_stack, stack_outputs
 from .logs import fetch_log_events
@@ -30,9 +29,9 @@ INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
 
 
-def render_args_with_inputs(template: str, run_id: str, input_names: list[str]) -> str:
+def render_args_with_inputs(template: str, job_name: str, input_names: list[str]) -> str:
     rendered = (
-        template.replace("{{RUN_ID}}", run_id)
+        template.replace("{{JOB_NAME}}", job_name)
         .replace("{{INPUT_DIR}}", INPUT_DIR)
         .replace("{{OUTPUT_DIR}}", OUTPUT_DIR)
     )
@@ -41,18 +40,21 @@ def render_args_with_inputs(template: str, run_id: str, input_names: list[str]) 
     return rendered
 
 
-def build_run_item(
+def build_job_item(
     config: NormalizedConfig,
     job_queue: str,
     job_definition: str,
     inputs_s3: Dict[str, str],
     output_s3: str,
     timeout_seconds: int | None,
+    job_id: str,
+    job_name: str,
 ) -> Dict[str, object]:
     item: Dict[str, object] = {
-        "run_id": config.run_id,
-        "sort_key": "RUN",
+        "job_name": job_name,
+        "sort_key": "JOB",
         "created_at": utc_now(),
+        "job_id": job_id,
         "instance_type": config.compute["instance"],
         "use_spot": config.compute["use_spot"],
         "job_queue": job_queue,
@@ -63,22 +65,13 @@ def build_run_item(
         "pism_executable": config.pism["executable"],
         "mpi_ranks": config.compute["mpi_ranks"],
         "gpus": config.compute["gpus"],
+        "status": "SUBMITTED",
     }
     if config.budget_usd is not None:
         item["budget_usd"] = config.budget_usd
     if timeout_seconds is not None:
         item["timeout_seconds"] = timeout_seconds
     return item
-
-
-def build_job_item(run_id: str, job_id: str, job_name: str) -> Dict[str, object]:
-    return {
-        "run_id": run_id,
-        "sort_key": "JOB",
-        "job_id": job_id,
-        "job_name": job_name,
-        "status": "SUBMITTED",
-    }
 
 
 def submit(config_paths: list[str], stack_name: str) -> int:
@@ -90,7 +83,7 @@ def submit(config_paths: list[str], stack_name: str) -> int:
 
     table = get_table()
 
-    seen_run_ids = set()
+    seen_job_names = set()
     try:
         outputs = stack_outputs(stack_name)
     except Exception as exc:
@@ -104,19 +97,19 @@ def submit(config_paths: list[str], stack_name: str) -> int:
         return 2
 
     for cfg in configs:
-        if cfg.run_id in seen_run_ids:
-            print(f"Config error: duplicate run_id {cfg.run_id}", file=sys.stderr)
+        if cfg.job_name in seen_job_names:
+            print(f"Config error: duplicate job_name {cfg.job_name}", file=sys.stderr)
             return 2
-        seen_run_ids.add(cfg.run_id)
+        seen_job_names.add(cfg.job_name)
 
     for cfg in configs:
         try:
-            existing = get_run(table, cfg.run_id)
+            existing = get_job(table, cfg.job_name)
         except Exception as exc:
-            print(f"Run lookup failed: {exc}", file=sys.stderr)
+            print(f"Job lookup failed: {exc}", file=sys.stderr)
             return 2
         if existing:
-            print(f"Config error: run_id {cfg.run_id} already exists", file=sys.stderr)
+            print(f"Config error: job_name {cfg.job_name} already exists", file=sys.stderr)
             return 2
 
     for cfg in configs:
@@ -134,11 +127,11 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             else:
                 resolved_inputs[name] = f"s3://{input_bucket}/{value}"
 
-        output_s3 = f"s3://{output_bucket}/{cfg.run_id}"
+        output_s3 = f"s3://{output_bucket}/{cfg.job_name}"
 
         rendered_args = render_args_with_inputs(
             cfg.pism["args"],
-            cfg.run_id,
+            cfg.job_name,
             list(cfg.inputs.keys()),
         )
 
@@ -165,36 +158,37 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             pism_args="",
             pism_args_s3=args_s3,
             pism_executable=cfg.pism["executable"],
-            run_id=cfg.run_id,
+            job_name=cfg.job_name,
         )
 
         job_id, job_name = submit_job(
-            run_id=cfg.run_id,
+            job_name=cfg.job_name,
             job_queue=job_queue,
             job_definition=job_definition,
             overrides=overrides,
             timeout_seconds=timeout_seconds,
             tags={
-                "PismRunId": cfg.run_id,
+                "PismJobName": cfg.job_name,
                 "PismInstanceType": cfg.compute["instance"],
                 "PismSpot": "true" if cfg.compute["use_spot"] else "false",
             },
         )
 
-        store_run(
+        store_job(
             table,
-            build_run_item(
+            build_job_item(
                 cfg,
                 job_queue,
                 job_definition,
                 resolved_inputs,
                 output_s3,
                 timeout_seconds,
+                job_id,
+                job_name,
             ),
         )
-        store_job(table, build_job_item(cfg.run_id, job_id, job_name))
 
-        print(f"Submitted run {cfg.run_id} (1 job)")
+        print(f"Submitted job {cfg.job_name}")
         print(f"Queue: {job_queue}")
         if cfg.budget_usd is not None:
             if timeout_seconds is not None:
@@ -206,35 +200,39 @@ def submit(config_paths: list[str], stack_name: str) -> int:
     return 0
 
 
-def status(run_id: str) -> int:
+def status(job_name: str) -> int:
     table = get_table()
-    jobs = list_jobs(table, run_id)
-    if not jobs:
-        print(f"Run {run_id} not found")
+    job_item = get_job(table, job_name)
+    if not job_item:
+        print(f"Job {job_name} not found")
         return 1
 
-    run_item = get_run(table, run_id)
-    instance_type = None
-    use_spot = None
-    budget_usd = None
-    if run_item:
-        instance_type = run_item.get("instance_type")
-        use_spot = run_item.get("use_spot")
-        budget_usd = run_item.get("budget_usd")
+    job_id = job_item.get("job_id")
+    if not job_id:
+        print(f"Job {job_name} missing AWS Batch job id")
+        return 1
 
-    job_ids = [job["job_id"] for job in jobs]
-    batch_jobs = describe_jobs(job_ids)
-    summary = summarize_status(batch_jobs)
+    batch_jobs = describe_jobs([str(job_id)])
+    if not batch_jobs:
+        print(f"Job {job_name} not found in AWS Batch")
+        return 1
 
-    print(f"Run {run_id}")
-    print(
-        "Jobs: queued={queued} running={running} succeeded={succeeded} failed={failed}".format(
-            **summary
-        )
-    )
+    job = batch_jobs[0]
+
+    print(f"Job {job_name}")
+    status_value = job.get("status") or "UNKNOWN"
+    status_reason = job.get("statusReason", "")
+    if status_reason:
+        print(f"Status: {status_value} ({status_reason})")
+    else:
+        print(f"Status: {status_value}")
     rate = None
     snapshot = None
     cost_by_job = {}
+    instance_type = job_item.get("instance_type")
+    use_spot = job_item.get("use_spot")
+    budget_usd = job_item.get("budget_usd")
+
     if instance_type and use_spot is not None:
         try:
             rate = hourly_rate(str(instance_type), bool(use_spot))
@@ -294,27 +292,24 @@ def status(run_id: str) -> int:
                     and progress.sample_count >= 3
                 ):
                     print(
-                        f"Budget guard: estimate ${estimated_total:.2f} exceeds budget ${float(budget_usd):.2f}; cancelling run"
+                        f"Budget guard: estimate ${estimated_total:.2f} exceeds budget ${float(budget_usd):.2f}; cancelling job"
                     )
                     from .batch import batch_client
 
                     client = batch_client()
-                    for job in jobs:
-                        client.terminate_job(jobId=job["job_id"], reason="Budget estimate exceeded")
+                    client.terminate_job(jobId=str(job_id), reason="Budget estimate exceeded")
 
-    if run_item:
-        budget = run_item.get("budget_usd")
-        timeout_seconds = run_item.get("timeout_seconds")
-        if budget is not None:
-            if timeout_seconds:
-                hours = float(timeout_seconds) / 3600.0
-                print(f"Budget guard: ${float(budget):.2f} (~{hours:.2f}h timeout)")
-            else:
-                print(f"Budget guard: ${float(budget):.2f}")
+    timeout_seconds = job_item.get("timeout_seconds")
+    if budget_usd is not None:
+        if timeout_seconds:
+            hours = float(timeout_seconds) / 3600.0
+            print(f"Budget guard: ${float(budget_usd):.2f} (~{hours:.2f}h timeout)")
+        else:
+            print(f"Budget guard: ${float(budget_usd):.2f}")
 
     for job in batch_jobs:
-        job_id = str(job.get("jobId") or "")
-        cost_value = cost_by_job.get(job_id)
+        job_id_value = str(job.get("jobId") or "")
+        cost_value = cost_by_job.get(job_id_value)
         cost_suffix = ""
         if cost_value is not None and cost_value > 0:
             cost_suffix = f" cost=${cost_value:.2f}"
@@ -349,36 +344,39 @@ def _format_eta(seconds: float) -> str:
     return f"{minutes}m"
 
 
-def cancel(run_id: str) -> int:
+def cancel(job_name: str) -> int:
     from .batch import batch_client
 
     table = get_table()
-    jobs = list_jobs(table, run_id)
-    if not jobs:
-        print(f"Run {run_id} not found")
+    job_item = get_job(table, job_name)
+    if not job_item:
+        print(f"Job {job_name} not found")
+        return 1
+    job_id = job_item.get("job_id")
+    if not job_id:
+        print(f"Job {job_name} missing AWS Batch job id")
         return 1
 
     client = batch_client()
-    for job in jobs:
-        client.terminate_job(jobId=job["job_id"], reason="Cancelled by user")
+    client.terminate_job(jobId=str(job_id), reason="Cancelled by user")
 
-    print(f"Cancelled run {run_id} ({len(jobs)} jobs)")
+    print(f"Cancelled job {job_name}")
     return 0
 
 
-def list_runs_cmd() -> int:
+def list_jobs_cmd() -> int:
     table = get_table()
-    runs = list_runs(table)
-    if not runs:
-        print("No runs found")
+    jobs = list_jobs(table)
+    if not jobs:
+        print("No jobs found")
         return 0
 
-    for run in sorted(runs, key=lambda item: item.get("created_at", "")):
+    for job in sorted(jobs, key=lambda item: item.get("created_at", "")):
         print(
-            "{run_id} instance={instance} spot={spot}".format(
-                run_id=run.get("run_id"),
-                instance=run.get("instance_type"),
-                spot=run.get("use_spot"),
+            "{job_name} instance={instance} spot={spot}".format(
+                job_name=job.get("job_name"),
+                instance=job.get("instance_type"),
+                spot=job.get("use_spot"),
             )
         )
     return 0
@@ -498,20 +496,20 @@ def upload_inputs(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pism-cloud", description="PISM AWS Batch runner")
+    parser = argparse.ArgumentParser(prog="pism-cloud", description="PISM AWS Batch job runner")
     subcommands = parser.add_subparsers(dest="command")
 
-    submit_parser = subcommands.add_parser("submit", help="Submit one or more runs")
+    submit_parser = subcommands.add_parser("submit", help="Submit one or more jobs")
     submit_parser.add_argument("config", nargs="+", help="Path(s) to config.yml")
     submit_parser.add_argument("--stack-name", default="pism-batch")
 
-    status_parser = subcommands.add_parser("status", help="Show run status")
-    status_parser.add_argument("run_id")
+    status_parser = subcommands.add_parser("status", help="Show job status")
+    status_parser.add_argument("job_name")
 
-    cancel_parser = subcommands.add_parser("cancel", help="Cancel a run")
-    cancel_parser.add_argument("run_id")
+    cancel_parser = subcommands.add_parser("cancel", help="Cancel a job")
+    cancel_parser.add_argument("job_name")
 
-    subcommands.add_parser("runs", help="List submitted runs")
+    subcommands.add_parser("jobs", help="List submitted jobs")
 
     images_parser = subcommands.add_parser("build-images", help="Build and push CPU/GPU images to ECR")
     images_parser.add_argument("--cpu-repo", default="pism-cpu")
@@ -565,11 +563,11 @@ def main() -> int:
     if args.command == "submit":
         return submit(args.config, args.stack_name)
     if args.command == "status":
-        return status(args.run_id)
+        return status(args.job_name)
     if args.command == "cancel":
-        return cancel(args.run_id)
-    if args.command == "runs":
-        return list_runs_cmd()
+        return cancel(args.job_name)
+    if args.command == "jobs":
+        return list_jobs_cmd()
     if args.command == "build-images":
         return build_images(args)
     if args.command == "deploy":

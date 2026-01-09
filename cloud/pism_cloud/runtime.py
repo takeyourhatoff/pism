@@ -1,4 +1,4 @@
-"""Runtime cost helpers for PISM Batch runs."""
+"""Runtime cost helpers for PISM Batch jobs."""
 
 from __future__ import annotations
 

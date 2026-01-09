@@ -45,7 +45,7 @@ def build_overrides(
     pism_args: str,
     pism_args_s3: str | None,
     pism_executable: str,
-    run_id: str,
+    job_name: str,
 ) -> Dict[str, object]:
     resource_requirements = [
         {"type": "VCPU", "value": str(vcpus)},
@@ -55,7 +55,7 @@ def build_overrides(
         resource_requirements.append({"type": "GPU", "value": str(gpus)})
 
     environment = [
-        {"name": "RUN_ID", "value": run_id},
+        {"name": "JOB_NAME", "value": job_name},
         {"name": "INPUTS_JSON", "value": inputs_json},
         {"name": "OUTPUT_S3", "value": output_s3},
         {"name": "MPI_RANKS", "value": str(mpi_ranks)},
@@ -73,7 +73,7 @@ def build_overrides(
 
 
 def submit_job(
-    run_id: str,
+    job_name: str,
     job_queue: str,
     job_definition: str,
     overrides: Dict[str, object],
@@ -81,7 +81,6 @@ def submit_job(
     tags: Dict[str, str] | None = None,
 ) -> Tuple[str, str]:
     client = batch_client()
-    job_name = f"pism-{run_id}"
     payload: Dict[str, object] = {
         "jobName": job_name,
         "jobQueue": job_queue,

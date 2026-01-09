@@ -14,7 +14,7 @@ INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.x
 
 @dataclass(frozen=True)
 class NormalizedConfig:
-    run_id: str
+    job_name: str
     compute: Dict[str, Any]
     inputs: Dict[str, str]
     pism: Dict[str, Any]
@@ -57,7 +57,7 @@ def _load_documents(path: str) -> List[Tuple[int, Dict[str, Any]]]:
 
 
 def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
-    run_id = _require(data.get("run_id"), f"{source}: run_id is required")
+    job_name = _require(data.get("job_name"), f"{source}: job_name is required")
     budget_raw = data.get("budget_usd")
     budget_usd = None
     if budget_raw is not None:
@@ -122,7 +122,7 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
     normalized_pism = {"args": args, "executable": executable}
 
     return NormalizedConfig(
-        run_id=run_id,
+        job_name=job_name,
         compute=normalized_compute,
         inputs=normalized_inputs,
         pism=normalized_pism,

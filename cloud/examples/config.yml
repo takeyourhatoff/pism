@@ -1,4 +1,4 @@
-run_id: biis-test-001
+job_name: biis-test-001
 
 compute:
   backend: aws-batch
@@ -12,4 +12,4 @@ pism:
   args: >
     --config {{INPUTS.base}}/biis.cfg
     --time.end 20000
-    --o {{OUTPUT_DIR}}/run-{{RUN_ID}}.nc
+    --o {{OUTPUT_DIR}}/job-{{JOB_NAME}}.nc

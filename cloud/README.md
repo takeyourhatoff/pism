@@ -73,7 +73,7 @@ pism-cloud upload --source /path/to/inputs --prefix <inputs-prefix>
 
 If your stack name differs from `pism-batch`, add `--stack-name <name>`.
 
-### 5) Submit a run
+### 5) Submit a job
 
 ```
 pism-cloud submit cloud/examples/config.yml
@@ -85,18 +85,18 @@ If your stack name differs from `pism-batch`, add `--stack-name <name>`.
 
 To submit multiple jobs in one command, pass multiple config files or use a
 multi-document YAML (each document is one job). Each document should use a unique
-`run_id`.
+`job_name`.
 
 ```
-pism-cloud submit configs/member-1.yml configs/member-2.yml
+pism-cloud submit configs/job-1.yml configs/job-2.yml
 ```
 
 ```
-pism-cloud submit configs/run.yml
+pism-cloud submit configs/jobs.yml
 ```
 
 ```yaml
-run_id: biis-run-0001
+job_name: biis-job-0001
 compute:
   backend: aws-batch
   instance: c7i.4xlarge
@@ -104,10 +104,10 @@ inputs:
   base: biis
 pism:
   args: >
-    --config {{INPUTS.base}}/member-0001.cfg
+    --config {{INPUTS.base}}/job-0001.cfg
     --o {{OUTPUT_DIR}}/out-0001.nc
 ---
-run_id: biis-run-0002
+job_name: biis-job-0002
 compute:
   backend: aws-batch
   instance: c7i.4xlarge
@@ -115,7 +115,7 @@ inputs:
   base: biis
 pism:
   args: >
-    --config {{INPUTS.base}}/member-0002.cfg
+    --config {{INPUTS.base}}/job-0002.cfg
     --o {{OUTPUT_DIR}}/out-0002.nc
 ```
 
@@ -127,7 +127,7 @@ pism-cloud status biis-test-001
 
 Status prints a progress bar, ETA, and estimated total cost once logs are available.
 If `budget_usd` is set and the estimate exceeds the budget by ~20% after at least
-15 minutes, the run is cancelled.
+15 minutes, the job is cancelled.
 ETA is available when PISM logs a `* Run time:` line plus `S ...` progress lines
 (numeric years or calendar dates).
 
@@ -141,11 +141,11 @@ Open `http://localhost:8080`.
 
 ## Configuration
 
-- `run_id` identifies a run in the dashboard. Each YAML document is one job, so every
-  document must use a unique `run_id`; submissions fail if the run already exists.
+- `job_name` identifies a job in the dashboard. Each YAML document is one job, so every
+  document must use a unique `job_name`; submissions fail if the job already exists.
 - `inputs` is a map of input names to S3 prefixes or full S3 URIs. Prefixes are resolved
   under the input bucket created by `pism-cloud deploy`.
-- Outputs always land under `s3://<output-bucket>/<run_id>/`.
+- Outputs always land under `s3://<output-bucket>/<job_name>/`.
 - `compute.instance` controls instance selection.
 
 Set `budget_usd` to enable an automatic safety timeout. The CLI converts the budget
@@ -165,15 +165,15 @@ Placeholders inside `pism.args` are expanded per job:
 
 - `{{INPUT_DIR}}` -> `/workspace/input`
 - `{{OUTPUT_DIR}}` -> `/workspace/output`
-- `{{RUN_ID}}`
+- `{{JOB_NAME}}`
 - `{{INPUTS.<name>}}` -> `/workspace/input/<name>`
 
 Jobs download inputs with `aws s3 sync`, run PISM, then sync outputs to
-`s3://<output-bucket>/<run_id>/`.
+`s3://<output-bucket>/<job_name>/`.
 
 If your container uses `pism` instead of `pismr`, set `pism.executable: pism`.
 
-Jobs are tagged with `PismRunId`, `PismInstanceType`, and `PismSpot` for cost allocation.
+Jobs are tagged with `PismJobName`, `PismInstanceType`, and `PismSpot` for cost allocation.
 
 ## Container images
 
@@ -196,7 +196,7 @@ For other GPU types, set `--cuda-arch` when building images.
 ## Minimal config schema
 
 ```yaml
-run_id: <unique-run-id>
+job_name: <unique-job-name>
 budget_usd: 50
 
 compute:
@@ -221,9 +221,9 @@ pism:
 The `cloud/examples/haseloff.yml` config runs a small CPU job using the bundled Haseloff
 input file. Use it to validate the end-to-end path before running larger batches.
 
-## Standard Greenland runs (1-4)
+## Standard Greenland jobs (1-4)
 
-The following configs mirror the manual's standard Greenland runs:
+The following configs mirror the manual's standard Greenland jobs:
 
 - `cloud/examples/std-greenland-1.yml`
 - `cloud/examples/std-greenland-2.yml`
@@ -238,7 +238,7 @@ Workflow:
 cloud/examples/std-greenland/prepare_inputs.sh
 ```
 
-2. Submit runs 1-3:
+2. Submit jobs 1-3:
 
 ```
 pism-cloud submit cloud/examples/std-greenland-1.yml
@@ -246,16 +246,16 @@ pism-cloud submit cloud/examples/std-greenland-2.yml
 pism-cloud submit cloud/examples/std-greenland-3.yml
 ```
 
-3. After run 2 completes, stage its output for run 4:
+3. After job 2 completes, stage its output for job 4:
 
 ```
-SOURCE_PREFIX=std-greenland-2 DEST_PREFIX=std-greenland \
+SOURCE_JOB=std-greenland-2 DEST_PREFIX=std-greenland \
   cloud/examples/std-greenland/stage_output.sh
 ```
 
 Use `STACK_NAME=<name>` to override the defaults.
 
-4. Submit run 4:
+4. Submit job 4:
 
 ```
 pism-cloud submit cloud/examples/std-greenland-4.yml
@@ -279,5 +279,5 @@ Override these via environment variables:
 
 - `PISM_CPU_SPOT_QUEUE`, `PISM_GPU_SPOT_QUEUE`, `PISM_CPU_ONDEMAND_QUEUE`, `PISM_GPU_ONDEMAND_QUEUE`
 - `PISM_CPU_JOB_DEFINITION`, `PISM_GPU_JOB_DEFINITION`
-- `PISM_RUNS_TABLE` for DynamoDB
+- `PISM_JOBS_TABLE` for DynamoDB
 - `PISM_LOG_GROUP` for the dashboard log links

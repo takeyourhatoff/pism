@@ -71,7 +71,7 @@
       overflow: hidden;
     }
 
-    .runs {
+    .jobs {
       padding: 16px;
       display: flex;
       flex-direction: column;
@@ -79,7 +79,7 @@
       min-height: 400px;
     }
 
-    .run-card {
+    .job-card {
       padding: 10px 12px;
       border-radius: 12px;
       background: var(--panel-strong);
@@ -88,22 +88,22 @@
       transition: border 0.2s ease, transform 0.2s ease;
     }
 
-    .run-card:hover {
+    .job-card:hover {
       border-color: rgba(56, 182, 165, 0.5);
       transform: translateY(-2px);
     }
 
-    .run-card.active {
+    .job-card.active {
       border-color: var(--accent);
       box-shadow: 0 0 0 1px rgba(56, 182, 165, 0.3);
     }
 
-    .run-card h3 {
+    .job-card h3 {
       margin: 0;
       font-size: 15px;
     }
 
-    .run-card span {
+    .job-card span {
       color: var(--muted);
       font-size: 12px;
     }
@@ -329,18 +329,18 @@
   <header>
     <div>
       <h1>PISM Cloud</h1>
-      <p>Batch runs summarized for scientists.</p>
+      <p>Batch jobs summarized for scientists.</p>
     </div>
     <div class="muted" id="refresh-status">Refreshing...</div>
   </header>
 
   <div class="layout">
-    <section class="panel runs" id="runs"></section>
+    <section class="panel jobs" id="jobs"></section>
 
     <section class="panel detail">
       <div>
-        <h2 id="run-title">Select a run</h2>
-        <p class="muted" id="run-subtitle">Choose a run on the left to see details.</p>
+        <h2 id="job-title">Select a job</h2>
+        <p class="muted" id="job-subtitle">Choose a job on the left to see details.</p>
       </div>
       <div class="section-grid">
         <div class="section">
@@ -371,9 +371,9 @@
   </div>
 
   <script>
-    const runsEl = document.getElementById("runs");
-    const runTitle = document.getElementById("run-title");
-    const runSubtitle = document.getElementById("run-subtitle");
+    const jobsEl = document.getElementById("jobs");
+    const jobTitle = document.getElementById("job-title");
+    const jobSubtitle = document.getElementById("job-subtitle");
     const summaryEl = document.getElementById("summary");
     const costsEl = document.getElementById("costs");
     const configEl = document.getElementById("config");
@@ -382,19 +382,19 @@
     const argsEl = document.getElementById("args");
     const refreshStatus = document.getElementById("refresh-status");
 
-    let selectedRun = null;
+    let selectedJob = null;
 
-    function getRunFromUrl() {
+    function getJobFromUrl() {
       const params = new URLSearchParams(window.location.search);
-      return params.get("run");
+      return params.get("job");
     }
 
-    function setRunInUrl(runId) {
+    function setJobInUrl(jobName) {
       const url = new URL(window.location.href);
-      if (runId) {
-        url.searchParams.set("run", runId);
+      if (jobName) {
+        url.searchParams.set("job", jobName);
       } else {
-        url.searchParams.delete("run");
+        url.searchParams.delete("job");
       }
       window.history.replaceState({}, "", url.toString());
     }
@@ -478,33 +478,33 @@
       refreshStatus.textContent = state ? "Refreshing..." : "Up to date";
     }
 
-    async function fetchRuns() {
-      const response = await fetch("/api/runs");
+    async function fetchJobs() {
+      const response = await fetch("/api/jobs");
       return response.json();
     }
 
-    async function fetchRunDetail(runId) {
-      const response = await fetch(`/api/runs/${runId}`);
+    async function fetchJobDetail(jobName) {
+      const response = await fetch(`/api/jobs/${jobName}`);
       if (!response.ok) return null;
       return response.json();
     }
 
-    function renderRuns(runs) {
-      runsEl.innerHTML = "";
-      if (!runs.length) {
-        runsEl.innerHTML = '<div class="empty">No runs yet.</div>';
+    function renderJobs(jobs) {
+      jobsEl.innerHTML = "";
+      if (!jobs.length) {
+        jobsEl.innerHTML = '<div class="empty">No jobs yet.</div>';
         return;
       }
 
-      runs.forEach((run) => {
+      jobs.forEach((job) => {
         const card = document.createElement("div");
-        card.className = "run-card" + (run.run_id === selectedRun ? " active" : "");
+        card.className = "job-card" + (job.job_name === selectedJob ? " active" : "");
         card.innerHTML = `
-          <h3>${run.run_id}</h3>
-          <span>${run.instance_type} - ${run.use_spot ? "spot" : "on-demand"}</span>
+          <h3>${job.job_name}</h3>
+          <span>${job.instance_type} - ${job.use_spot ? "spot" : "on-demand"}</span>
         `;
-        card.onclick = () => selectRun(run.run_id);
-        runsEl.appendChild(card);
+        card.onclick = () => selectJob(job.job_name);
+        jobsEl.appendChild(card);
       });
     }
 
@@ -533,10 +533,10 @@
       container.appendChild(table);
     }
 
-    function renderSummary(run, detail) {
+    function renderSummary(job, detail) {
       summaryEl.innerHTML = "";
       costsEl.innerHTML = "";
-      if (!run || !detail) return;
+      if (!job || !detail) return;
 
       const isRunning = detail.summary && detail.summary.running > 0;
       const summary = detail.summary;
@@ -566,9 +566,9 @@
       const summaryItems = [
         { label: "Status", value: statusLine },
         { label: "Queue", value: detail.job_queue || "-" },
-        { label: "Requested instance", value: run.instance_type || "-" },
+        { label: "Requested instance", value: job.instance_type || "-" },
         { label: "Actual instance", value: actualInstance },
-        { label: "Spot", value: run.use_spot ? "yes" : "no" },
+        { label: "Spot", value: job.use_spot ? "yes" : "no" },
       ];
       const logUrl = detail.jobs && detail.jobs.length ? detail.jobs[0].log_url : null;
       summaryItems.push({
@@ -578,7 +578,7 @@
       });
 
       const costItems = [
-        { label: isRunning ? "Run time (so far)" : "Run time", value: formatDuration(detail.runtime_seconds) },
+        { label: isRunning ? "Job runtime (so far)" : "Job runtime", value: formatDuration(detail.runtime_seconds) },
         { label: "Cost per hour", value: formatRate(detail.hourly_rate_usd) },
         { label: isRunning ? "Cost so far" : "Total cost", value: formatCurrency(detail.cost_to_date_usd) },
         { label: "Estimated total", value: formatCurrency(detail.estimated_total_cost_usd) },
@@ -591,16 +591,16 @@
       renderKeyValueTable(costsEl, costItems);
     }
 
-    function renderRunDetails(run, detail) {
+    function renderJobDetails(job, detail) {
       configEl.innerHTML = "";
       inputsEl.innerHTML = "";
       outputsEl.innerHTML = "";
       argsEl.textContent = "";
-      if (!run || !detail) return;
+      if (!job || !detail) return;
 
       const configItems = [
-        { label: "Run ID", value: run.run_id },
-        { label: "Created", value: detail.created_at || run.created_at || "-" },
+        { label: "Job name", value: job.job_name },
+        { label: "Created", value: detail.created_at || job.created_at || "-" },
         { label: "Job definition", value: detail.job_definition || "-" },
         { label: "Executable", value: detail.pism_executable || "-" },
         { label: "MPI ranks", value: detail.mpi_ranks ?? "-" },
@@ -725,51 +725,51 @@
       argsEl.textContent = formatArgs(detail.pism_args);
     }
 
-    async function selectRun(runId) {
-      selectedRun = runId;
-      setRunInUrl(runId);
+    async function selectJob(jobName) {
+      selectedJob = jobName;
+      setJobInUrl(jobName);
       setRefreshing(true);
-      const [runs, detail] = await Promise.all([fetchRuns(), fetchRunDetail(runId)]);
-      const run = runs.find((item) => item.run_id === runId);
-      renderRuns(runs);
-      if (run && detail) {
-        runTitle.textContent = run.run_id;
+      const [jobs, detail] = await Promise.all([fetchJobs(), fetchJobDetail(jobName)]);
+      const job = jobs.find((item) => item.job_name === jobName);
+      renderJobs(jobs);
+      if (job && detail) {
+        jobTitle.textContent = job.job_name;
         const actualNote = detail.actual_instance_type
           ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
           : "";
-        runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
-        renderSummary(run, detail);
-        renderRunDetails(run, detail);
+        jobSubtitle.textContent = `Requested: ${job.instance_type} ${job.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
+        renderSummary(job, detail);
+        renderJobDetails(job, detail);
       }
       setRefreshing(false);
     }
 
     async function refresh() {
       setRefreshing(true);
-      const runs = await fetchRuns();
-      renderRuns(runs);
-      if (selectedRun) {
-        const detail = await fetchRunDetail(selectedRun);
-        const run = runs.find((item) => item.run_id === selectedRun);
-        if (run && detail) {
-          runTitle.textContent = run.run_id;
+      const jobs = await fetchJobs();
+      renderJobs(jobs);
+      if (selectedJob) {
+        const detail = await fetchJobDetail(selectedJob);
+        const job = jobs.find((item) => item.job_name === selectedJob);
+        if (job && detail) {
+          jobTitle.textContent = job.job_name;
           const actualNote = detail.actual_instance_type
             ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
             : "";
-          runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
-          renderSummary(run, detail);
-          renderRunDetails(run, detail);
-        } else if (!run) {
-          selectedRun = null;
-          setRunInUrl(null);
+          jobSubtitle.textContent = `Requested: ${job.instance_type} ${job.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
+          renderSummary(job, detail);
+          renderJobDetails(job, detail);
+        } else if (!job) {
+          selectedJob = null;
+          setJobInUrl(null);
         }
       }
       setRefreshing(false);
     }
 
-    const initialRun = getRunFromUrl();
-    if (initialRun) {
-      selectRun(initialRun);
+    const initialJob = getJobFromUrl();
+    if (initialJob) {
+      selectJob(initialJob);
     } else {
       refresh();
     }

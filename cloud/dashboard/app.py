@@ -1,4 +1,4 @@
-"""Minimal dashboard for PISM Batch runs."""
+"""Minimal dashboard for PISM Batch jobs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from pism_cloud.aws import aws_region
 from pism_cloud.batch import describe_jobs, summarize_status
-from pism_cloud.dynamo import get_run, get_table, list_jobs, list_runs
+from pism_cloud.dynamo import get_job, get_table, list_jobs
 from pism_cloud.logs import fetch_log_events
 from pism_cloud.progress import estimate_progress
 from pism_cloud.runtime import hourly_rate, summarize_costs, summarize_runtime_seconds
@@ -141,15 +141,15 @@ async def index(request: Request):
     return TEMPLATES.TemplateResponse("dashboard.html", {"request": request})
 
 
-@app.get("/api/runs")
-async def runs() -> List[Dict[str, object]]:
+@app.get("/api/jobs")
+async def jobs() -> List[Dict[str, object]]:
     table = get_table()
-    items = list_runs(table)
+    items = list_jobs(table)
     results = []
     for item in items:
         results.append(
             {
-                "run_id": item.get("run_id"),
+                "job_name": item.get("job_name"),
                 "created_at": item.get("created_at"),
                 "instance_type": item.get("instance_type"),
                 "use_spot": item.get("use_spot"),
@@ -158,17 +158,16 @@ async def runs() -> List[Dict[str, object]]:
     return sorted(results, key=lambda item: item.get("created_at", ""))
 
 
-@app.get("/api/runs/{run_id}")
-async def run_detail(run_id: str) -> Dict[str, object]:
+@app.get("/api/jobs/{job_name}")
+async def job_detail(job_name: str) -> Dict[str, object]:
     table = get_table()
-    jobs = list_jobs(table, run_id)
-    if not jobs:
-        raise HTTPException(status_code=404, detail="Run not found")
+    job_item = get_job(table, job_name)
+    if not job_item:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-    run_item = get_run(table, run_id) or {}
-    job_ids = [job["job_id"] for job in jobs]
-    batch_jobs = describe_jobs(job_ids)
-    summary = summarize_status(batch_jobs)
+    job_id = job_item.get("job_id")
+    batch_jobs = describe_jobs([str(job_id)]) if job_id else []
+    summary = summarize_status(batch_jobs) if batch_jobs else {"queued": 0, "running": 0, "succeeded": 0, "failed": 0}
 
     hourly_rate_usd = None
     cost_to_date_usd = None
@@ -178,10 +177,10 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     estimated_total_cost = None
     runtime_seconds = None
     actual_instance = None
-    instance_type = run_item.get("instance_type")
-    use_spot = run_item.get("use_spot")
-    budget_usd = run_item.get("budget_usd")
-    timeout_seconds = run_item.get("timeout_seconds")
+    instance_type = job_item.get("instance_type")
+    use_spot = job_item.get("use_spot")
+    budget_usd = job_item.get("budget_usd")
+    timeout_seconds = job_item.get("timeout_seconds")
     if instance_type and use_spot is not None:
         try:
             rate = hourly_rate(str(instance_type), bool(use_spot))
@@ -236,7 +235,7 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         )
 
     job_details.sort(key=lambda item: item.get("job_name", ""))
-    output_s3 = run_item.get("output_s3")
+    output_s3 = job_item.get("output_s3")
     output_console_url = None
     output_summary = None
     output_objects: List[Dict[str, object]] = []
@@ -252,21 +251,22 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         else:
             output_summary = {"status": "pending"}
     return {
-        "run_id": run_id,
-        "created_at": run_item.get("created_at"),
-        "instance_type": run_item.get("instance_type"),
-        "use_spot": run_item.get("use_spot"),
-        "job_queue": run_item.get("job_queue"),
-        "job_definition": run_item.get("job_definition"),
-        "inputs": run_item.get("inputs", {}),
+        "job_name": job_name,
+        "job_id": job_item.get("job_id"),
+        "created_at": job_item.get("created_at"),
+        "instance_type": job_item.get("instance_type"),
+        "use_spot": job_item.get("use_spot"),
+        "job_queue": job_item.get("job_queue"),
+        "job_definition": job_item.get("job_definition"),
+        "inputs": job_item.get("inputs", {}),
         "output_s3": output_s3,
         "output_console_url": output_console_url,
         "output_summary": output_summary,
         "output_objects": output_objects,
-        "pism_args": run_item.get("pism_args"),
-        "pism_executable": run_item.get("pism_executable"),
-        "mpi_ranks": run_item.get("mpi_ranks"),
-        "gpus": run_item.get("gpus"),
+        "pism_args": job_item.get("pism_args"),
+        "pism_executable": job_item.get("pism_executable"),
+        "mpi_ranks": job_item.get("mpi_ranks"),
+        "gpus": job_item.get("gpus"),
         "actual_instance_type": actual_instance.get("instance_type") if actual_instance else None,
         "actual_instance_id": actual_instance.get("instance_id") if actual_instance else None,
         "actual_availability_zone": actual_instance.get("availability_zone") if actual_instance else None,

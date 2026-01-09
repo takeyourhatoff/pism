@@ -697,18 +697,18 @@ Resources:
           - OnStatusReason: "Host EC2*"
             Action: RETRY
 
-  RunsTable:
+  JobsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: pism-runs
+      TableName: pism-jobs
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: run_id
+        - AttributeName: job_name
           AttributeType: S
         - AttributeName: sort_key
           AttributeType: S
       KeySchema:
-        - AttributeName: run_id
+        - AttributeName: job_name
           KeyType: HASH
         - AttributeName: sort_key
           KeyType: RANGE
@@ -724,8 +724,8 @@ Outputs:
     Description: "CloudWatch log group for Batch logs."
     Value: !Ref BatchLogGroup
   DynamoTable:
-    Description: "DynamoDB table for run metadata."
-    Value: !Ref RunsTable
+    Description: "DynamoDB table for job metadata."
+    Value: !Ref JobsTable
   InputBucketName:
     Description: "S3 bucket for inputs."
     Value: !Ref InputBucket

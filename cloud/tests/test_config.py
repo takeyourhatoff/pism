@@ -57,7 +57,7 @@ class ConfigTests(unittest.TestCase):
         )
         path = self._write_config(
             """
-            run_id: run-001
+            job_name: job-001
             compute:
               backend: aws-batch
               instance: c7i.4xlarge
@@ -70,7 +70,7 @@ class ConfigTests(unittest.TestCase):
         configs = config.load_configs([path])
         self.assertEqual(len(configs), 1)
         cfg = configs[0]
-        self.assertEqual(cfg.run_id, "run-001")
+        self.assertEqual(cfg.job_name, "job-001")
         self.assertEqual(cfg.inputs["base"], "my-prefix")
         self.assertTrue(cfg.compute["use_spot"])
         self.assertEqual(cfg.compute["mpi_ranks"], 16)
@@ -85,7 +85,7 @@ class ConfigTests(unittest.TestCase):
         )
         path = self._write_config(
             """
-            run_id: gpu-001
+            job_name: gpu-001
             compute:
               backend: aws-batch
               instance: g5.xlarge
@@ -110,7 +110,7 @@ class ConfigTests(unittest.TestCase):
         )
         path = self._write_config(
             """
-            run_id: budget-001
+            job_name: budget-001
             budget_usd: -1
             compute:
               backend: aws-batch
@@ -134,7 +134,7 @@ class ConfigTests(unittest.TestCase):
         )
         path = self._write_config(
             """
-            run_id: missing-inputs
+            job_name: missing-inputs
             compute:
               backend: aws-batch
               instance: c7i.4xlarge
@@ -155,7 +155,7 @@ class ConfigTests(unittest.TestCase):
         )
         path = self._write_config(
             """
-            run_id: bad-instance-types
+            job_name: bad-instance-types
             compute:
               backend: aws-batch
               instance_types: [c7i.4xlarge]
