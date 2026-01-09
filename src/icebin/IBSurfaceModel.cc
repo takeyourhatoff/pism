@@ -73,9 +73,9 @@ void IBSurfaceModel::update_impl(const Geometry &geometry, double t, double dt) 
   (void)dt;
 
   // compute naive estimates of accumulation, melt, and runoff
-  dummy_accumulation(massxfer, *m_accumulation);
-  dummy_melt(massxfer, *m_melt);
-  dummy_runoff(massxfer, *m_runoff);
+  dummy_accumulation(massxfer, dt, *m_accumulation);
+  dummy_melt(massxfer, dt, *m_melt);
+  dummy_runoff(massxfer, dt, *m_runoff);
 }
 
 const array::Scalar &IBSurfaceModel::liquid_water_fraction_impl() const {
