@@ -952,10 +952,15 @@ void PicoGeometry::compute_box_mask(const array::Scalar &D_gl, const array::Scal
   const int n_min   = 1;
   const double zeta = 0.5;
 
-  for (int k = 0; k < n_shelves; ++k) {
-    n_boxes[k] = n_min + round(pow((GL_distance_max[k] / GL_distance_ref), zeta) * (max_number_of_boxes - n_min));
+  if (GL_distance_ref <= 0.0) {
+    std::fill(n_boxes.begin(), n_boxes.end(), n_min);
+  } else {
+    for (int k = 0; k < n_shelves; ++k) {
+      n_boxes[k] = n_min + round(pow((GL_distance_max[k] / GL_distance_ref), zeta) *
+                                     (max_number_of_boxes - n_min));
 
-    n_boxes[k] = std::min(n_boxes[k], max_number_of_boxes);
+      n_boxes[k] = std::min(n_boxes[k], max_number_of_boxes);
+    }
   }
 
   result.set(0.0);
