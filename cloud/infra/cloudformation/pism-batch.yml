@@ -33,7 +33,7 @@ Parameters:
   CpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "CPU instance types for Batch."
-    Default: c7i.4xlarge
+    Default: c7i.4xlarge,c7a.4xlarge,c6i.4xlarge,c6a.4xlarge,m7i.4xlarge,m6i.4xlarge,c5.4xlarge,m5.4xlarge
   GpuInstanceTypes:
     Type: CommaDelimitedList
     Description: "GPU instance types for Batch."
@@ -421,7 +421,6 @@ Resources:
   CpuSpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: pism-cpu-spot
       Type: MANAGED
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
@@ -468,7 +467,6 @@ Resources:
   CpuOnDemandComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: pism-cpu-ondemand
       Type: MANAGED
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
@@ -512,7 +510,6 @@ Resources:
   GpuSpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: pism-gpu-spot
       Type: MANAGED
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
@@ -559,7 +556,6 @@ Resources:
   GpuOnDemandComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
     Properties:
-      ComputeEnvironmentName: pism-gpu-ondemand
       Type: MANAGED
       ServiceRole: !GetAtt BatchServiceRole.Arn
       ComputeResources:
