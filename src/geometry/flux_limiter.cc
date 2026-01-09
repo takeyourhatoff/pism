@@ -155,14 +155,20 @@ void make_nonnegative_preserving(double dt,
     double X_n  = pp(x(i, j + 1) - eps);
 
     // limit total amounts (see equation (10) in [Smolarkiewicz1989])
-    double F_e_limited = std::max(std::min(F_e, (pp(F_e) / F_out) * X_ij),
-                                  (-np(F_e) / F_out_e) * X_e);
+    //
+    // Guard against zero outgoing flux totals to avoid 0/0 when the numerator is zero.
+    auto safe_ratio = [](double numerator, double denominator) {
+      return denominator > 0.0 ? (numerator / denominator) : 0.0;
+    };
+
+    double F_e_limited = std::max(std::min(F_e, safe_ratio(pp(F_e), F_out) * X_ij),
+                                  safe_ratio(-np(F_e), F_out_e) * X_e);
 
     assert(x(i, j) - F_e_limited >= 0);
     assert(x(i + 1, j) + F_e_limited >= 0);
 
-    double F_n_limited = std::max(std::min(F_n, (pp(F_n) / F_out) * X_ij),
-                                  (-np(F_n) / F_out_n) * X_n);
+    double F_n_limited = std::max(std::min(F_n, safe_ratio(pp(F_n), F_out) * X_ij),
+                                  safe_ratio(-np(F_n), F_out_n) * X_n);
 
     assert(x(i, j) - F_n_limited >= 0);
     assert(x(i, j + 1) + F_n_limited >= 0);
