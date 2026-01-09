@@ -101,6 +101,10 @@ void DischargeRouting::update_impl(const FrontalMeltInputs &inputs, double t, do
 
       double water_depth          = std::max(sea_level_elevation(i, j) - bed_elevation(i, j), 0.0),
              submerged_front_area = water_depth * grid_spacing;
+      if (submerged_front_area <= 0.0) {
+        m_frontal_melt_rate(i, j) = 0.0;
+        continue;
+      }
 
       // Convert subglacial water flux (m^2/s) to an "effective subglacial freshwater
       // velocity" or flux per unit area of ice front in m/day (see Xu et al 2013, section
