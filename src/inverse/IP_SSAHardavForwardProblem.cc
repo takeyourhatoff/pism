@@ -89,9 +89,15 @@ void IP_SSAHardavForwardProblem::init() {
   // I will need to fix this at some point.
   {
     Geometry geometry(m_grid);
-    geometry.ice_thickness.copy_from(*m_grid->variables().get_2d_scalar("land_ice_thickness"));
-    geometry.bed_elevation.copy_from(*m_grid->variables().get_2d_scalar("bedrock_altitude"));
-    geometry.sea_level_elevation.set(0.0); // FIXME: this should be an input
+    const auto &variables = m_grid->variables();
+
+    geometry.ice_thickness.copy_from(*variables.get_2d_scalar("land_ice_thickness"));
+    geometry.bed_elevation.copy_from(*variables.get_2d_scalar("bedrock_altitude"));
+    if (variables.is_available("sea_level")) {
+      geometry.sea_level_elevation.copy_from(*variables.get_2d_scalar("sea_level"));
+    } else {
+      geometry.sea_level_elevation.set(0.0);
+    }
 
     if (m_config->get_flag("geometry.part_grid.enabled")) {
       geometry.ice_area_specific_volume.copy_from(
@@ -103,8 +109,6 @@ void IP_SSAHardavForwardProblem::init() {
     geometry.ensure_consistency(m_config->get_number("stress_balance.ice_free_thickness_standard"));
 
     stressbalance::Inputs inputs;
-
-    const auto &variables = m_grid->variables();
 
     const array::Scalar *vel_bc_mask = nullptr;
     if (variables.is_available("vel_bc_mask")) {
