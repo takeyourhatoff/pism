@@ -50,9 +50,9 @@ void Simple::update_impl(const Geometry &geometry, double t, double dt) {
   m_mass_flux->copy_from(m_atmosphere->precipitation());
   m_temperature->copy_from(m_atmosphere->air_temperature());
 
-  dummy_accumulation(*m_mass_flux, *m_accumulation);
-  dummy_melt(*m_mass_flux, *m_melt);
-  dummy_runoff(*m_mass_flux, *m_runoff);
+  dummy_accumulation(*m_mass_flux, dt, *m_accumulation);
+  dummy_melt(*m_mass_flux, dt, *m_melt);
+  dummy_runoff(*m_mass_flux, dt, *m_runoff);
 }
 
 const array::Scalar &Simple::mass_flux_impl() const {

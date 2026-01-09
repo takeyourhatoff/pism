@@ -191,9 +191,9 @@ void ISMIP6::update_impl(const Geometry &geometry, double t, double dt) {
     T(i, j)   = T_ref(i, j) + aT(i, j) + dTdz(i, j) * (h(i, j) - h_ref(i, j));
   }
 
-  dummy_accumulation(SMB, *m_accumulation);
-  dummy_melt(SMB, *m_melt);
-  dummy_runoff(SMB, *m_runoff);
+  dummy_accumulation(SMB, dt, *m_accumulation);
+  dummy_melt(SMB, dt, *m_melt);
+  dummy_runoff(SMB, dt, *m_runoff);
 }
 
 MaxTimestep ISMIP6::max_timestep_impl(double t) const {

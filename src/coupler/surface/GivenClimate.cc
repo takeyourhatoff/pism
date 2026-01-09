@@ -96,9 +96,9 @@ void Given::update_impl(const Geometry &geometry, double t, double dt) {
   m_mass_flux->average(t, dt);
   m_temperature->average(t, dt);
 
-  dummy_accumulation(*m_mass_flux, *m_accumulation);
-  dummy_melt(*m_mass_flux, *m_melt);
-  dummy_runoff(*m_mass_flux, *m_runoff);
+  dummy_accumulation(*m_mass_flux, dt, *m_accumulation);
+  dummy_melt(*m_mass_flux, dt, *m_melt);
+  dummy_runoff(*m_mass_flux, dt, *m_runoff);
 
 }
 

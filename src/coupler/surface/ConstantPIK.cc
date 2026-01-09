@@ -85,9 +85,9 @@ void PIK::update_impl(const Geometry &geometry, double t, double dt) {
     (*m_temperature)(i, j) = 273.15 + 30 - 0.0075 * surface_elevation(i, j) - 0.68775 * latitude(i, j) * (-1.0);
   }
   
-  dummy_accumulation(*m_mass_flux, *m_accumulation);
-  dummy_melt(*m_mass_flux, *m_melt);
-  dummy_runoff(*m_mass_flux, *m_runoff);
+  dummy_accumulation(*m_mass_flux, dt, *m_accumulation);
+  dummy_melt(*m_mass_flux, dt, *m_melt);
+  dummy_runoff(*m_mass_flux, dt, *m_runoff);
 
 }
 

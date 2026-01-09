@@ -140,9 +140,9 @@ void Elevation::update_impl(const Geometry &geometry, double t, double dt) {
   compute_mass_flux(geometry.ice_surface_elevation, *m_mass_flux);
   compute_temperature(geometry.ice_surface_elevation, *m_temperature);
 
-  dummy_accumulation(*m_mass_flux, *m_accumulation);
-  dummy_melt(*m_mass_flux, *m_melt);
-  dummy_runoff(*m_mass_flux, *m_runoff);
+  dummy_accumulation(*m_mass_flux, dt, *m_accumulation);
+  dummy_melt(*m_mass_flux, dt, *m_melt);
+  dummy_runoff(*m_mass_flux, dt, *m_runoff);
   
 }
 

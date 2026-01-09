@@ -83,9 +83,9 @@ protected:
   virtual DiagnosticList diagnostics_impl() const;
   virtual TSDiagnosticList ts_diagnostics_impl() const;
 
-  void dummy_accumulation(const array::Scalar& smb, array::Scalar& result);
-  void dummy_melt(const array::Scalar& smb, array::Scalar& result);
-  void dummy_runoff(const array::Scalar& smb, array::Scalar& result);
+  void dummy_accumulation(const array::Scalar& smb_rate, double dt, array::Scalar& result);
+  void dummy_melt(const array::Scalar& smb_rate, double dt, array::Scalar& result);
+  void dummy_runoff(const array::Scalar& smb_rate, double dt, array::Scalar& result);
 
   static std::shared_ptr<array::Scalar> allocate_layer_mass(std::shared_ptr<const Grid> grid);
   static std::shared_ptr<array::Scalar> allocate_layer_thickness(std::shared_ptr<const Grid> grid);

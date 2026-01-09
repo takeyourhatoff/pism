@@ -257,9 +257,9 @@ void ForceThickness::update_impl(const Geometry &geometry, double t, double dt) 
                    geometry.cell_type,
                    *m_mass_flux);
   
-  dummy_accumulation(*m_mass_flux, *m_accumulation);
-  dummy_melt(*m_mass_flux, *m_melt);
-  dummy_runoff(*m_mass_flux, *m_runoff);
+  dummy_accumulation(*m_mass_flux, dt, *m_accumulation);
+  dummy_melt(*m_mass_flux, dt, *m_melt);
+  dummy_runoff(*m_mass_flux, dt, *m_runoff);
 }
 
 const array::Scalar &ForceThickness::mass_flux_impl() const {

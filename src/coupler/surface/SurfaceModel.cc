@@ -355,15 +355,15 @@ MaxTimestep SurfaceModel::max_timestep_impl(double t) const {
  *
  * We assume that the positive part of the SMB is accumulation and the negative part is
  * runoff. This ensures that outputs of PISM's surface models satisfy "SMB = accumulation
- * - runoff".
+ * - runoff". Here SMB is a rate, so we multiply by dt to get a per-step amount.
  */
-void SurfaceModel::dummy_accumulation(const array::Scalar& smb, array::Scalar& result) {
+void SurfaceModel::dummy_accumulation(const array::Scalar& smb, double dt, array::Scalar& result) {
 
   array::AccessScope list{&result, &smb};
 
   for (auto p = m_grid->points(); p; p.next()) {
     const int i = p.i(), j = p.j();
-    result(i,j) = std::max(smb(i,j), 0.0);
+    result(i,j) = std::max(smb(i,j), 0.0) * dt;
   }
 }
 
@@ -375,15 +375,15 @@ void SurfaceModel::dummy_accumulation(const array::Scalar& smb, array::Scalar& r
  *
  * We assume that the positive part of the SMB is accumulation and the negative part is
  * runoff. This ensures that outputs of PISM's surface models satisfy "SMB = accumulation
- * - runoff".
+ * - runoff". Here SMB is a rate, so we multiply by dt to get a per-step amount.
  */
-void SurfaceModel::dummy_runoff(const array::Scalar& smb, array::Scalar& result) {
+void SurfaceModel::dummy_runoff(const array::Scalar& smb, double dt, array::Scalar& result) {
 
   array::AccessScope list{&result, &smb};
 
   for (auto p = m_grid->points(); p; p.next()) {
     const int i = p.i(), j = p.j();
-    result(i,j) = std::max(-smb(i,j), 0.0);
+    result(i,j) = std::max(-smb(i,j), 0.0) * dt;
   }
 }
 
@@ -396,8 +396,8 @@ void SurfaceModel::dummy_runoff(const array::Scalar& smb, array::Scalar& result)
  * We assume that all melt runs off, i.e. runoff = melt, but treat melt as a "derived"
  * quantity.
  */
-void SurfaceModel::dummy_melt(const array::Scalar& smb, array::Scalar& result) {
-  dummy_runoff(smb, result);
+void SurfaceModel::dummy_melt(const array::Scalar& smb, double dt, array::Scalar& result) {
+  dummy_runoff(smb, dt, result);
 }
 
 namespace diagnostics {
@@ -850,4 +850,3 @@ TSDiagnosticList SurfaceModel::ts_diagnostics_impl() const {
 
 } // end of namespace surface
 } // end of namespace pism
-
