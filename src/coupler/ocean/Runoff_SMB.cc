@@ -59,6 +59,8 @@ void Runoff_SMB::init_impl(const Geometry &geometry) {
 void Runoff_SMB::update_impl(const Geometry &geometry, double t, double dt) {
   m_input_model->update(geometry, t, dt);
 
+  m_shelf_base_mass_flux->copy_from(m_input_model->shelf_base_mass_flux());
+
   mass_flux(m_forcing->value(t + 0.5 * dt), *m_shelf_base_mass_flux);
 }
 
@@ -81,6 +83,10 @@ void Runoff_SMB::mass_flux(double delta_T, array::Scalar &result) const {
     scale_factor = 1 + B * pow(a * delta_T, alpha) * pow(delta_T, beta);
   }
   result.scale(scale_factor);
+}
+
+const array::Scalar& Runoff_SMB::shelf_base_mass_flux_impl() const {
+  return *m_shelf_base_mass_flux;
 }
 
 } // end of namespace ocean

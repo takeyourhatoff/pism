@@ -61,6 +61,8 @@ private:
 
   void update_impl(const Geometry &geometry, double t, double dt);
 
+  const array::Scalar& shelf_base_mass_flux_impl() const;
+
   void mass_flux(double delta_T, array::Scalar &result) const;
 
   // @brief constant in the parameterization of the subglacial
