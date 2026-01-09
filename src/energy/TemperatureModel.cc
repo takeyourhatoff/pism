@@ -405,9 +405,10 @@ void TemperatureModel::column_drainage(const double rho, const double c, const d
       if (thicknessToFreezeOn <= *bwat) { // the water *is* available to freeze on
         *bwat -= thicknessToFreezeOn;
         *Texcess = 0.0;
-      } else { // only refreeze bwat thickness of water; update Texcess
+      } else { // only refreeze available water; update Texcess
+        const double bwat_available = *bwat;
         *bwat = 0.0;
-        const double dTemp = L * (*bwat) / (c * dz);
+        const double dTemp = L * bwat_available / (c * dz);
         *Texcess += dTemp;
       }
     }
