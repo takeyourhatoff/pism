@@ -166,6 +166,7 @@ void FractureDensity::update(double dt,
                                &m_toughness, &hardness, &geometry.ice_thickness};
 
   D_new.copy_from(D);
+  A_new.copy_from(A);
 
   //options
   /////////////////////////////////////////////////////////
