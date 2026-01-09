@@ -80,7 +80,7 @@
     }
 
     .run-card {
-      padding: 14px;
+      padding: 10px 12px;
       border-radius: 12px;
       background: var(--panel-strong);
       border: 1px solid transparent;
@@ -100,78 +100,138 @@
 
     .run-card h3 {
       margin: 0;
-      font-size: 16px;
+      font-size: 15px;
     }
 
     .run-card span {
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
     }
 
     .detail {
       padding: 24px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
     }
 
-    .metric-grid {
+    .section-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 16px;
     }
 
-    .metric {
-      padding: 16px;
-      background: rgba(255, 255, 255, 0.03);
-      border-radius: 12px;
-      border: 1px solid var(--border);
+    .section {
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
     }
 
-    .metric h4 {
+    .section h3 {
       margin: 0 0 8px;
-      font-size: 13px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .metric p {
-      margin: 0;
-      font-size: 20px;
-    }
-
-    .status-bar {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .detail-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 12px;
-    }
-
-    .detail-item {
-      padding: 12px;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid var(--border);
-    }
-
-    .detail-item h4 {
-      margin: 0 0 6px;
       font-size: 12px;
       color: var(--muted);
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
 
-    .detail-item p {
-      margin: 0;
-      font-size: 14px;
+    .section-subtitle {
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    table.kv {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    table.kv th,
+    table.kv td {
+      padding: 6px 4px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    table.kv th {
+      width: 140px;
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+    }
+
+    table.kv td {
       word-break: break-word;
+    }
+
+    .inputs-grid {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 16px;
+      font-size: 13px;
+    }
+
+    .inputs-grid .label {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 11px;
+    }
+
+    .inputs-grid .path a {
+      color: var(--accent-2);
+      text-decoration: none;
+      word-break: break-all;
+    }
+
+    .inputs-grid .path a:hover {
+      text-decoration: underline;
+    }
+
+    .outputs-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+
+    .outputs-header .prefix {
+      word-break: break-word;
+    }
+
+    .outputs-header a {
+      color: var(--accent-2);
+      text-decoration: none;
+    }
+
+    .outputs-header a:hover {
+      text-decoration: underline;
+    }
+
+    .outputs-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+
+    .outputs-table th,
+    .outputs-table td {
+      padding: 6px 4px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    .outputs-table th {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 11px;
     }
 
     .status-pill {
@@ -246,6 +306,8 @@
       color: var(--text);
       white-space: pre-wrap;
       word-break: break-word;
+      max-height: 220px;
+      overflow: auto;
     }
 
     @media (max-width: 900px) {
@@ -280,18 +342,33 @@
         <h2 id="run-title">Select a run</h2>
         <p class="muted" id="run-subtitle">Choose a run on the left to see details.</p>
       </div>
-      <div class="metric-grid" id="metrics"></div>
-      <div class="status-bar" id="status-bar"></div>
-      <div class="detail-grid" id="run-detail"></div>
-      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
-        <h3 style="margin: 0 0 10px;">Inputs</h3>
-        <div id="inputs"></div>
+      <div class="section-grid">
+        <div class="section">
+          <h3>Summary</h3>
+          <div id="summary"></div>
+        </div>
+        <div class="section">
+          <h3>Cost &amp; progress</h3>
+          <div id="costs"></div>
+        </div>
       </div>
-      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
-        <h3 style="margin: 0 0 10px;">PISM Args</h3>
+      <div class="section-grid">
+        <div class="section">
+          <h3>Config</h3>
+          <div id="config"></div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Data paths</h3>
+        <div id="inputs"></div>
+        <div id="outputs"></div>
+      </div>
+      <div class="section">
+        <h3>PISM Args</h3>
         <pre class="args" id="args"></pre>
       </div>
-      <div class="panel" style="background: rgba(0,0,0,0.1); border-radius: 12px; padding: 12px;">
+      <div class="section">
+        <h3>Jobs</h3>
         <table>
           <thead>
             <tr>
@@ -312,10 +389,11 @@
     const runsEl = document.getElementById("runs");
     const runTitle = document.getElementById("run-title");
     const runSubtitle = document.getElementById("run-subtitle");
-    const metricsEl = document.getElementById("metrics");
-    const statusBar = document.getElementById("status-bar");
-    const runDetail = document.getElementById("run-detail");
+    const summaryEl = document.getElementById("summary");
+    const costsEl = document.getElementById("costs");
+    const configEl = document.getElementById("config");
     const inputsEl = document.getElementById("inputs");
+    const outputsEl = document.getElementById("outputs");
     const argsEl = document.getElementById("args");
     const jobsBody = document.getElementById("jobs");
     const jobsEmpty = document.getElementById("jobs-empty");
@@ -353,6 +431,20 @@
       return `${Number(value).toFixed(1)}%`;
     }
 
+    function formatBytes(value) {
+      if (value === null || value === undefined) return "-";
+      const bytes = Number(value);
+      if (Number.isNaN(bytes)) return "-";
+      const units = ["B", "KB", "MB", "GB"];
+      let index = 0;
+      let size = bytes;
+      while (size >= 1024 && index < units.length - 1) {
+        size /= 1024;
+        index += 1;
+      }
+      return `${size.toFixed(1)} ${units[index]}`;
+    }
+
     function formatEta(seconds) {
       if (seconds === null || seconds === undefined) return "-";
       const totalMinutes = Math.max(0, Math.round(seconds / 60));
@@ -362,6 +454,21 @@
         return `${hours}h${String(minutes).padStart(2, "0")}m`;
       }
       return `${minutes}m`;
+    }
+
+    function formatDuration(seconds) {
+      if (seconds === null || seconds === undefined) return "-";
+      const totalSeconds = Math.max(0, Math.round(seconds));
+      const hours = Math.floor(totalSeconds / 3600);
+      const minutes = Math.floor((totalSeconds % 3600) / 60);
+      const secs = totalSeconds % 60;
+      if (hours > 0) {
+        return `${hours}h${String(minutes).padStart(2, "0")}m`;
+      }
+      if (minutes > 0) {
+        return `${minutes}m${String(secs).padStart(2, "0")}s`;
+      }
+      return `${secs}s`;
     }
 
     function formatArgs(args) {
@@ -418,48 +525,64 @@
       });
     }
 
-    function renderMetrics(run, detail) {
-      metricsEl.innerHTML = "";
-      if (!run) return;
-
-      const items = [
-        { label: "Instance", value: run.instance_type },
-      ];
-      if (detail && detail.budget_usd !== null && detail.budget_usd !== undefined) {
-        items.push({ label: "Budget", value: formatCurrency(detail.budget_usd) });
-      }
-      items.push(
-        { label: "Progress", value: formatPercent(detail ? detail.progress_percent : null) },
-        { label: "ETA", value: formatEta(detail ? detail.eta_seconds : null) },
-      );
-      items.push(
-        { label: "Cost per hour", value: formatRate(detail ? detail.hourly_rate_usd : null) },
-        { label: "Cost so far", value: formatCurrency(detail ? detail.cost_to_date_usd : null) },
-        { label: "Est. total cost", value: formatCurrency(detail ? detail.estimated_total_cost_usd : null) },
-      );
-
+    function renderKeyValueTable(container, items) {
+      container.innerHTML = "";
+      const table = document.createElement("table");
+      table.className = "kv";
+      const body = document.createElement("tbody");
       items.forEach((item) => {
-        const div = document.createElement("div");
-        div.className = "metric";
-        div.innerHTML = `<h4>${item.label}</h4><p>${item.value}</p>`;
-        metricsEl.appendChild(div);
+        const row = document.createElement("tr");
+        const label = document.createElement("th");
+        label.textContent = item.label;
+        const value = document.createElement("td");
+        const raw = item.value;
+        const text = raw === null || raw === undefined || raw === "" ? "-" : String(raw);
+        if (item.html) {
+          value.innerHTML = text;
+        } else {
+          value.textContent = text;
+        }
+        row.appendChild(label);
+        row.appendChild(value);
+        body.appendChild(row);
       });
+      table.appendChild(body);
+      container.appendChild(table);
+    }
 
-      if (detail) {
-        statusBar.innerHTML = "";
-        const summary = detail.summary;
-        [
-          `queued ${summary.queued}`,
-          `running ${summary.running}`,
-          `succeeded ${summary.succeeded}`,
-          `failed ${summary.failed}`,
-        ].forEach((text) => {
-          const pill = document.createElement("div");
-          pill.className = "status-pill";
-          pill.textContent = text;
-          statusBar.appendChild(pill);
-        });
-      }
+    function renderSummary(run, detail) {
+      summaryEl.innerHTML = "";
+      costsEl.innerHTML = "";
+      if (!run || !detail) return;
+
+      const isRunning = detail.summary && detail.summary.running > 0;
+      const statusLine = detail.summary
+        ? `queued ${detail.summary.queued} / running ${detail.summary.running} / succeeded ${detail.summary.succeeded} / failed ${detail.summary.failed}`
+        : "-";
+      const actualInstance = detail.actual_instance_type
+        ? `${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
+        : "-";
+
+      const summaryItems = [
+        { label: "Status", value: statusLine },
+        { label: "Queue", value: detail.job_queue || "-" },
+        { label: "Requested instance", value: run.instance_type || "-" },
+        { label: "Actual instance", value: actualInstance },
+        { label: "Spot", value: run.use_spot ? "yes" : "no" },
+      ];
+
+      const costItems = [
+        { label: isRunning ? "Run time (so far)" : "Run time", value: formatDuration(detail.runtime_seconds) },
+        { label: "Cost per hour", value: formatRate(detail.hourly_rate_usd) },
+        { label: isRunning ? "Cost so far" : "Total cost", value: formatCurrency(detail.cost_to_date_usd) },
+        { label: "Estimated total", value: formatCurrency(detail.estimated_total_cost_usd) },
+        { label: "Budget", value: formatCurrency(detail.budget_usd) },
+        { label: "ETA", value: formatEta(detail.eta_seconds) },
+        { label: "Progress", value: formatPercent(detail.progress_percent) },
+      ];
+
+      renderKeyValueTable(summaryEl, summaryItems);
+      renderKeyValueTable(costsEl, costItems);
     }
 
     function renderJobs(detail) {
@@ -483,42 +606,134 @@
     }
 
     function renderRunDetails(run, detail) {
-      runDetail.innerHTML = "";
+      configEl.innerHTML = "";
       inputsEl.innerHTML = "";
+      outputsEl.innerHTML = "";
       argsEl.textContent = "";
       if (!run || !detail) return;
 
-      const items = [
+      const configItems = [
         { label: "Run ID", value: run.run_id },
         { label: "Created", value: detail.created_at || run.created_at || "-" },
-        { label: "Instance", value: run.instance_type },
-        { label: "Spot", value: run.use_spot ? "yes" : "no" },
-        { label: "Queue", value: detail.job_queue || "-" },
-        { label: "Job Definition", value: detail.job_definition || "-" },
-        { label: "MPI Ranks", value: detail.mpi_ranks ?? "-" },
-        { label: "GPUs", value: detail.gpus ?? "-" },
-        { label: "Output", value: detail.output_s3 || "-" },
+        { label: "Job definition", value: detail.job_definition || "-" },
         { label: "Executable", value: detail.pism_executable || "-" },
+        { label: "MPI ranks", value: detail.mpi_ranks ?? "-" },
+        { label: "GPUs", value: detail.gpus ?? "-" },
+        { label: "Instance ID", value: detail.actual_instance_id || "-" },
       ];
 
-      items.forEach((item) => {
-        const div = document.createElement("div");
-        div.className = "detail-item";
-        div.innerHTML = `<h4>${item.label}</h4><p>${item.value}</p>`;
-        runDetail.appendChild(div);
-      });
+      renderKeyValueTable(configEl, configItems);
 
       const inputs = detail.inputs || {};
       const entries = Object.entries(inputs);
       if (!entries.length) {
-        inputsEl.innerHTML = '<div class="empty">No inputs listed.</div>';
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No inputs listed.";
+        inputsEl.appendChild(empty);
       } else {
+        const title = document.createElement("div");
+        title.className = "section-subtitle";
+        title.textContent = "Inputs";
+        inputsEl.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "inputs-grid";
         entries.forEach(([name, value]) => {
-          const row = document.createElement("div");
-          row.className = "detail-item";
-          row.innerHTML = `<h4>${name}</h4><p>${value}</p>`;
-          inputsEl.appendChild(row);
+          const label = document.createElement("div");
+          label.className = "label";
+          label.textContent = name;
+          const val = document.createElement("div");
+          val.className = "path";
+          const link = document.createElement("a");
+          link.href = value;
+          link.textContent = value;
+          link.target = "_blank";
+          val.appendChild(link);
+          grid.appendChild(label);
+          grid.appendChild(val);
         });
+        inputsEl.appendChild(grid);
+      }
+
+      if (detail.output_s3) {
+        const title = document.createElement("div");
+        title.className = "section-subtitle";
+        title.textContent = "Outputs";
+        outputsEl.appendChild(title);
+
+        const header = document.createElement("div");
+        header.className = "outputs-header";
+        const prefix = document.createElement("div");
+        prefix.className = "prefix";
+        const prefixLink = document.createElement("a");
+        prefixLink.href = detail.output_s3;
+        prefixLink.textContent = detail.output_s3;
+        prefixLink.target = "_blank";
+        prefix.appendChild(prefixLink);
+        header.appendChild(prefix);
+        outputsEl.appendChild(header);
+        if (detail.output_summary && detail.output_summary.key_count !== undefined) {
+          const meta = document.createElement("div");
+          meta.className = "section-subtitle";
+          meta.textContent = `${detail.output_summary.key_count} object(s)`;
+          outputsEl.appendChild(meta);
+        }
+      }
+
+      const outputSummary = detail.output_summary;
+      if (!outputSummary) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Outputs will appear after the job completes.";
+        outputsEl.appendChild(empty);
+      } else if (outputSummary.status === "pending") {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Outputs available after completion.";
+        outputsEl.appendChild(empty);
+      } else if (outputSummary.status === "error") {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Unable to fetch outputs.";
+        outputsEl.appendChild(empty);
+      } else if (!detail.output_objects || detail.output_objects.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No outputs found.";
+        outputsEl.appendChild(empty);
+      } else {
+        const table = document.createElement("table");
+        table.className = "outputs-table";
+        table.innerHTML = `
+          <thead>
+            <tr>
+              <th>Output file</th>
+              <th>Size</th>
+              <th>Modified</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        `;
+        const body = table.querySelector("tbody");
+        detail.output_objects.forEach((obj) => {
+          const tr = document.createElement("tr");
+          const key = obj.key || "";
+          tr.innerHTML = `
+            <td>${key}</td>
+            <td>${formatBytes(obj.size_bytes)}</td>
+            <td class="muted">${obj.last_modified || "-"}</td>
+          `;
+          body.appendChild(tr);
+        });
+        outputsEl.appendChild(table);
+        if (outputSummary.truncated) {
+          const note = document.createElement("div");
+          note.className = "muted";
+          note.style.marginTop = "8px";
+          note.textContent = "Showing first 50 objects.";
+          outputsEl.appendChild(note);
+        }
       }
 
       argsEl.textContent = formatArgs(detail.pism_args);
@@ -533,8 +748,11 @@
       renderRuns(runs);
       if (run && detail) {
         runTitle.textContent = run.run_id;
-        runSubtitle.textContent = `Instance: ${run.instance_type}`;
-        renderMetrics(run, detail);
+        const actualNote = detail.actual_instance_type
+          ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
+          : "";
+        runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
+        renderSummary(run, detail);
         renderJobs(detail);
         renderRunDetails(run, detail);
       }
@@ -549,7 +767,12 @@
         const detail = await fetchRunDetail(selectedRun);
         const run = runs.find((item) => item.run_id === selectedRun);
         if (run && detail) {
-          renderMetrics(run, detail);
+          runTitle.textContent = run.run_id;
+          const actualNote = detail.actual_instance_type
+            ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
+            : "";
+          runSubtitle.textContent = `Requested: ${run.instance_type} ${run.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
+          renderSummary(run, detail);
           renderJobs(detail);
           renderRunDetails(run, detail);
         } else if (!run) {

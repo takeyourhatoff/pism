@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import urllib.parse
 from typing import Dict, List
 
+import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -14,7 +16,7 @@ from pism_cloud.batch import describe_jobs, summarize_status
 from pism_cloud.dynamo import get_run, get_table, list_jobs, list_runs
 from pism_cloud.logs import fetch_log_events
 from pism_cloud.progress import estimate_progress
-from pism_cloud.runtime import hourly_rate, summarize_costs
+from pism_cloud.runtime import hourly_rate, summarize_costs, summarize_runtime_seconds
 
 LOG_GROUP = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
 TEMPLATES = Jinja2Templates(
@@ -32,6 +34,106 @@ def log_url(log_stream: str) -> str:
         f"https://{region}.console.aws.amazon.com/cloudwatch/home?region={region}"
         f"#logsV2:log-groups/log-group/{log_group}/log-events/{stream}"
     )
+
+
+def _parse_s3_uri(uri: str) -> tuple[str, str] | None:
+    if not uri or not uri.startswith("s3://"):
+        return None
+    path = uri[len("s3://") :]
+    if not path:
+        return None
+    if "/" in path:
+        bucket, prefix = path.split("/", 1)
+    else:
+        bucket, prefix = path, ""
+    return bucket, prefix.rstrip("/")
+
+
+def _s3_console_url(bucket: str, prefix: str) -> str:
+    region = aws_region()
+    quoted = urllib.parse.quote(prefix + "/" if prefix else "")
+    return (
+        f"https://s3.console.aws.amazon.com/s3/buckets/{bucket}"
+        f"?region={region}&prefix={quoted}&showversions=false"
+    )
+
+
+def _list_output_objects(uri: str, max_keys: int = 50) -> tuple[Dict[str, object], List[Dict[str, object]]]:
+    parsed = _parse_s3_uri(uri)
+    if not parsed:
+        return {}, []
+    bucket, prefix = parsed
+    s3 = boto3.client("s3")
+    response = s3.list_objects_v2(
+        Bucket=bucket,
+        Prefix=f"{prefix}/" if prefix else "",
+        MaxKeys=max_keys + 1,
+    )
+    contents = response.get("Contents", [])
+    objects = []
+    for item in contents[:max_keys]:
+        key = item.get("Key", "")
+        if not key or key == prefix or key == f"{prefix}/":
+            continue
+        objects.append(
+            {
+                "key": key,
+                "size_bytes": item.get("Size", 0),
+                "last_modified": item.get("LastModified").isoformat() if item.get("LastModified") else "",
+            }
+        )
+    summary = {
+        "bucket": bucket,
+        "prefix": prefix,
+        "truncated": response.get("IsTruncated", False),
+        "key_count": response.get("KeyCount", len(contents)),
+    }
+    return summary, objects
+
+
+def _container_instance_arn(job: Dict[str, object]) -> str | None:
+    container = job.get("container", {}) if isinstance(job.get("container"), dict) else {}
+    arn = container.get("containerInstanceArn")
+    if arn:
+        return arn
+    attempts = job.get("attempts", [])
+    if isinstance(attempts, list):
+        for attempt in reversed(attempts):
+            container = attempt.get("container", {}) if isinstance(attempt, dict) else {}
+            arn = container.get("containerInstanceArn")
+            if arn:
+                return arn
+    return None
+
+
+def _actual_instance(batch_jobs: List[Dict[str, object]]) -> Dict[str, str] | None:
+    arn = None
+    for job in batch_jobs:
+        arn = _container_instance_arn(job)
+        if arn:
+            break
+    if not arn:
+        return None
+    try:
+        resource = arn.split("container-instance/", 1)[-1]
+        cluster = resource.split("/", 1)[0]
+        ecs = boto3.client("ecs")
+        resp = ecs.describe_container_instances(cluster=cluster, containerInstances=[arn])
+        if not resp.get("containerInstances"):
+            return None
+        ec2_instance_id = resp["containerInstances"][0].get("ec2InstanceId")
+        if not ec2_instance_id:
+            return None
+        ec2 = boto3.client("ec2")
+        res = ec2.describe_instances(InstanceIds=[ec2_instance_id])
+        instance = res["Reservations"][0]["Instances"][0]
+        return {
+            "instance_id": ec2_instance_id,
+            "instance_type": instance.get("InstanceType", ""),
+            "availability_zone": instance.get("Placement", {}).get("AvailabilityZone", ""),
+        }
+    except Exception:
+        return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -74,6 +176,8 @@ async def run_detail(run_id: str) -> Dict[str, object]:
     progress_percent = None
     eta_seconds = None
     estimated_total_cost = None
+    runtime_seconds = None
+    actual_instance = None
     instance_type = run_item.get("instance_type")
     use_spot = run_item.get("use_spot")
     budget_usd = run_item.get("budget_usd")
@@ -87,6 +191,9 @@ async def run_detail(run_id: str) -> Dict[str, object]:
             running_rate_usd = snapshot.running_rate_usd
         except Exception:
             pass
+
+    runtime_seconds = summarize_runtime_seconds(batch_jobs)
+    actual_instance = _actual_instance(batch_jobs)
 
     running_job = next(
         (
@@ -112,6 +219,9 @@ async def run_detail(run_id: str) -> Dict[str, object]:
             except Exception:
                 pass
 
+    if estimated_total_cost is None and cost_to_date_usd is not None and summary["running"] == 0:
+        estimated_total_cost = cost_to_date_usd
+
     job_details = []
     for job in batch_jobs:
         log_stream = job.get("container", {}).get("logStreamName")
@@ -126,6 +236,21 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         )
 
     job_details.sort(key=lambda item: item.get("job_name", ""))
+    output_s3 = run_item.get("output_s3")
+    output_console_url = None
+    output_summary = None
+    output_objects: List[Dict[str, object]] = []
+    if output_s3:
+        parsed = _parse_s3_uri(output_s3)
+        if parsed:
+            output_console_url = _s3_console_url(*parsed)
+        if summary["queued"] == 0 and summary["running"] == 0:
+            try:
+                output_summary, output_objects = _list_output_objects(output_s3)
+            except Exception:
+                output_summary = {"status": "error"}
+        else:
+            output_summary = {"status": "pending"}
     return {
         "run_id": run_id,
         "created_at": run_item.get("created_at"),
@@ -134,11 +259,17 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         "job_queue": run_item.get("job_queue"),
         "job_definition": run_item.get("job_definition"),
         "inputs": run_item.get("inputs", {}),
-        "output_s3": run_item.get("output_s3"),
+        "output_s3": output_s3,
+        "output_console_url": output_console_url,
+        "output_summary": output_summary,
+        "output_objects": output_objects,
         "pism_args": run_item.get("pism_args"),
         "pism_executable": run_item.get("pism_executable"),
         "mpi_ranks": run_item.get("mpi_ranks"),
         "gpus": run_item.get("gpus"),
+        "actual_instance_type": actual_instance.get("instance_type") if actual_instance else None,
+        "actual_instance_id": actual_instance.get("instance_id") if actual_instance else None,
+        "actual_availability_zone": actual_instance.get("availability_zone") if actual_instance else None,
         "summary": summary,
         "jobs": job_details,
         "hourly_rate_usd": hourly_rate_usd,
@@ -146,6 +277,7 @@ async def run_detail(run_id: str) -> Dict[str, object]:
         "running_rate_usd": running_rate_usd,
         "budget_usd": budget_usd,
         "timeout_seconds": timeout_seconds,
+        "runtime_seconds": runtime_seconds,
         "progress_percent": progress_percent,
         "eta_seconds": eta_seconds,
         "estimated_total_cost_usd": estimated_total_cost,

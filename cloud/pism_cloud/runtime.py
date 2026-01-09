@@ -73,3 +73,22 @@ def summarize_costs(
         running_rate_usd=running_rate,
         cost_to_date_usd=cost_to_date,
     )
+
+
+def summarize_runtime_seconds(
+    jobs: Iterable[Dict[str, object]],
+    now: Optional[datetime] = None,
+) -> float | None:
+    now_ms = int((now or datetime.now(timezone.utc)).timestamp() * 1000)
+    started_times = []
+    end_times = []
+    for job in jobs:
+        started = int(job.get("startedAt") or 0)
+        if started <= 0:
+            continue
+        stopped = int(job.get("stoppedAt") or 0)
+        started_times.append(started)
+        end_times.append(stopped if stopped > 0 else now_ms)
+    if not started_times:
+        return None
+    return (max(end_times) - min(started_times)) / 1000.0
