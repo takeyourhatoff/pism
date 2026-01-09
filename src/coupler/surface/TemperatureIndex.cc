@@ -250,6 +250,16 @@ void TemperatureIndex::update_impl(const Geometry &geometry, double t, double dt
     ts[k] = t + k * dtseries;
   }
 
+  const double balance_year_start = m_next_balance_year_start;
+  double next_balance_year_start = balance_year_start;
+  for (int k = 0; k < N; ++k) {
+    if (ts[k] >= next_balance_year_start) {
+      while (next_balance_year_start <= ts[k]) {
+        next_balance_year_start = time().increment_date(next_balance_year_start, 1);
+      }
+    }
+  }
+
   // update standard deviation time series
   if (m_sd_file_set) {
     m_air_temp_sd->update(t, dt);
@@ -368,7 +378,7 @@ void TemperatureIndex::update_impl(const Geometry &geometry, double t, double dt
       // Use degree-day factors, the number of PDDs, and the snow precipitation to get surface mass
       // balance (and diagnostics: accumulation, melt, runoff)
       {
-        double next_snow_depth_reset = m_next_balance_year_start;
+        double next_snow_depth_reset = balance_year_start;
 
         // make copies of firn and snow depth values at this point to avoid accessing 2D
         // fields in the inner loop
@@ -447,7 +457,7 @@ void TemperatureIndex::update_impl(const Geometry &geometry, double t, double dt
 
   m_atmosphere->end_pointwise_access();
 
-  m_next_balance_year_start = compute_next_balance_year_start(time().current());
+  m_next_balance_year_start = next_balance_year_start;
 }
 
 const array::Scalar &TemperatureIndex::mass_flux_impl() const {
