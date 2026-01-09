@@ -368,7 +368,16 @@ Isochrones::Isochrones(std::shared_ptr<const Grid> grid,
   // inappropriate.
   m_layer_thickness = details::allocate_layer_thickness(m_grid, { time->current() });
   m_tmp             = m_layer_thickness->duplicate(array::WITH_GHOSTS);
-  m_top_layer_index = details::n_active_layers(m_layer_thickness->levels(), time->start()) - 1;
+  {
+    auto active_layers = details::n_active_layers(m_layer_thickness->levels(), time->start());
+    if (active_layers == 0) {
+      throw RuntimeError::formatted(PISM_ERROR_LOCATION,
+                                    "isochrones: no deposition times at or before the start time (%s); "
+                                    "check isochrones.deposition_times",
+                                    time->date(time->start()).c_str());
+    }
+    m_top_layer_index = active_layers - 1;
+  }
 }
 
 /*!
@@ -459,7 +468,16 @@ void Isochrones::bootstrap(const array::Scalar &ice_thickness) {
       }
     }
 
-    m_top_layer_index = n_active_layers(m_layer_thickness->levels(), time->start()) - 1;
+    {
+      auto active_layers = n_active_layers(m_layer_thickness->levels(), time->start());
+      if (active_layers == 0) {
+        throw RuntimeError::formatted(PISM_ERROR_LOCATION,
+                                      "isochrones: no deposition times at or before the start time (%s); "
+                                      "check isochrones.deposition_times",
+                                      time->date(time->start()).c_str());
+      }
+      m_top_layer_index = active_layers - 1;
+    }
     {
       std::vector<std::string> dates;
       for (auto t : m_layer_thickness->levels()) {
@@ -507,7 +525,16 @@ void Isochrones::initialize(const File &input_file, int record, bool use_interpo
     m_tmp = m_layer_thickness->duplicate(array::WITH_GHOSTS);
 
     // set m_top_layer_index
-    m_top_layer_index = n_active_layers(m_layer_thickness->levels(), time->start()) - 1;
+    {
+      auto active_layers = n_active_layers(m_layer_thickness->levels(), time->start());
+      if (active_layers == 0) {
+        throw RuntimeError::formatted(PISM_ERROR_LOCATION,
+                                      "isochrones: no deposition times at or before the start time (%s); "
+                                      "check isochrones.deposition_times",
+                                      time->date(time->start()).c_str());
+      }
+      m_top_layer_index = active_layers - 1;
+    }
 
     {
       std::vector<std::string> dates;
