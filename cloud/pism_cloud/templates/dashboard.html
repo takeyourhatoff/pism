@@ -4,24 +4,17 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PISM Cloud Dashboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
     rel="stylesheet"
   />
   <style>
     :root {
-      --bg: #0f1b1c;
-      --panel: #142426;
-      --panel-strong: #1a3033;
-      --text: #edf4f5;
-      --muted: #9fb2b7;
-      --accent: #38b6a5;
-      --accent-2: #f0b45b;
-      --danger: #f26d5b;
-      --border: rgba(255, 255, 255, 0.08);
-      --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      --bg: #ffffff;
+      --text: #111111;
+      --muted: #666666;
+      --border: #dddddd;
+      --accent: #0057d8;
     }
 
     * {
@@ -30,258 +23,102 @@
 
     body {
       margin: 0;
-      font-family: "Space Grotesk", sans-serif;
+      font-family: "JetBrains Mono", monospace;
       color: var(--text);
-      background: radial-gradient(circle at 10% 20%, rgba(56, 182, 165, 0.3), transparent 50%),
-        radial-gradient(circle at 80% 0%, rgba(240, 180, 91, 0.2), transparent 55%),
-        var(--bg);
-      min-height: 100vh;
+      background: var(--bg);
     }
 
     header {
-      padding: 28px 40px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
     }
 
     header h1 {
       margin: 0;
-      font-size: 28px;
-      letter-spacing: 0.02em;
-    }
-
-    header p {
-      margin: 4px 0 0;
-      color: var(--muted);
+      font-size: 16px;
+      font-weight: 600;
     }
 
     .layout {
       display: grid;
-      grid-template-columns: 280px 1fr;
-      gap: 20px;
-      padding: 0 40px 40px;
+      grid-template-columns: 320px 1fr;
+      gap: 12px;
+      padding: 12px 16px 24px;
     }
 
     .panel {
-      background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    .jobs {
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-      min-height: 400px;
-    }
-
-    .job-card {
-      padding: 10px 12px;
-      border-radius: 12px;
-      background: var(--panel-strong);
-      border: 1px solid transparent;
-      cursor: pointer;
-      transition: border 0.2s ease, transform 0.2s ease;
-    }
-
-    .job-card:hover {
-      border-color: rgba(56, 182, 165, 0.5);
-      transform: translateY(-2px);
-    }
-
-    .job-card.active {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px rgba(56, 182, 165, 0.3);
-    }
-
-    .job-card h3 {
-      margin: 0;
-      font-size: 15px;
-    }
-
-    .job-card span {
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .detail {
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .section-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 16px;
-    }
-
-    .section {
-      padding-top: 10px;
-      border-top: 1px solid var(--border);
-    }
-
-    .section h3 {
-      margin: 0 0 8px;
-      font-size: 12px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .section-subtitle {
-      margin: 0 0 8px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    table.kv {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-
-    table.kv th,
-    table.kv td {
-      padding: 6px 4px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-      text-align: left;
-    }
-
-    table.kv th {
-      width: 140px;
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-weight: 600;
-    }
-
-    table.kv td {
-      word-break: break-word;
-    }
-
-    .inputs-grid {
-      display: grid;
-      grid-template-columns: 140px 1fr;
-      gap: 8px 16px;
-      font-size: 13px;
-    }
-
-    .inputs-grid .label {
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 11px;
-    }
-
-    .inputs-grid .path a {
-      color: var(--accent-2);
-      text-decoration: none;
-      word-break: break-all;
-    }
-
-    .inputs-grid .path a:hover {
-      text-decoration: underline;
-    }
-
-    .outputs-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 12px;
-      flex-wrap: wrap;
-      font-size: 13px;
-    }
-
-    .outputs-header .prefix {
-      word-break: break-word;
-    }
-
-    .outputs-header a {
-      color: var(--accent-2);
-      text-decoration: none;
-    }
-
-    .outputs-header a:hover {
-      text-decoration: underline;
-    }
-
-    .outputs-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      margin-top: 8px;
-    }
-
-    .outputs-table th,
-    .outputs-table td {
-      padding: 6px 4px;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-    }
-
-    .outputs-table th {
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 11px;
-    }
-
-    .status-pill {
-      padding: 8px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.04);
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-    }
-
-    th, td {
-      padding: 10px;
-      border-bottom: 1px solid var(--border);
-      text-align: left;
-    }
-
-    th {
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      font-size: 11px;
-    }
-
-    .status-label {
-      padding: 4px 8px;
-      border-radius: 8px;
-      background: rgba(56, 182, 165, 0.15);
-      color: var(--accent);
-      font-weight: 600;
-      font-size: 12px;
-    }
-
-    .status-failed {
-      background: rgba(242, 109, 91, 0.15);
-      color: var(--danger);
+      padding: 12px;
     }
 
     .muted {
       color: var(--muted);
     }
 
+    .empty {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    th, td {
+      padding: 6px 4px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+
+    th {
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    .jobs-table tr {
+      cursor: pointer;
+    }
+
+    .jobs-table tr.active {
+      background: #f0f6ff;
+    }
+
+    .section {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    .section h3 {
+      margin: 0 0 6px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    pre {
+      margin: 0;
+      padding: 8px;
+      border: 1px solid var(--border);
+      background: #fafafa;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow: auto;
+    }
+
     a {
-      color: var(--accent-2);
+      color: var(--accent);
       text-decoration: none;
     }
 
@@ -289,83 +126,53 @@
       text-decoration: underline;
     }
 
-    .empty {
-      color: var(--muted);
-      padding: 24px;
-      text-align: center;
-    }
-
-    pre.args {
-      margin: 0;
-      padding: 12px;
-      background: rgba(0, 0, 0, 0.2);
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12px;
-      color: var(--text);
-      white-space: pre-wrap;
-      word-break: break-word;
-      max-height: 220px;
-      overflow: auto;
-    }
-
     @media (max-width: 900px) {
       .layout {
         grid-template-columns: 1fr;
-        padding: 0 20px 30px;
-      }
-
-      header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 24px 20px 10px;
       }
     }
   </style>
 </head>
 <body>
   <header>
-    <div>
-      <h1>PISM Cloud</h1>
-      <p>Batch jobs summarized for scientists.</p>
-    </div>
+    <h1>PISM Cloud Dashboard</h1>
     <div class="muted" id="refresh-status">Refreshing...</div>
   </header>
 
   <div class="layout">
-    <section class="panel jobs" id="jobs"></section>
+    <section class="panel" id="jobs-panel">
+      <table class="jobs-table" id="jobs"></table>
+    </section>
 
-    <section class="panel detail">
+    <section class="panel" id="detail-panel">
       <div>
         <h2 id="job-title">Select a job</h2>
-        <p class="muted" id="job-subtitle">Choose a job on the left to see details.</p>
+        <div class="muted" id="job-subtitle">Choose a job to see details.</div>
       </div>
-      <div class="section-grid">
-        <div class="section">
-          <h3>Summary</h3>
-          <div id="summary"></div>
-        </div>
-        <div class="section">
-          <h3>Cost &amp; progress</h3>
-          <div id="costs"></div>
-        </div>
-      </div>
-      <div class="section-grid">
-        <div class="section">
-          <h3>Config</h3>
-          <div id="config"></div>
-        </div>
-      </div>
+
       <div class="section">
-        <h3>Data paths</h3>
-        <div id="inputs"></div>
-        <div id="outputs"></div>
+        <h3>Status</h3>
+        <div id="status"></div>
       </div>
+
       <div class="section">
-        <h3>PISM Args</h3>
-        <pre class="args" id="args"></pre>
+        <h3>Cost</h3>
+        <div id="cost"></div>
+      </div>
+
+      <div class="section">
+        <h3>Data</h3>
+        <div id="data"></div>
+      </div>
+
+      <div class="section">
+        <h3>History</h3>
+        <div id="history"></div>
+      </div>
+
+      <div class="section">
+        <h3>Args</h3>
+        <pre id="args"></pre>
       </div>
     </section>
   </div>
@@ -374,11 +181,10 @@
     const jobsEl = document.getElementById("jobs");
     const jobTitle = document.getElementById("job-title");
     const jobSubtitle = document.getElementById("job-subtitle");
-    const summaryEl = document.getElementById("summary");
-    const costsEl = document.getElementById("costs");
-    const configEl = document.getElementById("config");
-    const inputsEl = document.getElementById("inputs");
-    const outputsEl = document.getElementById("outputs");
+    const statusEl = document.getElementById("status");
+    const costEl = document.getElementById("cost");
+    const dataEl = document.getElementById("data");
+    const historyEl = document.getElementById("history");
     const argsEl = document.getElementById("args");
     const refreshStatus = document.getElementById("refresh-status");
 
@@ -428,6 +234,21 @@
       return `${size.toFixed(1)} ${units[index]}`;
     }
 
+    function formatMemoryGiB(mib) {
+      if (mib === null || mib === undefined) return "-";
+      const value = Number(mib);
+      if (Number.isNaN(value)) return "-";
+      return `${(value / 1024).toFixed(1)} GiB`;
+    }
+
+    function formatResources(job) {
+      if (!job) return "-";
+      const vcpus = job.vcpus ?? "-";
+      const gpus = job.gpus ?? 0;
+      const mem = formatMemoryGiB(job.memory_mib);
+      return `${vcpus} vCPU | ${mem} | ${gpus} GPU`;
+    }
+
     function formatEta(seconds) {
       if (seconds === null || seconds === undefined) return "-";
       const totalMinutes = Math.max(0, Math.round(seconds / 60));
@@ -452,6 +273,19 @@
         return `${minutes}m${String(secs).padStart(2, "0")}s`;
       }
       return `${secs}s`;
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return "-";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      const hours = String(date.getUTCHours()).padStart(2, "0");
+      const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+      const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds} UTC`;
     }
 
     function formatArgs(args) {
@@ -492,26 +326,44 @@
     function renderJobs(jobs) {
       jobsEl.innerHTML = "";
       if (!jobs.length) {
-        jobsEl.innerHTML = '<div class="empty">No jobs yet.</div>';
+        jobsEl.innerHTML = '<tr><td class="empty">No jobs yet.</td></tr>';
         return;
       }
 
+      const header = document.createElement("thead");
+      header.innerHTML = `
+        <tr>
+          <th>Job</th>
+          <th>Status</th>
+          <th>ETA</th>
+          <th>Cost</th>
+        </tr>
+      `;
+      const body = document.createElement("tbody");
+
       jobs.forEach((job) => {
-        const card = document.createElement("div");
-        card.className = "job-card" + (job.job_name === selectedJob ? " active" : "");
-        card.innerHTML = `
-          <h3>${job.job_name}</h3>
-          <span>${job.instance_type} - ${job.use_spot ? "spot" : "on-demand"}</span>
+        const row = document.createElement("tr");
+        if (job.job_name === selectedJob) {
+          row.classList.add("active");
+        }
+        const status = job.status || "-";
+        row.innerHTML = `
+          <td>${job.job_name}</td>
+          <td>${status || "-"}</td>
+          <td>${formatEta(job.eta_seconds)}</td>
+          <td>${formatCurrency(job.cost_to_date_usd)}</td>
         `;
-        card.onclick = () => selectJob(job.job_name);
-        jobsEl.appendChild(card);
+        row.onclick = () => selectJob(job.job_name);
+        body.appendChild(row);
       });
+
+      jobsEl.appendChild(header);
+      jobsEl.appendChild(body);
     }
 
     function renderKeyValueTable(container, items) {
       container.innerHTML = "";
       const table = document.createElement("table");
-      table.className = "kv";
       const body = document.createElement("tbody");
       items.forEach((item) => {
         const row = document.createElement("tr");
@@ -533,164 +385,92 @@
       container.appendChild(table);
     }
 
-    function renderSummary(job, detail) {
-      summaryEl.innerHTML = "";
-      costsEl.innerHTML = "";
-      if (!job || !detail) return;
+    function buildStatusLine(detail) {
+      if (!detail) return "-";
+      const statusLine = detail.status || "-";
+      if (detail.status_reason) {
+        return `${statusLine} (${detail.status_reason})`;
+      }
+      return statusLine;
+    }
 
-      const isRunning = detail.summary && detail.summary.running > 0;
-      const summary = detail.summary;
-      let statusLine = "-";
-      if (summary) {
-        if (summary.running > 0) {
-          statusLine = "RUNNING";
-        } else if (summary.queued > 0) {
-          statusLine = "QUEUED";
-        } else if (summary.failed > 0) {
-          statusLine = "FAILED";
-        } else if (summary.succeeded > 0) {
-          statusLine = "SUCCEEDED";
-        }
-      }
-      const statusReason =
-        detail.jobs && detail.jobs.length && detail.jobs[0].status_reason
-          ? detail.jobs[0].status_reason
-          : null;
-      if (statusReason) {
-        statusLine = `${statusLine} (${statusReason})`;
-      }
+    function renderStatus(job, detail) {
+      if (!job || !detail) return;
       const actualInstance = detail.actual_instance_type
         ? `${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
         : "-";
-
-      const summaryItems = [
-        { label: "Status", value: statusLine },
-        { label: "Queue", value: detail.job_queue || "-" },
-        { label: "Requested instance", value: job.instance_type || "-" },
-        { label: "Actual instance", value: actualInstance },
+      const logUrl = detail.log_url || null;
+      const items = [
+        { label: "Status", value: buildStatusLine(detail) },
+        { label: "Instance", value: actualInstance },
+        { label: "Requested", value: formatResources(detail) },
         { label: "Spot", value: job.use_spot ? "yes" : "no" },
-      ];
-      const logUrl = detail.jobs && detail.jobs.length ? detail.jobs[0].log_url : null;
-      summaryItems.push({
-        label: "Logs",
-        value: logUrl ? `<a href="${logUrl}" target="_blank">CloudWatch</a>` : "-",
-        html: true,
-      });
-
-      const costItems = [
-        { label: isRunning ? "Job runtime (so far)" : "Job runtime", value: formatDuration(detail.runtime_seconds) },
-        { label: "Cost per hour", value: formatRate(detail.hourly_rate_usd) },
-        { label: isRunning ? "Cost so far" : "Total cost", value: formatCurrency(detail.cost_to_date_usd) },
-        { label: "Estimated total", value: formatCurrency(detail.estimated_total_cost_usd) },
-        { label: "Budget", value: formatCurrency(detail.budget_usd) },
-        { label: "ETA", value: formatEta(detail.eta_seconds) },
+        { label: "Runtime", value: formatDuration(detail.runtime_seconds) },
         { label: "Progress", value: formatPercent(detail.progress_percent) },
+        { label: "ETA", value: formatEta(detail.eta_seconds) },
+        {
+          label: "Logs",
+          value: logUrl ? `<a href="${logUrl}" target="_blank">CloudWatch</a>` : "-",
+          html: true,
+        },
       ];
-
-      renderKeyValueTable(summaryEl, summaryItems);
-      renderKeyValueTable(costsEl, costItems);
+      renderKeyValueTable(statusEl, items);
     }
 
-    function renderJobDetails(job, detail) {
-      configEl.innerHTML = "";
-      inputsEl.innerHTML = "";
-      outputsEl.innerHTML = "";
-      argsEl.textContent = "";
-      if (!job || !detail) return;
-
-      const configItems = [
-        { label: "Job name", value: job.job_name },
-        { label: "Created", value: detail.created_at || job.created_at || "-" },
-        { label: "Job definition", value: detail.job_definition || "-" },
-        { label: "Executable", value: detail.pism_executable || "-" },
-        { label: "MPI ranks", value: detail.mpi_ranks ?? "-" },
-        { label: "GPUs", value: detail.gpus ?? "-" },
-        { label: "Instance ID", value: detail.actual_instance_id || "-" },
+    function renderCost(detail) {
+      if (!detail) return;
+      const items = [
+        { label: "Cost per hour", value: formatRate(detail.hourly_rate_usd) },
+        { label: "Cost so far", value: formatCurrency(detail.cost_to_date_usd) },
+        { label: "Estimated total", value: formatCurrency(detail.estimated_total_cost_usd) },
+        { label: "Budget", value: formatCurrency(detail.budget_usd) },
       ];
+      renderKeyValueTable(costEl, items);
+    }
 
-      renderKeyValueTable(configEl, configItems);
-
+    function renderData(detail) {
+      dataEl.innerHTML = "";
+      if (!detail) return;
       const inputs = detail.inputs || {};
       const entries = Object.entries(inputs);
-      if (!entries.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "No inputs listed.";
-        inputsEl.appendChild(empty);
-      } else {
-        const title = document.createElement("div");
-        title.className = "section-subtitle";
-        title.textContent = "Inputs";
-        inputsEl.appendChild(title);
-
-        const grid = document.createElement("div");
-        grid.className = "inputs-grid";
+      if (entries.length) {
+        const inputTable = document.createElement("table");
+        inputTable.innerHTML = `
+          <thead>
+            <tr><th>Input</th><th>Path</th></tr>
+          </thead>
+          <tbody></tbody>
+        `;
+        const body = inputTable.querySelector("tbody");
         entries.forEach(([name, value]) => {
-          const label = document.createElement("div");
-          label.className = "label";
-          label.textContent = name;
-          const val = document.createElement("div");
-          val.className = "path";
+          const row = document.createElement("tr");
           const link = document.createElement("a");
-          link.href = value;
+          const consoleUrl = detail.inputs_console ? detail.inputs_console[name] : null;
+          link.href = consoleUrl || value;
           link.textContent = value;
           link.target = "_blank";
-          val.appendChild(link);
-          grid.appendChild(label);
-          grid.appendChild(val);
+          row.innerHTML = `<td>${name}</td><td></td>`;
+          row.querySelector("td:last-child").appendChild(link);
+          body.appendChild(row);
         });
-        inputsEl.appendChild(grid);
+        dataEl.appendChild(inputTable);
       }
 
       if (detail.output_s3) {
-        const title = document.createElement("div");
-        title.className = "section-subtitle";
-        title.textContent = "Outputs";
-        outputsEl.appendChild(title);
-
-        const header = document.createElement("div");
-        header.className = "outputs-header";
-        const prefix = document.createElement("div");
-        prefix.className = "prefix";
-        const prefixLink = document.createElement("a");
-        prefixLink.href = detail.output_s3;
-        prefixLink.textContent = detail.output_s3;
-        prefixLink.target = "_blank";
-        prefix.appendChild(prefixLink);
-        header.appendChild(prefix);
-        outputsEl.appendChild(header);
-        if (detail.output_summary && detail.output_summary.key_count !== undefined) {
-          const meta = document.createElement("div");
-          meta.className = "section-subtitle";
-          meta.textContent = `${detail.output_summary.key_count} object(s)`;
-          outputsEl.appendChild(meta);
-        }
+        const outputBlock = document.createElement("div");
+        outputBlock.style.marginTop = entries.length ? "8px" : "0";
+        const link = document.createElement("a");
+        link.href = detail.output_console_url || detail.output_s3;
+        link.textContent = detail.output_s3;
+        link.target = "_blank";
+        outputBlock.appendChild(document.createTextNode("Output: "));
+        outputBlock.appendChild(link);
+        dataEl.appendChild(outputBlock);
       }
 
-      const outputSummary = detail.output_summary;
-      if (!outputSummary) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "Outputs will appear after the job completes.";
-        outputsEl.appendChild(empty);
-      } else if (outputSummary.status === "pending") {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "Outputs available after completion.";
-        outputsEl.appendChild(empty);
-      } else if (outputSummary.status === "error") {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "Unable to fetch outputs.";
-        outputsEl.appendChild(empty);
-      } else if (!detail.output_objects || detail.output_objects.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "No outputs found.";
-        outputsEl.appendChild(empty);
-      } else {
+      if (detail.output_objects && detail.output_objects.length) {
         const table = document.createElement("table");
-        table.className = "outputs-table";
+        table.style.marginTop = "8px";
         table.innerHTML = `
           <thead>
             <tr>
@@ -708,38 +488,70 @@
           tr.innerHTML = `
             <td>${key}</td>
             <td>${formatBytes(obj.size_bytes)}</td>
-            <td class="muted">${obj.last_modified || "-"}</td>
+            <td class="muted">${formatTimestamp(obj.last_modified)}</td>
           `;
           body.appendChild(tr);
         });
-        outputsEl.appendChild(table);
-        if (outputSummary.truncated) {
-          const note = document.createElement("div");
-          note.className = "muted";
-          note.style.marginTop = "8px";
-          note.textContent = "Showing first 50 objects.";
-          outputsEl.appendChild(note);
-        }
+        dataEl.appendChild(table);
       }
 
-      argsEl.textContent = formatArgs(detail.pism_args);
+      if (!entries.length && !detail.output_s3) {
+        dataEl.innerHTML = '<div class="empty">No data paths.</div>';
+      }
+    }
+
+    function renderHistory(detail) {
+      historyEl.innerHTML = "";
+      if (!detail) return;
+      const timeline = detail.timeline || [];
+      if (!timeline.length) {
+        historyEl.innerHTML = '<div class="empty">No events.</div>';
+        return;
+      }
+      const lines = timeline.map((event) => {
+        const stamp = formatTimestamp(event.timestamp);
+        const detailText = event.detail ? ` - ${event.detail}` : "";
+        return `${stamp} ${event.label}${detailText}`;
+      });
+      const pre = document.createElement("pre");
+      pre.textContent = lines.join("\n");
+      historyEl.appendChild(pre);
+    }
+
+    function renderArgs(detail) {
+      argsEl.textContent = detail ? formatArgs(detail.pism_args) : "";
+    }
+
+    function setLoading(jobName) {
+      jobTitle.textContent = jobName || "Select a job";
+      jobSubtitle.textContent = jobName ? "Loading..." : "Choose a job to see details.";
+      statusEl.innerHTML = '<div class="muted">Loading...</div>';
+      costEl.innerHTML = '<div class="muted">Loading...</div>';
+      dataEl.innerHTML = '<div class="muted">Loading...</div>';
+      historyEl.innerHTML = '<div class="muted">Loading...</div>';
+      argsEl.textContent = jobName ? "Loading..." : "";
     }
 
     async function selectJob(jobName) {
       selectedJob = jobName;
       setJobInUrl(jobName);
+      setLoading(jobName);
       setRefreshing(true);
       const [jobs, detail] = await Promise.all([fetchJobs(), fetchJobDetail(jobName)]);
       const job = jobs.find((item) => item.job_name === jobName);
       renderJobs(jobs);
       if (job && detail) {
         jobTitle.textContent = job.job_name;
+        const statusLine = buildStatusLine(detail);
         const actualNote = detail.actual_instance_type
-          ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
+          ? ` | ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
           : "";
-        jobSubtitle.textContent = `Requested: ${job.instance_type} ${job.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
-        renderSummary(job, detail);
-        renderJobDetails(job, detail);
+        jobSubtitle.textContent = `${statusLine} | ${formatResources(detail)}${actualNote}`;
+        renderStatus(job, detail);
+        renderCost(detail);
+        renderData(detail);
+        renderHistory(detail);
+        renderArgs(detail);
       }
       setRefreshing(false);
     }
@@ -753,12 +565,16 @@
         const job = jobs.find((item) => item.job_name === selectedJob);
         if (job && detail) {
           jobTitle.textContent = job.job_name;
+          const statusLine = buildStatusLine(detail);
           const actualNote = detail.actual_instance_type
-            ? ` | actual ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
+            ? ` | ${detail.actual_instance_type}${detail.actual_availability_zone ? ` (${detail.actual_availability_zone})` : ""}`
             : "";
-          jobSubtitle.textContent = `Requested: ${job.instance_type} ${job.use_spot ? "(spot)" : "(on-demand)"}${actualNote}`;
-          renderSummary(job, detail);
-          renderJobDetails(job, detail);
+          jobSubtitle.textContent = `${statusLine} | ${formatResources(detail)}${actualNote}`;
+          renderStatus(job, detail);
+          renderCost(detail);
+          renderData(detail);
+          renderHistory(detail);
+          renderArgs(detail);
         } else if (!job) {
           selectedJob = null;
           setJobInUrl(null);
