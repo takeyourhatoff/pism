@@ -4,7 +4,6 @@ import textwrap
 import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 
 def _install_boto3_stub() -> None:
@@ -36,7 +35,6 @@ _install_boto3_stub()
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from pism_cloud import config
-from pism_cloud.aws import InstanceSpec
 
 
 class ConfigTests(unittest.TestCase):
@@ -47,20 +45,10 @@ class ConfigTests(unittest.TestCase):
         handle.close()
         return handle.name
 
-    @patch("pism_cloud.config.instance_spec")
-    def test_load_minimal_config(self, mock_spec) -> None:
-        mock_spec.return_value = InstanceSpec(
-            instance_type="c7i.4xlarge",
-            vcpus=16,
-            memory_mib=32768,
-            gpus=0,
-        )
+    def test_load_minimal_config(self) -> None:
         path = self._write_config(
             """
             job_name: job-001
-            compute:
-              backend: aws-batch
-              instance: c7i.4xlarge
             inputs:
               base: my-prefix/
             pism:
@@ -72,49 +60,45 @@ class ConfigTests(unittest.TestCase):
         cfg = configs[0]
         self.assertEqual(cfg.job_name, "job-001")
         self.assertEqual(cfg.inputs["base"], "my-prefix")
-        self.assertTrue(cfg.compute["use_spot"])
-        self.assertEqual(cfg.compute["mpi_ranks"], 16)
+        self.assertTrue(cfg.use_spot)
+        self.assertEqual(cfg.accelerator, "cpu")
 
-    @patch("pism_cloud.config.instance_spec")
-    def test_gpu_defaults_mpi_ranks_to_gpus(self, mock_spec) -> None:
-        mock_spec.return_value = InstanceSpec(
-            instance_type="g5.xlarge",
-            vcpus=4,
-            memory_mib=16384,
-            gpus=1,
-        )
+    def test_gpu_accelerator_sets_mode(self) -> None:
         path = self._write_config(
             """
             job_name: gpu-001
             compute:
-              backend: aws-batch
-              instance: g5.xlarge
+              accelerator: gpu
             inputs:
-              base: s3://bucket/path
+              base: bucket/path
             pism:
               args: "--config {{INPUTS.base}}/config.cfg"
             """
         )
         cfg = config.load_configs([path])[0]
-        self.assertEqual(cfg.compute["gpus"], 1)
-        self.assertEqual(cfg.compute["mpi_ranks"], 1)
-        self.assertEqual(cfg.inputs["base"], "s3://bucket/path")
+        self.assertEqual(cfg.accelerator, "gpu")
+        self.assertEqual(cfg.inputs["base"], "bucket/path")
 
-    @patch("pism_cloud.config.instance_spec")
-    def test_budget_usd_validation(self, mock_spec) -> None:
-        mock_spec.return_value = InstanceSpec(
-            instance_type="c7i.4xlarge",
-            vcpus=16,
-            memory_mib=32768,
-            gpus=0,
+    def test_compute_extra_keys_ignored(self) -> None:
+        path = self._write_config(
+            """
+            job_name: overrides
+            compute:
+              vcpus: 8
+            inputs:
+              base: bucket/path
+            pism:
+              args: "--config {{INPUTS.base}}/config.cfg"
+            """
         )
+        cfg = config.load_configs([path])[0]
+        self.assertEqual(cfg.accelerator, "cpu")
+
+    def test_budget_usd_validation(self) -> None:
         path = self._write_config(
             """
             job_name: budget-001
             budget_usd: -1
-            compute:
-              backend: aws-batch
-              instance: c7i.4xlarge
             inputs:
               base: my-prefix
             pism:
@@ -124,45 +108,12 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.load_configs([path])
 
-    @patch("pism_cloud.config.instance_spec")
-    def test_missing_inputs(self, mock_spec) -> None:
-        mock_spec.return_value = InstanceSpec(
-            instance_type="c7i.4xlarge",
-            vcpus=16,
-            memory_mib=32768,
-            gpus=0,
-        )
+    def test_missing_inputs(self) -> None:
         path = self._write_config(
             """
             job_name: missing-inputs
-            compute:
-              backend: aws-batch
-              instance: c7i.4xlarge
             pism:
               args: "--config foo"
-            """
-        )
-        with self.assertRaises(ValueError):
-            config.load_configs([path])
-
-    @patch("pism_cloud.config.instance_spec")
-    def test_instance_types_rejected(self, mock_spec) -> None:
-        mock_spec.return_value = InstanceSpec(
-            instance_type="c7i.4xlarge",
-            vcpus=16,
-            memory_mib=32768,
-            gpus=0,
-        )
-        path = self._write_config(
-            """
-            job_name: bad-instance-types
-            compute:
-              backend: aws-batch
-              instance_types: [c7i.4xlarge]
-            inputs:
-              base: my-prefix
-            pism:
-              args: "--config {{INPUTS.base}}/config.cfg"
             """
         )
         with self.assertRaises(ValueError):

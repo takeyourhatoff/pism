@@ -9,24 +9,33 @@ import sys
 from pathlib import Path
 from typing import Dict
 
+if sys.version_info < (3, 13):
+    raise SystemExit("pism-cloud requires Python 3.13+.")
+
+from .aws import aws_region
 from .batch import (
     build_overrides,
     describe_jobs,
+    resolve_instance_metadata,
     select_job_definition,
     select_queue,
-    submit_job,
 )
 from .config import NormalizedConfig, load_configs
-from .dynamo import get_job, get_table, list_jobs, store_job, utc_now
+from .dynamo import get_job, get_table, list_jobs, store_job, update_job_execution, utc_now
 from .images import build_and_push, repo_root
 from .infra import deploy_stack, stack_outputs
-from .logs import fetch_log_events
+from .jobs import attempt_ids_for_item, current_job
+from .logs import extract_log_streams_for_jobs, fetch_log_events_for_streams
+from .orchestrator import start_execution, stop_execution
 from .progress import estimate_progress
-from .runtime import hourly_rate, job_costs, summarize_costs
-from .s3 import upload_path, upload_text
+from .resources import resolve_resources
+from .runtime import hourly_rate, summarize_costs, summarize_runtime_seconds
+from .timeline import build_timeline_for_attempts
+from .s3 import parse_s3_uri, upload_path, upload_text
 
 INPUT_DIR = "/workspace/input"
 OUTPUT_DIR = "/workspace/output"
+RESUME_MARKER_NAME = "pism-cloud-resume.json"
 
 
 def render_args_with_inputs(template: str, job_name: str, input_names: list[str]) -> str:
@@ -42,35 +51,24 @@ def render_args_with_inputs(template: str, job_name: str, input_names: list[str]
 
 def build_job_item(
     config: NormalizedConfig,
-    job_queue: str,
-    job_definition: str,
     inputs_s3: Dict[str, str],
     output_s3: str,
-    timeout_seconds: int | None,
-    job_id: str,
-    job_name: str,
+    resources: Dict[str, int],
 ) -> Dict[str, object]:
     item: Dict[str, object] = {
-        "job_name": job_name,
+        "job_name": config.job_name,
         "sort_key": "JOB",
         "created_at": utc_now(),
-        "job_id": job_id,
-        "instance_type": config.compute["instance"],
-        "use_spot": config.compute["use_spot"],
-        "job_queue": job_queue,
-        "job_definition": job_definition,
+        "use_spot": config.use_spot,
         "inputs": inputs_s3,
         "output_s3": output_s3,
         "pism_args": config.pism["args"],
-        "pism_executable": config.pism["executable"],
-        "mpi_ranks": config.compute["mpi_ranks"],
-        "gpus": config.compute["gpus"],
-        "status": "SUBMITTED",
+        "gpus": resources["gpus"],
+        "vcpus": resources["vcpus"],
+        "memory_mib": resources["memory_mib"],
     }
     if config.budget_usd is not None:
         item["budget_usd"] = config.budget_usd
-    if timeout_seconds is not None:
-        item["timeout_seconds"] = timeout_seconds
     return item
 
 
@@ -92,8 +90,12 @@ def submit(config_paths: list[str], stack_name: str) -> int:
 
     input_bucket = outputs.get("InputBucketName")
     output_bucket = outputs.get("OutputBucketName")
-    if not input_bucket or not output_bucket:
-        print("InputBucketName/OutputBucketName not found in stack outputs", file=sys.stderr)
+    state_machine_arn = outputs.get("StateMachineArn")
+    if not input_bucket or not output_bucket or not state_machine_arn:
+        print(
+            "InputBucketName/OutputBucketName/StateMachineArn not found in stack outputs",
+            file=sys.stderr,
+        )
         return 2
 
     for cfg in configs:
@@ -113,21 +115,33 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             return 2
 
     for cfg in configs:
+        gpus_hint = 1 if cfg.accelerator == "gpu" else 0
         try:
-            job_queue = select_queue(cfg.compute["gpus"], cfg.compute["use_spot"])
+            job_definition = select_job_definition(gpus_hint)
+            resources = resolve_resources(job_definition)
+        except ValueError as exc:
+            print(f"Resource selection error: {exc}", file=sys.stderr)
+            return 2
+        if cfg.accelerator == "gpu" and resources["gpus"] <= 0:
+            print(
+                f"Resource selection error: job definition {job_definition} has no GPU requirement",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            job_queue = select_queue(resources["gpus"], cfg.use_spot)
         except ValueError as exc:
             print(f"Queue selection error: {exc}", file=sys.stderr)
             return 2
-
-        job_definition = select_job_definition(cfg.compute["gpus"])
         resolved_inputs: Dict[str, str] = {}
         for name, value in cfg.inputs.items():
-            if value.startswith("s3://"):
-                resolved_inputs[name] = value
-            else:
-                resolved_inputs[name] = f"s3://{input_bucket}/{value}"
+            resolved_inputs[name] = f"s3://{input_bucket}/{value}"
 
         output_s3 = f"s3://{output_bucket}/{cfg.job_name}"
+        output_bucket_name, output_prefix = parse_s3_uri(output_s3)
+        resume_key = (
+            f"{output_prefix}/{RESUME_MARKER_NAME}" if output_prefix else RESUME_MARKER_NAME
+        )
 
         rendered_args = render_args_with_inputs(
             cfg.pism["args"],
@@ -135,67 +149,67 @@ def submit(config_paths: list[str], stack_name: str) -> int:
             list(cfg.inputs.keys()),
         )
 
-        timeout_seconds = None
-        if cfg.budget_usd is not None:
-            try:
-                rate = hourly_rate(str(cfg.compute["instance"]), bool(cfg.compute["use_spot"]))
-            except Exception as exc:
-                print(f"Budget error: unable to fetch pricing for {cfg.compute['instance']}: {exc}", file=sys.stderr)
-                return 2
-            if rate <= 0:
-                print(f"Budget error: invalid hourly rate for {cfg.compute['instance']}", file=sys.stderr)
-                return 2
-            budget_hours = cfg.budget_usd / rate
-            timeout_seconds = max(60, int(budget_hours * 3600))
         args_s3 = upload_text(rendered_args, output_s3, "pism_args.txt")
         overrides = build_overrides(
-            vcpus=cfg.compute["vcpus"],
-            memory_mib=cfg.compute["memory_mib"],
-            mpi_ranks=cfg.compute["mpi_ranks"],
-            gpus=cfg.compute["gpus"],
+            vcpus=resources["vcpus"],
+            memory_mib=resources["memory_mib"],
+            mpi_ranks=resources["mpi_ranks"],
+            gpus=resources["gpus"],
             inputs_json=json.dumps(resolved_inputs),
             output_s3=output_s3,
-            pism_args="",
             pism_args_s3=args_s3,
             pism_executable=cfg.pism["executable"],
             job_name=cfg.job_name,
-        )
-
-        job_id, job_name = submit_job(
-            job_name=cfg.job_name,
-            job_queue=job_queue,
-            job_definition=job_definition,
-            overrides=overrides,
-            timeout_seconds=timeout_seconds,
-            tags={
-                "PismJobName": cfg.job_name,
-                "PismInstanceType": cfg.compute["instance"],
-                "PismSpot": "true" if cfg.compute["use_spot"] else "false",
-            },
         )
 
         store_job(
             table,
             build_job_item(
                 cfg,
-                job_queue,
-                job_definition,
                 resolved_inputs,
                 output_s3,
-                timeout_seconds,
-                job_id,
-                job_name,
+                resources,
             ),
         )
+        try:
+            execution_arn = start_execution(
+                state_machine_arn,
+                {
+                    "job_name": cfg.job_name,
+                    "job_queue": job_queue,
+                    "job_definition": job_definition,
+                    "overrides": overrides,
+                    "tags": {
+                        "PismJobName": cfg.job_name,
+                        "PismSpot": "true" if cfg.use_spot else "false",
+                    },
+                    "resume_bucket": output_bucket_name,
+                    "resume_key": resume_key,
+                },
+            )
+        except Exception as exc:
+            print(f"Orchestration start failed: {exc}", file=sys.stderr)
+            return 2
+
+        try:
+            update_job_execution(table, cfg.job_name, execution_arn)
+        except Exception as exc:
+            print(f"Warning: unable to store execution ARN: {exc}", file=sys.stderr)
 
         print(f"Submitted job {cfg.job_name}")
         print(f"Queue: {job_queue}")
+        print(f"Execution: {execution_arn}")
+        mem_gib = resources["memory_mib"] / 1024.0
+        print(
+            "Resources: vcpus={vcpus} mem={mem:.1f}GiB gpus={gpus} mpi_ranks={mpi}".format(
+                vcpus=resources["vcpus"],
+                mem=mem_gib,
+                gpus=resources["gpus"],
+                mpi=resources["mpi_ranks"],
+            )
+        )
         if cfg.budget_usd is not None:
-            if timeout_seconds is not None:
-                hours = timeout_seconds / 3600.0
-                print(f"Budget guard: ${cfg.budget_usd:.2f} (~{hours:.2f}h timeout)")
-            else:
-                print(f"Budget guard: ${cfg.budget_usd:.2f}")
+            print(f"Budget guard: ${cfg.budget_usd:.2f}")
 
     return 0
 
@@ -207,66 +221,89 @@ def status(job_name: str) -> int:
         print(f"Job {job_name} not found")
         return 1
 
-    job_id = job_item.get("job_id")
-    if not job_id:
-        print(f"Job {job_name} missing AWS Batch job id")
+    attempt_ids = attempt_ids_for_item(job_item)
+
+    if not attempt_ids:
+        print(f"Job {job_name} has no attempts yet")
         return 1
 
-    batch_jobs = describe_jobs([str(job_id)])
+    batch_jobs = describe_jobs(attempt_ids)
     if not batch_jobs:
         print(f"Job {job_name} not found in AWS Batch")
         return 1
 
-    job = batch_jobs[0]
+    job = current_job(batch_jobs, attempt_ids)
+    if not job:
+        print(f"Job {job_name} not found in AWS Batch")
+        return 1
+    current_job_id = job.get("jobId")
 
     print(f"Job {job_name}")
     status_value = job.get("status") or "UNKNOWN"
     status_reason = job.get("statusReason", "")
-    if status_reason:
-        print(f"Status: {status_value} ({status_reason})")
-    else:
-        print(f"Status: {status_value}")
+    status_line = f"{status_value} ({status_reason})" if status_reason else status_value
+    print(f"Status: {status_line}")
     rate = None
     snapshot = None
-    cost_by_job = {}
-    instance_type = job_item.get("instance_type")
     use_spot = job_item.get("use_spot")
     budget_usd = job_item.get("budget_usd")
+    actual_instance_type = None
+    availability_zone = None
+    execution_arn = job_item.get("execution_arn")
+    runtime_seconds = summarize_runtime_seconds(batch_jobs)
 
-    if instance_type and use_spot is not None:
-        try:
-            rate = hourly_rate(str(instance_type), bool(use_spot))
-            snapshot = summarize_costs(batch_jobs, rate)
-            print(
-                "Cost per hour: ${rate:.2f}/hr per job | Running cost per hour: ${running:.2f}/hr | Cost so far: ${total:.2f}".format(
-                    rate=snapshot.hourly_rate_usd,
-                    running=snapshot.running_rate_usd,
-                    total=snapshot.cost_to_date_usd,
-                )
-            )
-            cost_by_job = job_costs(batch_jobs, rate)
-        except Exception as exc:
-            print(f"Cost per hour unavailable: {exc}", file=sys.stderr)
+    if use_spot is not None:
+        print(f"Spot: {'yes' if use_spot else 'no'}")
+
+    resources_line = _format_resources(job_item)
+    if resources_line:
+        print(f"Resources: {resources_line}")
 
     progress = None
-    running_job = next(
-        (
-            job
-            for job in batch_jobs
-            if job.get("status") in {"STARTING", "RUNNING"}
-            and job.get("container", {}).get("logStreamName")
-        ),
-        None,
-    )
-    if running_job:
-        log_stream = running_job.get("container", {}).get("logStreamName")
-        if log_stream:
-            log_group = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
-            try:
-                events = fetch_log_events(log_group, log_stream, include_head=True)
-                progress = estimate_progress(events)
-            except Exception as exc:
-                print(f"ETA unavailable: {exc}", file=sys.stderr)
+    log_events = []
+    log_group = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
+    log_streams = extract_log_streams_for_jobs(batch_jobs)
+    log_stream = job.get("container", {}).get("logStreamName")
+    if log_streams:
+        try:
+            log_events = fetch_log_events_for_streams(log_group, log_streams, include_head=True)
+            progress = estimate_progress(log_events, monotonic=True)
+        except Exception as exc:
+            print(f"ETA unavailable: {exc}", file=sys.stderr)
+
+    instance_meta = None
+    try:
+        instance_meta = resolve_instance_metadata(job)
+    except Exception as exc:
+        print(f"Instance lookup unavailable: {exc}", file=sys.stderr)
+
+    if instance_meta:
+        actual_instance_type = instance_meta.get("instance_type")
+        availability_zone = instance_meta.get("availability_zone")
+
+    if actual_instance_type:
+        instance_line = actual_instance_type
+        if availability_zone:
+            instance_line = f"{instance_line} ({availability_zone})"
+        print(f"Instance: {instance_line}")
+
+    if runtime_seconds is not None:
+        print(f"Runtime: {_format_duration(runtime_seconds)}")
+
+    if log_stream:
+        print(f"Logs: {_log_url(log_group, log_stream)}")
+
+    if actual_instance_type and use_spot is not None:
+        try:
+            rate = hourly_rate(str(actual_instance_type), bool(use_spot))
+            snapshot = summarize_costs(batch_jobs, rate)
+            print(
+                "Cost per hour: ${rate:.2f}/hr | Cost so far: ${total:.2f}".format(
+                    rate=snapshot.hourly_rate_usd, total=snapshot.cost_to_date_usd
+                )
+            )
+        except Exception as exc:
+            print(f"Cost per hour unavailable: {exc}", file=sys.stderr)
 
     if progress:
         bar = _format_progress_bar(progress.progress_fraction)
@@ -297,30 +334,23 @@ def status(job_name: str) -> int:
                     from .batch import batch_client
 
                     client = batch_client()
-                    client.terminate_job(jobId=str(job_id), reason="Budget estimate exceeded")
+                    if current_job_id:
+                        client.terminate_job(jobId=str(current_job_id), reason="Budget estimate exceeded")
+                    if execution_arn:
+                        try:
+                            stop_execution(str(execution_arn), reason="Budget estimate exceeded")
+                        except Exception as exc:
+                            print(f"Warning: unable to stop orchestrator: {exc}", file=sys.stderr)
 
-    timeout_seconds = job_item.get("timeout_seconds")
     if budget_usd is not None:
-        if timeout_seconds:
-            hours = float(timeout_seconds) / 3600.0
-            print(f"Budget guard: ${float(budget_usd):.2f} (~{hours:.2f}h timeout)")
-        else:
-            print(f"Budget guard: ${float(budget_usd):.2f}")
-
-    for job in batch_jobs:
-        job_id_value = str(job.get("jobId") or "")
-        cost_value = cost_by_job.get(job_id_value)
-        cost_suffix = ""
-        if cost_value is not None and cost_value > 0:
-            cost_suffix = f" cost=${cost_value:.2f}"
-        print(
-            "{name} {status} {status_reason}{cost}".format(
-                name=job.get("jobName"),
-                status=job.get("status"),
-                status_reason=job.get("statusReason", ""),
-                cost=cost_suffix,
-            )
-        )
+        print(f"Budget: ${float(budget_usd):.2f}")
+    timeline = build_timeline_for_attempts(job_item, batch_jobs, attempt_ids, log_events)
+    if timeline:
+        print("Timeline:")
+        for event in timeline:
+            stamp = event.iso_timestamp()
+            detail = f" - {event.detail}" if event.detail else ""
+            print(f"{stamp} {event.label}{detail}")
     return 0
 
 
@@ -331,6 +361,51 @@ def _format_progress_bar(progress: float, width: int = 24) -> str:
         fill="#" * filled,
         rest="-" * (width - filled),
         pct=clamped * 100.0,
+    )
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "0s"
+    total_seconds = int(round(seconds))
+    minutes, secs = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m"
+    if minutes:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+def _format_memory_gib(memory_mib: object) -> str | None:
+    if not isinstance(memory_mib, (int, float)):
+        return None
+    return f"{float(memory_mib) / 1024.0:.1f} GiB"
+
+
+def _format_resources(job_item: Dict[str, object]) -> str:
+    if not job_item:
+        return ""
+    parts = []
+    vcpus = job_item.get("vcpus")
+    if vcpus is not None:
+        parts.append(f"{vcpus} vCPU")
+    mem = _format_memory_gib(job_item.get("memory_mib"))
+    if mem:
+        parts.append(mem)
+    gpus = job_item.get("gpus")
+    if gpus is not None:
+        parts.append(f"{gpus} GPU")
+    return " | ".join(parts)
+
+
+def _log_url(log_group: str, log_stream: str) -> str:
+    region = aws_region()
+    group = log_group.replace("/", "$252F")
+    stream = log_stream.replace("/", "$252F")
+    return (
+        f"https://{region}.console.aws.amazon.com/cloudwatch/home?region={region}"
+        f"#logsV2:log-groups/log-group/{group}/log-events/{stream}"
     )
 
 
@@ -352,14 +427,18 @@ def cancel(job_name: str) -> int:
     if not job_item:
         print(f"Job {job_name} not found")
         return 1
-    job_id = job_item.get("job_id")
-    if not job_id:
-        print(f"Job {job_name} missing AWS Batch job id")
-        return 1
+    execution_arn = job_item.get("execution_arn")
+    if execution_arn:
+        try:
+            stop_execution(str(execution_arn), reason="Cancelled by user")
+        except Exception as exc:
+            print(f"Warning: unable to stop orchestrator: {exc}", file=sys.stderr)
 
-    client = batch_client()
-    client.terminate_job(jobId=str(job_id), reason="Cancelled by user")
+    attempt_ids = attempt_ids_for_item(job_item)
 
+    if attempt_ids:
+        client = batch_client()
+        client.terminate_job(jobId=str(attempt_ids[-1]), reason="Cancelled by user")
     print(f"Cancelled job {job_name}")
     return 0
 
@@ -372,10 +451,17 @@ def list_jobs_cmd() -> int:
         return 0
 
     for job in sorted(jobs, key=lambda item: item.get("created_at", "")):
+        mem_mib = job.get("memory_mib")
+        mem_gib = None
+        if isinstance(mem_mib, (int, float)):
+            mem_gib = float(mem_mib) / 1024.0
+        mem_display = f"{mem_gib:.1f}GiB" if mem_gib is not None else "?"
         print(
-            "{job_name} instance={instance} spot={spot}".format(
+            "{job_name} vcpus={vcpus} mem={mem} gpus={gpus} spot={spot}".format(
                 job_name=job.get("job_name"),
-                instance=job.get("instance_type"),
+                vcpus=job.get("vcpus", "?"),
+                mem=mem_display,
+                gpus=job.get("gpus", "?"),
                 spot=job.get("use_spot"),
             )
         )

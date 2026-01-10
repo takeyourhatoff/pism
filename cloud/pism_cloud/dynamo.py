@@ -58,3 +58,11 @@ def list_jobs(table) -> List[Dict[str, Any]]:
 def get_job(table, job_name: str) -> Dict[str, Any] | None:
     response = table.get_item(Key={"job_name": job_name, "sort_key": "JOB"})
     return response.get("Item")
+
+
+def update_job_execution(table, job_name: str, execution_arn: str) -> None:
+    table.update_item(
+        Key={"job_name": job_name, "sort_key": "JOB"},
+        UpdateExpression="SET execution_arn = :arn",
+        ExpressionAttributeValues={":arn": execution_arn},
+    )

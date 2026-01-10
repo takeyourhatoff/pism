@@ -13,6 +13,10 @@ build*/
 *.petsc
 *.petsc.info
 *.pyc
+__pycache__/
+.venv/
+.venv*/
+*.egg-info/
 out.*
 examples/**/*.png
 examples/**/*.zip

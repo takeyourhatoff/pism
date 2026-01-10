@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional
 
 import boto3
 
@@ -42,57 +42,34 @@ def build_overrides(
     gpus: int,
     inputs_json: str,
     output_s3: str,
-    pism_args: str,
-    pism_args_s3: str | None,
+    pism_args_s3: str,
     pism_executable: str,
     job_name: str,
 ) -> Dict[str, object]:
+    region = aws_region()
     resource_requirements = [
-        {"type": "VCPU", "value": str(vcpus)},
-        {"type": "MEMORY", "value": str(memory_mib)},
+        {"Type": "VCPU", "Value": str(vcpus)},
+        {"Type": "MEMORY", "Value": str(memory_mib)},
     ]
     if gpus > 0:
-        resource_requirements.append({"type": "GPU", "value": str(gpus)})
+        resource_requirements.append({"Type": "GPU", "Value": str(gpus)})
 
     environment = [
-        {"name": "JOB_NAME", "value": job_name},
-        {"name": "INPUTS_JSON", "value": inputs_json},
-        {"name": "OUTPUT_S3", "value": output_s3},
-        {"name": "MPI_RANKS", "value": str(mpi_ranks)},
-        {"name": "PISM_ARGS", "value": pism_args},
-        {"name": "PISM_EXECUTABLE", "value": pism_executable},
+        {"Name": "JOB_NAME", "Value": job_name},
+        {"Name": "INPUTS_JSON", "Value": inputs_json},
+        {"Name": "OUTPUT_S3", "Value": output_s3},
+        {"Name": "MPI_RANKS", "Value": str(mpi_ranks)},
+        {"Name": "PISM_EXECUTABLE", "Value": pism_executable},
+        {"Name": "PISM_ARGS_S3", "Value": pism_args_s3},
+        {"Name": "AWS_REGION", "Value": region},
+        {"Name": "AWS_DEFAULT_REGION", "Value": region},
     ]
-    if pism_args_s3:
-        environment.append({"name": "PISM_ARGS_S3", "value": pism_args_s3})
 
     return {
-        "command": build_job_command(),
-        "resourceRequirements": resource_requirements,
-        "environment": environment,
+        "Command": build_job_command(),
+        "ResourceRequirements": resource_requirements,
+        "Environment": environment,
     }
-
-
-def submit_job(
-    job_name: str,
-    job_queue: str,
-    job_definition: str,
-    overrides: Dict[str, object],
-    timeout_seconds: int | None = None,
-    tags: Dict[str, str] | None = None,
-) -> Tuple[str, str]:
-    client = batch_client()
-    payload: Dict[str, object] = {
-        "jobName": job_name,
-        "jobQueue": job_queue,
-        "jobDefinition": job_definition,
-        "containerOverrides": overrides,
-    }
-    if timeout_seconds is not None:
-        payload["timeout"] = {"attemptDurationSeconds": int(timeout_seconds)}
-    if tags:
-        payload["tags"] = {str(k): str(v) for k, v in tags.items()}
-    response = client.submit_job(**payload)
-    return response["jobId"], job_name
 
 
 def describe_jobs(job_ids: List[str]) -> List[Dict[str, object]]:
@@ -107,16 +84,46 @@ def describe_jobs(job_ids: List[str]) -> List[Dict[str, object]]:
     return results
 
 
-def summarize_status(jobs: List[Dict[str, object]]) -> Dict[str, int]:
-    summary = {"queued": 0, "running": 0, "succeeded": 0, "failed": 0}
-    for job in jobs:
-        status = job.get("status", "")
-        if status in {"SUBMITTED", "PENDING", "RUNNABLE"}:
-            summary["queued"] += 1
-        elif status in {"STARTING", "RUNNING"}:
-            summary["running"] += 1
-        elif status == "SUCCEEDED":
-            summary["succeeded"] += 1
-        elif status == "FAILED":
-            summary["failed"] += 1
-    return summary
+def _cluster_name_from_container_instance_arn(arn: str) -> Optional[str]:
+    marker = "container-instance/"
+    if marker not in arn:
+        return None
+    cluster = arn.split(marker, 1)[1].split("/", 1)[0]
+    return cluster or None
+
+
+def resolve_instance_metadata(job: Dict[str, object]) -> Optional[Dict[str, str]]:
+    container = job.get("container", {}) if isinstance(job.get("container"), dict) else {}
+    container_instance_arn = container.get("containerInstanceArn")
+    if not container_instance_arn:
+        return None
+    cluster_name = _cluster_name_from_container_instance_arn(str(container_instance_arn))
+    if not cluster_name:
+        return None
+
+    region = aws_region()
+    ecs = boto3.client("ecs", region_name=region)
+    response = ecs.describe_container_instances(
+        cluster=cluster_name,
+        containerInstances=[str(container_instance_arn)],
+    )
+    container_instances = response.get("containerInstances", [])
+    if not container_instances:
+        return None
+    instance_id = container_instances[0].get("ec2InstanceId")
+    if not instance_id:
+        return None
+
+    ec2 = boto3.client("ec2", region_name=region)
+    response = ec2.describe_instances(InstanceIds=[str(instance_id)])
+    reservations = response.get("Reservations", [])
+    if not reservations:
+        return None
+    instances = reservations[0].get("Instances", [])
+    if not instances:
+        return None
+    payload = instances[0]
+    return {
+        "instance_type": str(payload.get("InstanceType", "")),
+        "availability_zone": str(payload.get("Placement", {}).get("AvailabilityZone", "")),
+    }

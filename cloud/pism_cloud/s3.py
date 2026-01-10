@@ -43,3 +43,4 @@ def upload_text(text: str, dest_uri: str, name: str) -> str:
     client = boto3.client("s3", region_name=aws_region())
     client.put_object(Bucket=bucket, Key=key, Body=text.encode("utf-8"))
     return f"s3://{bucket}/{key}"
+

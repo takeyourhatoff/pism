@@ -1,10 +1,5 @@
 job_name: haseloff-smoke-001
 
-compute:
-  backend: aws-batch
-  instance: c7i.4xlarge
-  # use_spot: false
-
 inputs:
   base: haseloff
 

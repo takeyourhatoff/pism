@@ -4,6 +4,10 @@ import unittest
 from pathlib import Path
 
 
+if sys.version_info < (3, 13):
+    raise unittest.SkipTest("pism-cloud tests require Python 3.13+")
+
+
 def _install_boto3_stub() -> None:
     if "boto3" in sys.modules:
         return

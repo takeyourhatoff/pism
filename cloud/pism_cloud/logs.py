@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 import boto3
 
@@ -39,4 +39,62 @@ def fetch_log_events(
     events.extend(
         [(int(event.get("timestamp", 0)), str(event.get("message", ""))) for event in tail_events]
     )
+    return events
+
+
+def extract_log_streams(job: Dict[str, object]) -> List[str]:
+    streams: List[str] = []
+    container = job.get("container", {}) if isinstance(job.get("container"), dict) else {}
+    current_stream = container.get("logStreamName")
+    if current_stream:
+        streams.append(str(current_stream))
+    attempts = job.get("attempts", [])
+    if isinstance(attempts, list):
+        for attempt in attempts:
+            container = attempt.get("container", {}) if isinstance(attempt, dict) else {}
+            stream = container.get("logStreamName")
+            if stream:
+                streams.append(str(stream))
+    seen: set[str] = set()
+    unique: List[str] = []
+    for stream in streams:
+        if stream in seen:
+            continue
+        seen.add(stream)
+        unique.append(stream)
+    return unique
+
+
+def extract_log_streams_for_jobs(jobs: Iterable[Dict[str, object]]) -> List[str]:
+    streams: List[str] = []
+    for job in jobs:
+        streams.extend(extract_log_streams(job))
+    seen: set[str] = set()
+    unique: List[str] = []
+    for stream in streams:
+        if stream in seen:
+            continue
+        seen.add(stream)
+        unique.append(stream)
+    return unique
+
+
+def fetch_log_events_for_streams(
+    log_group: str,
+    log_streams: Iterable[str],
+    limit: int = 200,
+    include_head: bool = False,
+    head_limit: int = 200,
+) -> List[Tuple[int, str]]:
+    events: List[Tuple[int, str]] = []
+    for stream in log_streams:
+        events.extend(
+            fetch_log_events(
+                log_group,
+                stream,
+                limit=limit,
+                include_head=include_head,
+                head_limit=head_limit,
+            )
+        )
     return events

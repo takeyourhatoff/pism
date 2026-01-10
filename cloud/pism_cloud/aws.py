@@ -1,10 +1,9 @@
-"""AWS helper utilities for instance discovery and pricing."""
+"""AWS helper utilities for pricing and region selection."""
 
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Optional
@@ -12,35 +11,13 @@ from typing import Optional
 import boto3
 
 
-@dataclass(frozen=True)
-class InstanceSpec:
-    instance_type: str
-    vcpus: int
-    memory_mib: int
-    gpus: int
-
-
 def aws_region() -> str:
     session = boto3.session.Session()
-    return session.region_name or os.environ.get("AWS_REGION", "us-east-1")
-
-
-@lru_cache(maxsize=64)
-def instance_spec(instance_type: str, region: Optional[str] = None) -> InstanceSpec:
-    region = region or aws_region()
-    ec2 = boto3.client("ec2", region_name=region)
-    response = ec2.describe_instance_types(InstanceTypes=[instance_type])
-    info = response["InstanceTypes"][0]
-
-    gpus = 0
-    if "GpuInfo" in info:
-        gpus = sum(gpu.get("Count", 0) for gpu in info["GpuInfo"].get("Gpus", []))
-
-    return InstanceSpec(
-        instance_type=instance_type,
-        vcpus=int(info["VCpuInfo"]["DefaultVCpus"]),
-        memory_mib=int(info["MemoryInfo"]["SizeInMiB"]),
-        gpus=int(gpus),
+    return (
+        session.region_name
+        or os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "us-east-1"
     )
 
 

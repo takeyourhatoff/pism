@@ -7,15 +7,12 @@ from typing import Any, Dict, List, Tuple
 
 import yaml
 
-from .aws import instance_spec
-
-INSTANCE_ALIASES = {"c7i": "c7i.4xlarge", "hpc6a": "hpc6a.48xlarge", "g5": "g5.xlarge"}
-
 
 @dataclass(frozen=True)
 class NormalizedConfig:
     job_name: str
-    compute: Dict[str, Any]
+    accelerator: str
+    use_spot: bool
     inputs: Dict[str, str]
     pism: Dict[str, Any]
     budget_usd: float | None
@@ -27,20 +24,8 @@ def _require(value: Any, message: str) -> Any:
     return value
 
 
-def _ensure_s3_uri(value: str, field_name: str) -> str:
-    if not value.startswith("s3://"):
-        raise ValueError(f"{field_name} must start with s3://")
-    return value
-
-
 def _normalize_prefix(value: str) -> str:
     return value.strip("/")
-
-
-def _resolve_instance(instance: str | None) -> str:
-    if instance is None:
-        raise ValueError("Instance type not specified")
-    return INSTANCE_ALIASES.get(instance, instance)
 
 
 def _load_documents(path: str) -> List[Tuple[int, Dict[str, Any]]]:
@@ -68,24 +53,14 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
         if budget_usd <= 0:
             raise ValueError(f"{source}: budget_usd must be greater than zero")
 
-    compute = data.get("compute", {})
-    if compute.get("backend") != "aws-batch":
-        raise ValueError(f"{source}: compute.backend must be aws-batch")
+    compute = data.get("compute", {}) or {}
+    if not isinstance(compute, dict):
+        raise ValueError(f"{source}: compute must be a mapping")
 
     use_spot = bool(compute.get("use_spot", True))
-    instance_value = compute.get("instance")
-    if instance_value is None:
-        if compute.get("instance_types") is not None:
-            raise ValueError(
-                f"{source}: compute.instance_types is no longer supported; use compute.instance"
-            )
-        raise ValueError(f"{source}: compute.instance is required")
-    instance = _resolve_instance(instance_value)
-
-    spec = instance_spec(instance)
-
-    gpus = int(spec.gpus)
-    mpi_ranks = int(gpus if gpus > 0 else spec.vcpus)
+    accelerator = str(compute.get("accelerator") or "cpu").lower()
+    if accelerator not in {"cpu", "gpu"}:
+        raise ValueError(f"{source}: compute.accelerator must be cpu or gpu")
 
     inputs_cfg = data.get("inputs")
     if inputs_cfg is None:
@@ -101,29 +76,19 @@ def _normalize_config(data: Dict[str, Any], source: str) -> NormalizedConfig:
         if not raw:
             raise ValueError(f"{source}: inputs.{name} must not be empty")
         if raw.startswith("s3://"):
-            normalized_inputs[str(name)] = _ensure_s3_uri(raw, f"{source}: inputs.{name}").rstrip("/")
-        else:
-            normalized_inputs[str(name)] = _normalize_prefix(raw)
+            raise ValueError(f"{source}: inputs.{name} must be a prefix, not a full S3 URI")
+        normalized_inputs[str(name)] = _normalize_prefix(raw)
 
     pism_cfg = data.get("pism", {})
     args = _require(pism_cfg.get("args"), f"{source}: pism.args is required")
     executable = pism_cfg.get("executable", "pismr")
 
-    normalized_compute = {
-        "backend": "aws-batch",
-        "instance": instance,
-        "vcpus": spec.vcpus,
-        "memory_mib": spec.memory_mib,
-        "gpus": gpus,
-        "mpi_ranks": mpi_ranks,
-        "use_spot": use_spot,
-    }
-
     normalized_pism = {"args": args, "executable": executable}
 
     return NormalizedConfig(
         job_name=job_name,
-        compute=normalized_compute,
+        accelerator=accelerator,
+        use_spot=use_spot,
         inputs=normalized_inputs,
         pism=normalized_pism,
         budget_usd=budget_usd,

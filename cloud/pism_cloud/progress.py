@@ -21,12 +21,10 @@ MONTH_LENGTHS = (31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 @dataclass(frozen=True)
 class ProgressEstimate:
-    start_time: float
     end_time: float
     current_time: float
     progress_fraction: float
     eta_seconds: float
-    model_units_per_hour: float
     sample_count: int
     wall_seconds: float
 
@@ -105,6 +103,7 @@ def _parse_model_time(line: str) -> float | None:
 def estimate_progress(
     events: Iterable[Tuple[int, str]],
     sample_limit: int = 20,
+    monotonic: bool = False,
 ) -> ProgressEstimate | None:
     ordered = sorted(events, key=lambda item: item[0])
     lines = [message for _, message in ordered]
@@ -123,11 +122,24 @@ def estimate_progress(
     if len(samples) < 2:
         return None
 
-    samples = samples[-sample_limit:]
-    t0, m0 = samples[0]
-    t1, m1 = samples[-1]
-    if t1 <= t0 or m1 <= m0:
-        return None
+    if monotonic:
+        monotonic_samples: list[tuple[int, float]] = []
+        max_time: float | None = None
+        for ts, model_time in samples:
+            if max_time is None or model_time > max_time:
+                monotonic_samples.append((ts, model_time))
+                max_time = model_time
+        if len(monotonic_samples) < 2:
+            return None
+        monotonic_samples = monotonic_samples[-sample_limit:]
+        t0, m0 = monotonic_samples[0]
+        t1, m1 = monotonic_samples[-1]
+    else:
+        samples = samples[-sample_limit:]
+        t0, m0 = samples[0]
+        t1, m1 = samples[-1]
+        if t1 <= t0 or m1 <= m0:
+            return None
 
     wall_seconds = (t1 - t0) / 1000.0
     rate = (m1 - m0) / wall_seconds
@@ -140,12 +152,10 @@ def estimate_progress(
     progress = max(0.0, min(1.0, progress))
 
     return ProgressEstimate(
-        start_time=start_time,
         end_time=end_time,
         current_time=m1,
         progress_fraction=progress,
         eta_seconds=eta_seconds,
-        model_units_per_hour=rate * 3600.0,
         sample_count=len(samples),
         wall_seconds=wall_seconds,
     )

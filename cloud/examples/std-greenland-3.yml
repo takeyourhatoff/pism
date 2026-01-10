@@ -1,11 +1,6 @@
 job_name: std-greenland-3
 budget_usd: 100
 
-compute:
-  backend: aws-batch
-  instance: c7i.4xlarge
-  # use_spot: false
-
 inputs:
   base: std-greenland
 

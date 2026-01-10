@@ -1,8 +1,7 @@
 job_name: biis-test-001
 
 compute:
-  backend: aws-batch
-  instance: g5.xlarge
+  accelerator: gpu
   # use_spot: false
 
 inputs:
