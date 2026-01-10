@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM nvidia/cuda:12.2.0-devel-ubuntu22.04 AS build
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -6,6 +7,7 @@ ARG CUDA_ARCH=sm_86
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
+    ccache \
     cmake \
     curl \
     gfortran \
@@ -21,6 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     python3 \
     && rm -rf /var/lib/apt/lists/*
+
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=10G
 
 WORKDIR /opt
 RUN git clone -b release --depth=1 https://gitlab.com/petsc/petsc.git
@@ -48,8 +53,10 @@ ENV PKG_CONFIG_PATH="/opt/petsc-install/lib/pkgconfig"
 WORKDIR /opt/pism
 COPY . /opt/pism
 
-RUN cmake -S . -B build \
+RUN --mount=type=cache,target=/ccache cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX=/opt/pism-install \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DPism_BUILD_PYTHON_BINDINGS=OFF \
         -DPism_BUILD_TESTS=OFF \
         -DPism_USE_CUDA_SIA=ON \

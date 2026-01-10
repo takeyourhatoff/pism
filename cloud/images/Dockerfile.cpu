@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 FROM ubuntu:22.04 AS build
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -5,6 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     ca-certificates \
+    ccache \
     cmake \
     curl \
     git \
@@ -20,11 +22,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     && rm -rf /var/lib/apt/lists/*
 
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=10G
+
 WORKDIR /opt/pism
 COPY . /opt/pism
 
-RUN cmake -S . -B build \
+RUN --mount=type=cache,target=/ccache cmake -S . -B build \
         -DCMAKE_INSTALL_PREFIX=/opt/pism-install \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DPism_BUILD_PYTHON_BINDINGS=OFF \
         -DPism_BUILD_TESTS=OFF \
     && cmake --build build -j$(nproc) \

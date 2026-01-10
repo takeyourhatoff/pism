@@ -17,12 +17,10 @@ OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/workspace/output")
 OUTPUT_S3 = os.environ.get("OUTPUT_S3", "")
 MPI_RANKS = os.environ.get("MPI_RANKS", "1")
 PISM_EXECUTABLE = os.environ.get("PISM_EXECUTABLE", "pismr")
-PISM_ARGS_RAW = os.environ.get("PISM_ARGS", "")
 PISM_ARGS_S3 = os.environ.get("PISM_ARGS_S3", "")
-CHECKPOINT_ENABLED = True
-CHECKPOINT_RESUME = True
 CHECKPOINT_SYNC_INTERVAL = 600
 CHECKPOINT_INTERVAL_HOURS = 0.1667
+RESUME_MARKER_NAME = "pism-cloud-resume.json"
 
 
 def sync_outputs() -> None:
@@ -39,10 +37,9 @@ def sync_inputs() -> None:
         subprocess.run(["aws", "s3", "sync", uri, dest], check=True)
 
 
-def load_args_from_s3() -> None:
-    global PISM_ARGS_RAW
-    if PISM_ARGS_RAW.strip() or not PISM_ARGS_S3:
-        return
+def load_args_from_s3() -> str:
+    if not PISM_ARGS_S3:
+        raise RuntimeError("PISM_ARGS_S3 is required")
     result = subprocess.run(
         ["aws", "s3", "cp", PISM_ARGS_S3, "-"],
         capture_output=True,
@@ -52,9 +49,42 @@ def load_args_from_s3() -> None:
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip()
         if message:
-            print(f"Args download failed for {PISM_ARGS_S3}: {message}", flush=True)
+            raise RuntimeError(f"Args download failed for {PISM_ARGS_S3}: {message}")
+        raise RuntimeError(f"Args download failed for {PISM_ARGS_S3}")
+    args_text = result.stdout.strip()
+    if not args_text:
+        raise RuntimeError(f"Args file {PISM_ARGS_S3} is empty")
+    return args_text
+
+
+def resume_marker_uri() -> str | None:
+    if not OUTPUT_S3:
+        return None
+    return OUTPUT_S3.rstrip("/") + "/" + RESUME_MARKER_NAME
+
+
+def clear_resume_marker() -> None:
+    uri = resume_marker_uri()
+    if not uri:
         return
-    PISM_ARGS_RAW = result.stdout.strip()
+    subprocess.run(["aws", "s3", "rm", uri], check=False)
+
+
+def write_resume_marker(reason: str) -> None:
+    uri = resume_marker_uri()
+    if not uri:
+        return
+    payload = {
+        "reason": reason,
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "job_name": os.environ.get("JOB_NAME", ""),
+    }
+    subprocess.run(
+        ["aws", "s3", "cp", "-", uri],
+        input=json.dumps(payload),
+        text=True,
+        check=False,
+    )
 
 
 def find_output_file(tokens: list[str]) -> str | None:
@@ -116,8 +146,6 @@ def _checkpoint_path(output_file: str) -> str:
 
 
 def resume_if_possible(tokens: list[str]) -> list[str]:
-    if not (CHECKPOINT_ENABLED and CHECKPOINT_RESUME):
-        return tokens
     output_file = find_output_file(tokens)
     if not output_file:
         return tokens
@@ -174,10 +202,15 @@ def resume_if_possible(tokens: list[str]) -> list[str]:
 def main() -> int:
     os.makedirs(INPUT_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+    clear_resume_marker()
     sync_inputs()
-    load_args_from_s3()
+    try:
+        args_text = load_args_from_s3()
+    except RuntimeError as exc:
+        print(str(exc), flush=True)
+        return 2
 
-    args_tokens = shlex.split(PISM_ARGS_RAW)
+    args_tokens = shlex.split(args_text)
     if "-checkpoint_interval" not in args_tokens and "--checkpoint_interval" not in args_tokens:
         args_tokens.extend(["-checkpoint_interval", str(CHECKPOINT_INTERVAL_HOURS)])
     args_tokens = resume_if_possible(args_tokens)
@@ -191,15 +224,17 @@ def main() -> int:
             except Exception:
                 pass
 
-    if CHECKPOINT_ENABLED and CHECKPOINT_SYNC_INTERVAL > 0 and OUTPUT_S3:
+    if CHECKPOINT_SYNC_INTERVAL > 0 and OUTPUT_S3:
         threading.Thread(target=sync_loop, daemon=True).start()
 
     proc: subprocess.Popen[str] | None = None
     terminated = False
+    term_reason = ""
 
     def handle_term(signum, frame) -> None:
-        nonlocal terminated
+        nonlocal terminated, term_reason
         terminated = True
+        term_reason = "sigterm"
         if proc and proc.poll() is None:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)
@@ -218,13 +253,19 @@ def main() -> int:
     exit_code = proc.wait()
 
     stop_event.set()
+    if terminated:
+        write_resume_marker(term_reason or "terminated")
+        try:
+            sync_outputs()
+        except Exception:
+            pass
+        print("SIGTERM received; resume requested.", flush=True)
+        return 0
     try:
         sync_outputs()
     except Exception:
         pass
-
-    if terminated:
-        return 143
+    clear_resume_marker()
     return int(exit_code)
 
 

@@ -415,9 +415,63 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
                   - s3:AbortMultipartUpload
+                  - s3:DeleteObject
                 Resource:
                   - !GetAtt OutputBucket.Arn
                   - !Sub "${OutputBucket.Arn}/*"
+
+  OrchestratorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pism-batch-orchestrator-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: pism-batch-orchestrator
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - batch:SubmitJob
+                Resource:
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-cpu"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-cpu:*"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-gpu"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-gpu:*"
+                  - !Ref CpuSpotQueue
+                  - !Ref CpuOnDemandQueue
+                  - !Ref GpuSpotQueue
+                  - !Ref GpuOnDemandQueue
+              - Effect: Allow
+                Action:
+                  - batch:TagResource
+                Resource:
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-cpu"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-cpu:*"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-gpu"
+                  - !Sub "arn:aws:batch:${AWS::Region}:${AWS::AccountId}:job-definition/pism-gpu:*"
+                  - !Ref CpuSpotQueue
+                  - !Ref CpuOnDemandQueue
+                  - !Ref GpuSpotQueue
+                  - !Ref GpuOnDemandQueue
+              - Effect: Allow
+                Action:
+                  - batch:DescribeJobs
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !GetAtt JobsTable.Arn
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource: !GetAtt OutputBucket.Arn
 
   CpuSpotComputeEnvironment:
     Type: AWS::Batch::ComputeEnvironment
@@ -650,9 +704,9 @@ Resources:
           - echo Override command set by pism-cloud
         ResourceRequirements:
           - Type: VCPU
-            Value: "1"
+            Value: "16"
           - Type: MEMORY
-            Value: "2048"
+            Value: "32768"
         JobRoleArn: !GetAtt JobRole.Arn
         LogConfiguration:
           LogDriver: awslogs
@@ -661,10 +715,7 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: pism
       RetryStrategy:
-        Attempts: 3
-        EvaluateOnExit:
-          - OnStatusReason: "Host EC2*"
-            Action: RETRY
+        Attempts: 1
 
   GpuJobDefinition:
     Type: AWS::Batch::JobDefinition
@@ -679,9 +730,9 @@ Resources:
           - echo Override command set by pism-cloud
         ResourceRequirements:
           - Type: VCPU
-            Value: "1"
+            Value: "4"
           - Type: MEMORY
-            Value: "2048"
+            Value: "16384"
           - Type: GPU
             Value: "1"
         JobRoleArn: !GetAtt JobRole.Arn
@@ -692,10 +743,7 @@ Resources:
             awslogs-region: !Ref AWS::Region
             awslogs-stream-prefix: pism
       RetryStrategy:
-        Attempts: 3
-        EvaluateOnExit:
-          - OnStatusReason: "Host EC2*"
-            Action: RETRY
+        Attempts: 1
 
   JobsTable:
     Type: AWS::DynamoDB::Table
@@ -713,6 +761,154 @@ Resources:
         - AttributeName: sort_key
           KeyType: RANGE
 
+  OrchestratorStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: pism-batch-orchestrator
+      RoleArn: !GetAtt OrchestratorRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "Init",
+          "States": {
+            "Init": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_name.$": "$.job_name",
+                "job_queue.$": "$.job_queue",
+                "job_definition.$": "$.job_definition",
+                "overrides.$": "$.overrides",
+                "tags.$": "$.tags",
+                "resume_bucket.$": "$.resume_bucket",
+                "resume_key.$": "$.resume_key",
+                "attempt": 1
+              },
+              "Next": "SubmitJob"
+            },
+            "SubmitJob": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::batch:submitJob",
+              "Parameters": {
+                "JobName.$": "$.job_name",
+                "JobQueue.$": "$.job_queue",
+                "JobDefinition.$": "$.job_definition",
+                "ContainerOverrides.$": "$.overrides",
+                "Tags.$": "$.tags"
+              },
+              "ResultPath": "$.submit",
+              "Next": "RecordAttempt"
+            },
+            "RecordAttempt": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "${JobsTable}",
+                "Key": {
+                  "job_name": { "S.$": "$.job_name" },
+                  "sort_key": { "S": "JOB" }
+                },
+                "UpdateExpression": "SET attempt_job_ids = list_append(if_not_exists(attempt_job_ids, :empty), :new)",
+                "ExpressionAttributeValues": {
+                  ":empty": { "L": [] },
+                  ":new": { "L": [ { "S.$": "$.submit.JobId" } ] }
+                }
+              },
+              "Next": "WaitForCompletion"
+            },
+            "WaitForCompletion": {
+              "Type": "Wait",
+              "Seconds": 60,
+              "Next": "DescribeJob"
+            },
+            "DescribeJob": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:batch:describeJobs",
+              "Parameters": {
+                "Jobs.$": "States.Array($.submit.JobId)"
+              },
+              "ResultSelector": {
+                "job.$": "$.jobs[0]"
+              },
+              "ResultPath": "$.describe",
+              "Next": "CheckStatus"
+            },
+            "CheckStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.describe.job.status",
+                  "StringEquals": "SUCCEEDED",
+                  "Next": "CheckResumeMarker"
+                },
+                {
+                  "Variable": "$.describe.job.status",
+                  "StringEquals": "FAILED",
+                  "Next": "CheckSpotFailure"
+                }
+              ],
+              "Default": "WaitForCompletion"
+            },
+            "CheckSpotFailure": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.describe.job.statusReason",
+                  "StringMatches": "Host EC2*",
+                  "Next": "IncrementAttempt"
+                },
+                {
+                  "Variable": "$.describe.job.statusReason",
+                  "StringMatches": "*instance terminated*",
+                  "Next": "IncrementAttempt"
+                }
+              ],
+              "Default": "JobFailed"
+            },
+            "IncrementAttempt": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_name.$": "$.job_name",
+                "job_queue.$": "$.job_queue",
+                "job_definition.$": "$.job_definition",
+                "overrides.$": "$.overrides",
+                "tags.$": "$.tags",
+                "resume_bucket.$": "$.resume_bucket",
+                "resume_key.$": "$.resume_key",
+                "attempt.$": "States.MathAdd($.attempt, 1)"
+              },
+              "Next": "SubmitJob"
+            },
+            "CheckResumeMarker": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:s3:listObjectsV2",
+              "Parameters": {
+                "Bucket.$": "$.resume_bucket",
+                "Prefix.$": "$.resume_key",
+                "MaxKeys": 1
+              },
+              "ResultPath": "$.resume_check",
+              "Next": "ResumeDecision"
+            },
+            "ResumeDecision": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.resume_check.KeyCount",
+                  "NumericGreaterThan": 0,
+                  "Next": "IncrementAttempt"
+                }
+              ],
+              "Default": "JobSucceeded"
+            },
+            "JobSucceeded": {
+              "Type": "Succeed"
+            },
+            "JobFailed": {
+              "Type": "Fail",
+              "Cause": "Batch job failed"
+            }
+          }
+        }
+
 Outputs:
   BatchJobQueues:
     Description: "Batch job queues (CPU spot, CPU on-demand, GPU spot, GPU on-demand)."
@@ -726,6 +922,9 @@ Outputs:
   DynamoTable:
     Description: "DynamoDB table for job metadata."
     Value: !Ref JobsTable
+  StateMachineArn:
+    Description: "Step Functions state machine for job orchestration."
+    Value: !Ref OrchestratorStateMachine
   InputBucketName:
     Description: "S3 bucket for inputs."
     Value: !Ref InputBucket
