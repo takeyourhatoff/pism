@@ -183,4 +183,10 @@ if(GPISM_BUILD_TESTS)
               $<TARGET_FILE:gpism-field-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
+
+  if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
+    add_executable(gpism-io-smoke tests/io_smoke.cpp)
+    target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-io-smoke COMMAND gpism-io-smoke)
+  endif()
 endif()

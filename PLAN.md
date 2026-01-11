@@ -136,7 +136,7 @@
 
   * [ ] read “state at time t”
   * [ ] write restart file at end of run
-* [ ] Add I/O tests
+* [x] Add I/O tests
 
   * [ ] write then read round-trip test for each field type
   * [ ] multi-rank output correctness (each rank writes its slab)
@@ -144,7 +144,7 @@
 ### M3 Definition of Done
 
 * [x] `gpism -i input.nc -o out.nc` produces a readable NetCDF with expected variables
-* [ ] round-trip tests pass
+* [x] round-trip tests pass
 
 ---
 
@@ -492,6 +492,7 @@
   * Implemented CLI/config/dry-run scaffold for M2.
   * Added minimal NetCDF restart read/write path for `thk`, `topg`, `tauc`.
   * Verified `gpism -i input.nc -o out.nc` writes expected NetCDF variables.
+  * Added NetCDF round-trip CTest (io_smoke).
 * 🎯 Next:
 
   * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.
