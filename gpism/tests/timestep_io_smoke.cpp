@@ -1,4 +1,5 @@
 #include "gpism/config.h"
+#include "gpism/field_sync.h"
 #include "gpism/geometry.h"
 #include "gpism/netcdf_io.h"
 #include "gpism/ssa_solver.h"
@@ -45,6 +46,12 @@ int main() {
   gpism::FieldStag2D<double> flux(mx, my, gw);
   vel.fill(0.0);
 
+  gpism::sync_host_to_device(fields.thk);
+  gpism::sync_host_to_device(fields.topg);
+  gpism::sync_host_to_device(fields.tauc);
+  gpism::sync_host_to_device(smb);
+  gpism::sync_host_to_device(vel);
+
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
   gpism::SSASolverOptions options;
@@ -60,6 +67,7 @@ int main() {
   std::remove(path.c_str());
   gpism::TimeManager clock(0.0, 0.1, 1.0, 0.5);
   gpism::ThicknessUpdateOptions thickness_opts;
+  gpism::GeometryDiagnostics geometry;
 
   int outputs = 0;
   while (!clock.done()) {
@@ -74,13 +82,16 @@ int main() {
     gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
     gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
                             fields.thk);
-    gpism::GeometryDiagnostics::compute_usurf_cpu(grid, fields.thk,
-                                                  fields.topg, fields.usurf);
+    geometry.compute_usurf(grid, fields.thk, fields.topg, fields.usurf);
     gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
     fields.has_usurf = true;
     fields.has_velocity = true;
 
     if (clock.should_output()) {
+      gpism::sync_device_to_host(fields.thk);
+      gpism::sync_device_to_host(fields.usurf);
+      gpism::sync_device_to_host(fields.uvel);
+      gpism::sync_device_to_host(fields.vvel);
       if (!io.write_output_append(path, grid, fields, clock.time())) {
         std::cerr << "failed to write output\n";
         return 1;

@@ -15,4 +15,6 @@ double norm2(const FieldStag2D<double>& a);
 
 double norm1(const FieldStag2D<double>& a);
 
+double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b);
+
 }  // namespace gpism

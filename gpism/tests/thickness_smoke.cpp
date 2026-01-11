@@ -1,4 +1,5 @@
 #include "gpism/grid2d.h"
+#include "gpism/field_sync.h"
 #include "gpism/thickness.h"
 
 #include <cmath>
@@ -19,10 +20,15 @@ int main() {
   smb.fill(0.1);
   vel.fill(2.0);
 
+  gpism::sync_host_to_device(thk);
+  gpism::sync_host_to_device(smb);
+  gpism::sync_host_to_device(vel);
+
   gpism::compute_face_fluxes(grid, thk, vel, flux);
   gpism::ThicknessUpdateOptions options;
   gpism::update_thickness(grid, flux, smb, 1.0, options, thk);
 
+  gpism::sync_device_to_host(thk);
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       if (std::abs(thk(i, j) - 1.1) > 1e-8) {
@@ -33,9 +39,11 @@ int main() {
   }
 
   smb.fill(-10.0);
+  gpism::sync_host_to_device(smb);
   gpism::compute_face_fluxes(grid, thk, vel, flux);
   gpism::update_thickness(grid, flux, smb, 1.0, options, thk);
 
+  gpism::sync_device_to_host(thk);
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       if (thk(i, j) < 0.0) {

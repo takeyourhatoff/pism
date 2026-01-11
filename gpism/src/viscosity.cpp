@@ -4,6 +4,19 @@
 #include <cmath>
 #include <vector>
 
+#include "gpism/config.h"
+
+#if GPISM_HAVE_CUDA
+namespace gpism {
+void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
+                                int stride_u, int stride_v, int stride_nuH_u,
+                                int stride_nuH_v, const double* thk,
+                                const double* u, const double* v, double* nuH_u,
+                                double* nuH_v, double B, double n_eff,
+                                double eps0, double inv_dx, double inv_dy);
+}  // namespace gpism
+#endif
+
 namespace gpism {
 namespace {
 
@@ -29,6 +42,27 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
   const double dy = grid.dy();
   const double inv_dx = 1.0 / dx;
   const double inv_dy = 1.0 / dy;
+
+#if GPISM_HAVE_CUDA
+  if (thk.has_device_data() && vel.component(0).has_device_data() &&
+      vel.component(1).has_device_data() && nuH.component(0).has_device_data() &&
+      nuH.component(1).has_device_data()) {
+    const double A_eff = clamp_positive(A_, 1e-20);
+    const double n_eff = clamp_positive(n_, 1.0);
+    const double B = std::pow(2.0 * A_eff, -1.0 / n_eff);
+    viscosity_compute_nuH_cuda(mx, my, thk.ghost_width(), thk.stride(),
+                               vel.component(0).stride(),
+                               vel.component(1).stride(),
+                               nuH.component(0).stride(),
+                               nuH.component(1).stride(), thk.device_data(),
+                               vel.component(0).device_data(),
+                               vel.component(1).device_data(),
+                               nuH.component(0).device_data(),
+                               nuH.component(1).device_data(), B, n_eff, eps0_,
+                               inv_dx, inv_dy);
+    return;
+  }
+#endif
 
   std::vector<double> u_center(static_cast<std::size_t>(mx) * my);
   std::vector<double> v_center(static_cast<std::size_t>(mx) * my);

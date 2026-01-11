@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "gpism/context.h"
+#include "gpism/field_sync.h"
 #include "gpism/runtime_config.h"
 #include "gpism/time_manager.h"
 #include "gpism/config.h"
@@ -223,14 +224,66 @@ int main(int argc, char** argv) {
     const bool evolve_thickness = config.get_bool("thickness.evolve");
     const bool run_ssa = config.get_bool("ssa.enabled");
 
+    gpism::GeometryDiagnostics geometry;
+
+    gpism::sync_host_to_device(fields.thk);
+    gpism::sync_host_to_device(fields.topg);
+    gpism::sync_host_to_device(fields.tauc);
+    gpism::sync_host_to_device(smb);
+    gpism::sync_host_to_device(vel);
+
     gpism::HaloExchange2D exchange;
+    auto exchange_field2d = [&](auto& field) {
+      if (!context.mpi_enabled()) {
+        return;
+      }
+#if GPISM_HAVE_CUDA
+      if (context.cuda_aware_mpi() && field.device_data() != nullptr) {
+        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
+        return;
+      }
+      if (field.device_data() != nullptr) {
+        gpism::sync_device_to_host(field);
+        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+        gpism::sync_host_to_device(field);
+        return;
+      }
+#endif
+      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+    };
+
+    auto exchange_field_stag = [&](auto& field) {
+      if (!context.mpi_enabled()) {
+        return;
+      }
+#if GPISM_HAVE_CUDA
+      const bool have_device =
+          field.component(0).device_data() != nullptr &&
+          field.component(1).device_data() != nullptr;
+      if (context.cuda_aware_mpi() && have_device) {
+        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
+        return;
+      }
+      if (have_device) {
+        gpism::sync_device_to_host(field);
+        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+        gpism::sync_host_to_device(field);
+        return;
+      }
+#endif
+      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+    };
+
     while (!clock.done()) {
       if (clock.should_output()) {
-        gpism::GeometryDiagnostics::compute_usurf_cpu(grid, fields.thk,
-                                                      fields.topg, fields.usurf);
+        geometry.compute_usurf(grid, fields.thk, fields.topg, fields.usurf);
         gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
         fields.has_usurf = true;
         fields.has_velocity = true;
+        gpism::sync_device_to_host(fields.thk);
+        gpism::sync_device_to_host(fields.usurf);
+        gpism::sync_device_to_host(fields.uvel);
+        gpism::sync_device_to_host(fields.vvel);
 
         if (!io.write_output_append(options.output, context, grid, fields,
                                     clock.time())) {
@@ -251,10 +304,8 @@ int main(int argc, char** argv) {
       }
 
       if (evolve_thickness) {
-        if (context.mpi_enabled()) {
-          exchange.exchange(fields.thk, grid, context, gpism::HaloExchange2D::Mode::Host);
-          exchange.exchange(vel, grid, context, gpism::HaloExchange2D::Mode::Host);
-        }
+        exchange_field2d(fields.thk);
+        exchange_field_stag(vel);
         gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
         gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
                                 fields.thk);

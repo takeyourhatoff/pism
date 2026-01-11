@@ -158,7 +158,6 @@ void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
                 (my + block.y - 1) / block.y);
   basal_drag_kernel<<<grid_dim, block>>>(mx, my, gw, stride, tauc, beta_u, beta_v,
                                          denom);
-  cudaDeviceSynchronize();
 }
 
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
@@ -174,7 +173,6 @@ void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
   rhs_kernel<<<grid_dim, block>>>(mx, my, gw, stride_thk, stride_dhdx, stride_dhdy,
                                   stride_rhs, thk, dhdx, dhdy, rhs_u, rhs_v,
                                   scale, mask_u, mask_v, bc_u, bc_v, has_bc);
-  cudaDeviceSynchronize();
 }
 
 void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -195,7 +193,6 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                     nu_v, beta_u, beta_v, out_u, out_v, inv_dx2,
                                     inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
                                     has_bc);
-  cudaDeviceSynchronize();
 }
 
 }  // namespace gpism

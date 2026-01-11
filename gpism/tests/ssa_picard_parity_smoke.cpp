@@ -1,4 +1,5 @@
 #include "gpism/device_policy.h"
+#include "gpism/field_sync.h"
 #include "gpism/ssa_solver.h"
 
 #include <cmath>
@@ -84,9 +85,14 @@ int main() {
   gpism::SSASolver solver_gpu(grid_gpu, 910.0, 9.81, 100.0, viscosity_gpu);
   gpism::FieldStag2D<double> vel_gpu(mx, my, gw);
   vel_gpu.fill(0.0);
+  gpism::sync_host_to_device(thk_gpu);
+  gpism::sync_host_to_device(topg_gpu);
+  gpism::sync_host_to_device(tauc_gpu);
+  gpism::sync_host_to_device(vel_gpu);
   gpism::SSASolverResult gpu_result =
       solver_gpu.solve(thk_gpu, topg_gpu, tauc_gpu, nullptr, nullptr, nullptr,
                        vel_gpu, options);
+  gpism::sync_device_to_host(vel_gpu);
 
   if (!cpu_result.converged || !gpu_result.converged) {
     std::cerr << "Picard solver did not converge for CPU/GPU parity test\n";

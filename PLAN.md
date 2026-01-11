@@ -399,6 +399,8 @@
 
   * [ ] confirm timestep loop is device-resident
   * [ ] no hidden syncs in reductions
+  * [x] remove unconditional `cudaDeviceSynchronize()` calls from CUDA ops (use error checks + sync only at host reads)
+  * [x] move timestep kernels (geometry, thickness, velocity) and SSA Picard norms/relax to device; stage to host only for IO
 * [ ] Overlap comm/compute
 
   * [ ] interior compute while halos exchange
@@ -574,9 +576,11 @@
   * Added thickness transport smoke test and SSA-only timestep loop smoke test.
   * Added NetCDF timestep IO smoke test (conditional on NetCDF builds).
   * Added append-to-time NetCDF outputs (single file, multiple records) and verified `gpism-timestep-io-smoke`.
+  * Removed unconditional CUDA syncs and added device-resident thickness/velocity/SSA Picard updates with host staging only for IO.
+  * Added CUDA viscosity path, GPU diff norms, and shared field sync helpers; updated GPU-facing tests to sync device/host data.
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Decide M9 thermodynamics scope (isothermal vs enthalpy), or start M10 profiling hooks.
+  * Verify device-resident timestep with profiler-based sync audit, then decide M9 thermodynamics scope or start M10 profiling hooks.

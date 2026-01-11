@@ -51,7 +51,6 @@ void GeometryDiagnostics::compute_usurf(const Grid2D& grid, const Field2D<double
     usurf_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
                                       thk.device_data(), topg.device_data(),
                                       usurf.device_data(), thk.stride());
-    cudaDeviceSynchronize();
     return;
   }
   GeometryDiagnostics::compute_usurf_cpu(grid, thk, topg, usurf);
@@ -69,7 +68,6 @@ void GeometryDiagnostics::compute_surface_slopes(const Grid2D& grid,
                                       usurf.device_data(), dhdx.device_data(),
                                       dhdy.device_data(), usurf.stride(),
                                       1.0 / grid.dx(), 1.0 / grid.dy());
-    cudaDeviceSynchronize();
     return;
   }
   GeometryDiagnostics::compute_surface_slopes_cpu(grid, usurf, dhdx, dhdy);

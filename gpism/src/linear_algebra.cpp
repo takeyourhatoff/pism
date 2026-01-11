@@ -15,6 +15,8 @@ void set_cuda(int mx, int my, int gw, int stride, double* x, double value);
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                 const double* a, const double* b);
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a);
+double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
+                       const double* a, const double* b);
 }  // namespace gpism
 #endif
 
@@ -40,6 +42,18 @@ double norm1_field_host(const Field2D<double>& a) {
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       sum += std::abs(a(i, j));
+    }
+  }
+  return sum;
+}
+
+double diff_norm1_field_host(const Field2D<double>& a, const Field2D<double>& b) {
+  double sum = 0.0;
+  const int mx = a.local_mx();
+  const int my = a.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      sum += std::abs(a(i, j) - b(i, j));
     }
   }
   return sum;
@@ -190,6 +204,29 @@ double norm1(const FieldStag2D<double>& a) {
   }
 #endif
   return norm1_field_host(a.component(0)) + norm1_field_host(a.component(1));
+}
+
+double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
+#if GPISM_HAVE_CUDA
+  if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
+      b.component(0).has_device_data() && b.component(1).has_device_data()) {
+    const double sum0 = diff_norm1_cuda(a.local_mx(), a.local_my(),
+                                        a.ghost_width(),
+                                        a.component(0).stride(),
+                                        b.component(0).stride(),
+                                        a.component(0).device_data(),
+                                        b.component(0).device_data());
+    const double sum1 = diff_norm1_cuda(a.local_mx(), a.local_my(),
+                                        a.ghost_width(),
+                                        a.component(1).stride(),
+                                        b.component(1).stride(),
+                                        a.component(1).device_data(),
+                                        b.component(1).device_data());
+    return sum0 + sum1;
+  }
+#endif
+  return diff_norm1_field_host(a.component(0), b.component(0)) +
+         diff_norm1_field_host(a.component(1), b.component(1));
 }
 
 }  // namespace gpism

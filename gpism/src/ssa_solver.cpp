@@ -6,61 +6,29 @@
 
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
+#include "gpism/field_sync.h"
 #include "gpism/gmres.h"
 #include "gpism/halo_exchange.h"
+#include "gpism/linear_algebra.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
 #endif
 
+#if GPISM_HAVE_CUDA
+namespace gpism {
+void ssa_relax_nuH_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                        const double* nuH_prev_u, const double* nuH_prev_v,
+                        double* nuH_u, double* nuH_v, double nuH_min,
+                        double nuH_max, double nuH_relax);
+void ssa_relax_vel_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                        const double* vel_prev_u, const double* vel_prev_v,
+                        double* vel_u, double* vel_v, double vel_relax);
+}  // namespace gpism
+#endif
+
 namespace gpism {
 namespace {
-
-template <typename T>
-void sync_host_to_device(Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
-  if (!field.host_staging_data() || field.elements() == 0) {
-    return;
-  }
-  std::memcpy(field.host_staging_data(), field.data(),
-              field.elements() * sizeof(T));
-  field.copy_host_to_device();
-#else
-  (void)field;
-#endif
-}
-
-template <typename T>
-void sync_device_to_host(Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
-  if (!field.host_staging_data() || field.elements() == 0) {
-    return;
-  }
-  field.copy_device_to_host();
-  std::memcpy(field.data(), field.host_staging_data(),
-              field.elements() * sizeof(T));
-#else
-  (void)field;
-#endif
-}
-
-template <typename T>
-void sync_host_to_device(FieldStag2D<T>& field) {
-  sync_host_to_device(field.component(0));
-  sync_host_to_device(field.component(1));
-}
-
-template <typename T>
-void sync_device_to_host(FieldStag2D<T>& field) {
-  sync_device_to_host(field.component(0));
-  sync_device_to_host(field.component(1));
-}
 
 template <typename T>
 bool can_use_device_exchange(const FieldStag2D<T>& field,
@@ -74,18 +42,6 @@ bool can_use_device_exchange(const FieldStag2D<T>& field,
   (void)context;
   return false;
 #endif
-}
-
-template <typename T>
-void exchange_for_host(FieldStag2D<T>& field, const Grid2D& grid,
-                       const Context& context) {
-  HaloExchange2D exchange;
-#if GPISM_HAVE_CUDA
-  if (can_use_device_exchange(field, context)) {
-    sync_device_to_host(field);
-  }
-#endif
-  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Host);
 }
 
 template <typename T>
@@ -113,38 +69,6 @@ double global_sum(const Context* context, double local_value) {
   return local_value;
 }
 
-double norm1(const FieldStag2D<double>& a) {
-  double sum = 0.0;
-  for (int j = 0; j < a.local_my(); ++j) {
-    for (int i = 0; i < a.local_mx(); ++i) {
-      sum += std::abs(a(i, j, 0)) + std::abs(a(i, j, 1));
-    }
-  }
-  return sum;
-}
-
-double norm2(const FieldStag2D<double>& a) {
-  double sum = 0.0;
-  for (int j = 0; j < a.local_my(); ++j) {
-    for (int i = 0; i < a.local_mx(); ++i) {
-      sum += a(i, j, 0) * a(i, j, 0) + a(i, j, 1) * a(i, j, 1);
-    }
-  }
-  return std::sqrt(sum);
-}
-
-double diff_norm1(const FieldStag2D<double>& a,
-                  const FieldStag2D<double>& b) {
-  double sum = 0.0;
-  for (int j = 0; j < a.local_my(); ++j) {
-    for (int i = 0; i < a.local_mx(); ++i) {
-      sum += std::abs(a(i, j, 0) - b(i, j, 0)) +
-             std::abs(a(i, j, 1) - b(i, j, 1));
-    }
-  }
-  return sum;
-}
-
 double clamp_value(double value, double min_value, double max_value) {
   if (max_value > 0.0 && value > max_value) {
     value = max_value;
@@ -153,6 +77,64 @@ double clamp_value(double value, double min_value, double max_value) {
     value = min_value;
   }
   return value;
+}
+
+void apply_nuH_constraints(FieldStag2D<double>& nuH,
+                           const FieldStag2D<double>& nuH_prev,
+                           const SSASolverOptions& options) {
+#if GPISM_HAVE_CUDA
+  if (nuH.component(0).has_device_data() && nuH.component(1).has_device_data() &&
+      nuH_prev.component(0).has_device_data() &&
+      nuH_prev.component(1).has_device_data()) {
+    ssa_relax_nuH_cuda(nuH.local_mx(), nuH.local_my(), nuH.ghost_width(),
+                       nuH.component(0).stride(), nuH.component(1).stride(),
+                       nuH_prev.component(0).device_data(),
+                       nuH_prev.component(1).device_data(),
+                       nuH.component(0).device_data(),
+                       nuH.component(1).device_data(), options.nuH_min,
+                       options.nuH_max, options.nuH_relax);
+    return;
+  }
+#endif
+  for (int j = 0; j < nuH.local_my(); ++j) {
+    for (int i = 0; i < nuH.local_mx(); ++i) {
+      for (int comp = 0; comp < 2; ++comp) {
+        double value = nuH(i, j, comp);
+        value = clamp_value(value, options.nuH_min, options.nuH_max);
+        if (options.nuH_relax < 1.0) {
+          value = options.nuH_relax * value +
+                  (1.0 - options.nuH_relax) * nuH_prev(i, j, comp);
+        }
+        nuH(i, j, comp) = value;
+      }
+    }
+  }
+}
+
+void apply_vel_relax(FieldStag2D<double>& vel,
+                     const FieldStag2D<double>& vel_prev,
+                     double vel_relax) {
+#if GPISM_HAVE_CUDA
+  if (vel.component(0).has_device_data() && vel.component(1).has_device_data() &&
+      vel_prev.component(0).has_device_data() &&
+      vel_prev.component(1).has_device_data()) {
+    ssa_relax_vel_cuda(vel.local_mx(), vel.local_my(), vel.ghost_width(),
+                       vel.component(0).stride(), vel.component(1).stride(),
+                       vel_prev.component(0).device_data(),
+                       vel_prev.component(1).device_data(),
+                       vel.component(0).device_data(),
+                       vel.component(1).device_data(), vel_relax);
+    return;
+  }
+#endif
+  for (int j = 0; j < vel.local_my(); ++j) {
+    for (int i = 0; i < vel.local_mx(); ++i) {
+      vel(i, j, 0) = vel_relax * vel(i, j, 0) +
+                     (1.0 - vel_relax) * vel_prev(i, j, 0);
+      vel(i, j, 1) = vel_relax * vel(i, j, 1) +
+                     (1.0 - vel_relax) * vel_prev(i, j, 1);
+    }
+  }
 }
 
 class SSAApplyOperator : public LinearOperator {
@@ -208,14 +190,6 @@ void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
   }
 }
 
-void copy_field(const Field2D<double>& src, Field2D<double>& dst) {
-  for (int j = 0; j < src.local_my(); ++j) {
-    for (int i = 0; i < src.local_mx(); ++i) {
-      dst(i, j) = src(i, j);
-    }
-  }
-}
-
 }  // namespace
 
 SSASolver::SSASolver(const Grid2D& grid, double rho, double g, double u_threshold,
@@ -259,73 +233,35 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     sync_host_to_device(bc_values);
   }
 
-  GeometryDiagnostics::compute_usurf_cpu(grid_, thk, topg, usurf);
-  GeometryDiagnostics::compute_surface_slopes_cpu(grid_, usurf, dhdx, dhdy);
+  GeometryDiagnostics geometry;
+  geometry.compute_usurf(grid_, thk, topg, usurf);
+  geometry.compute_surface_slopes(grid_, usurf, dhdx, dhdy);
 
-  Field2D<double> thk_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  Field2D<double> tauc_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  Field2D<double> dhdx_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  Field2D<double> dhdy_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  copy_field(thk, thk_dev);
-  copy_field(tauc, tauc_dev);
-  copy_field(dhdx, dhdx_dev);
-  copy_field(dhdy, dhdy_dev);
-
-  sync_host_to_device(thk_dev);
-  sync_host_to_device(tauc_dev);
-  sync_host_to_device(dhdx_dev);
-  sync_host_to_device(dhdy_dev);
-
-  ssa_.compute_basal_drag(grid_, tauc_dev, beta);
+  ssa_.compute_basal_drag(grid_, tauc, beta);
   if (context && context->mpi_enabled()) {
     exchange_for_device(beta, grid_, *context);
   }
-  sync_device_to_host(beta);
-  sync_host_to_device(beta);
 
-  ssa_.assemble_rhs(grid_, thk_dev, dhdx_dev, dhdy_dev, rhs,
+  ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
                     options.use_bc ? &bc : nullptr);
   if (context && context->mpi_enabled()) {
     exchange_for_device(rhs, grid_, *context);
   }
-  sync_device_to_host(rhs);
-  sync_host_to_device(rhs);
 
   for (int iter = 0; iter < options.max_picard; ++iter) {
-    for (int j = 0; j < grid_.local_my(); ++j) {
-      for (int i = 0; i < grid_.local_mx(); ++i) {
-        nuH_prev(i, j, 0) = nuH(i, j, 0);
-        nuH_prev(i, j, 1) = nuH(i, j, 1);
-        vel_prev(i, j, 0) = vel(i, j, 0);
-        vel_prev(i, j, 1) = vel(i, j, 1);
-      }
-    }
+    copy(nuH, nuH_prev);
+    copy(vel, vel_prev);
 
     if (context && context->mpi_enabled()) {
-      exchange_for_host(vel, grid_, *context);
+      exchange_for_device(vel, grid_, *context);
     }
     viscosity_.compute_nuH(grid_, thk, vel, nuH);
     if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
         options.nuH_relax < 1.0) {
-      for (int j = 0; j < grid_.local_my(); ++j) {
-        for (int i = 0; i < grid_.local_mx(); ++i) {
-          for (int comp = 0; comp < 2; ++comp) {
-            double value = nuH(i, j, comp);
-            value = clamp_value(value, options.nuH_min, options.nuH_max);
-            if (options.nuH_relax < 1.0) {
-              value = options.nuH_relax * value +
-                      (1.0 - options.nuH_relax) * nuH_prev(i, j, comp);
-            }
-            nuH(i, j, comp) = value;
-          }
-        }
-      }
+      apply_nuH_constraints(nuH, nuH_prev, options);
     }
-    sync_host_to_device(nuH);
-    sync_host_to_device(vel);
     if (context && context->mpi_enabled()) {
       exchange_for_device(nuH, grid_, *context);
-      exchange_for_device(vel, grid_, *context);
     }
 
     GMRESOptions gmres_opts;
@@ -340,18 +276,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     result.linear_iters = gmres_result.iterations;
     result.linear_residual = gmres_result.residual;
 
-    sync_device_to_host(vel);
-    sync_device_to_host(nuH);
-
     if (options.vel_relax < 1.0) {
-      for (int j = 0; j < grid_.local_my(); ++j) {
-        for (int i = 0; i < grid_.local_mx(); ++i) {
-          vel(i, j, 0) = options.vel_relax * vel(i, j, 0) +
-                         (1.0 - options.vel_relax) * vel_prev(i, j, 0);
-          vel(i, j, 1) = options.vel_relax * vel(i, j, 1) +
-                         (1.0 - options.vel_relax) * vel_prev(i, j, 1);
-        }
-      }
+      apply_vel_relax(vel, vel_prev, options.vel_relax);
     }
 
     const double nuH_diff_local = diff_norm1(nuH, nuH_prev);
