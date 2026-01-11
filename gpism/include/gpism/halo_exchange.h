@@ -34,8 +34,11 @@ struct MpiType<double> {
 
 class HaloExchange2D {
 public:
+  enum class Mode { Auto, Host, Device };
+
   template <typename T>
-  void exchange(Field2D<T>& field, const Grid2D& grid, const Context& context) {
+  void exchange(Field2D<T>& field, const Grid2D& grid, const Context& context,
+                Mode mode = Mode::Auto) {
     if (!context.mpi_enabled()) {
       return;
     }
@@ -59,10 +62,14 @@ public:
     const int tag_north = 103;
 
 #if GPISM_HAVE_CUDA
-    const bool use_device =
+    const bool can_device =
         context.cuda_aware_mpi() && field.device_data() != nullptr;
+    const bool use_device =
+        (mode == Mode::Device) ? can_device :
+        (mode == Mode::Host) ? false : can_device;
 #else
     const bool use_device = false;
+    (void)mode;
 #endif
 
 #if GPISM_HAVE_CUDA
@@ -352,9 +359,10 @@ public:
   }
 
   template <typename T>
-  void exchange(FieldStag2D<T>& field, const Grid2D& grid, const Context& context) {
-    exchange(field.component(0), grid, context);
-    exchange(field.component(1), grid, context);
+  void exchange(FieldStag2D<T>& field, const Grid2D& grid, const Context& context,
+                Mode mode = Mode::Auto) {
+    exchange(field.component(0), grid, context, mode);
+    exchange(field.component(1), grid, context, mode);
   }
 
 private:

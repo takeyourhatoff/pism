@@ -6,6 +6,8 @@
 
 namespace gpism {
 
+class Context;
+
 class LinearOperator {
 public:
   virtual ~LinearOperator() = default;
@@ -31,6 +33,7 @@ struct GMRESOptions {
   int max_iter = 200;
   double tol = 1e-8;
   bool verbose = false;
+  const Context* context = nullptr;
 };
 
 struct GMRESResult {

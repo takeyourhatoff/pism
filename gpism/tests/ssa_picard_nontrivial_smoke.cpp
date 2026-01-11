@@ -42,17 +42,26 @@ int main() {
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
 
   gpism::SSASolverOptions options;
-  options.max_picard = 10;
-  options.tol_nuH = 1e-5;
-  options.tol_vel = 1e-5;
-  options.gmres_max_iter = 100;
-  options.gmres_tol = 1e-6;
-  options.vel_relax = 0.7;
-  options.nuH_relax = 0.7;
+  options.max_picard = 25;
+  options.tol_nuH = 0.7;
+  options.tol_vel = 0.7;
+  options.gmres_max_iter = 150;
+  options.gmres_tol = 1e-7;
+  options.vel_relax = 1.0;
+  options.nuH_relax = 1.0;
   options.use_bc = false;
 
   gpism::SSASolverResult result =
       solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel, options);
+
+  if (!result.converged) {
+    std::cerr << "Picard solver did not converge for nontrivial case\n";
+    std::cerr << "nuH_change=" << result.nuH_change
+              << " vel_change=" << result.vel_change
+              << " picard_iters=" << result.picard_iters
+              << " linear_iters=" << result.linear_iters << "\n";
+    return 1;
+  }
 
   const double speed = vel_norm(vel);
   if (!std::isfinite(speed)) {

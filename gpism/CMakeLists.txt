@@ -223,6 +223,21 @@ if(GPISM_BUILD_TESTS)
     )
   endif()
 
+  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+    add_executable(gpism-ssa-picard-mpi-smoke tests/ssa_picard_mpi_smoke.cpp)
+    target_link_libraries(gpism-ssa-picard-mpi-smoke PRIVATE gpism-core)
+    add_test(
+      NAME gpism-ssa-picard-mpi-smoke-1
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+    add_test(
+      NAME gpism-ssa-picard-mpi-smoke-2
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+  endif()
+
   if(NOT GPISM_ENABLE_CUDA)
     add_executable(gpism-gmres-mg-compare-smoke tests/gmres_mg_compare_smoke.cpp)
     target_link_libraries(gpism-gmres-mg-compare-smoke PRIVATE gpism-core)

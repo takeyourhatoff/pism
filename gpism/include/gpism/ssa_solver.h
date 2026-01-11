@@ -9,6 +9,8 @@
 
 namespace gpism {
 
+class Context;
+
 struct SSASolverOptions {
   int max_picard = 10;
   double tol_nuH = 1e-6;
@@ -24,6 +26,7 @@ struct SSASolverOptions {
   double gmres_tol = 1e-8;
 
   bool use_bc = false;
+  const Context* context = nullptr;
 };
 
 struct SSASolverResult {

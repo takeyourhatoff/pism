@@ -132,6 +132,7 @@ int main(int argc, char** argv) {
   opts.restart = 5;
   opts.max_iter = 10;
   opts.tol = 1e-12;
+  opts.context = &context;
 
   gpism::GMRESResult res = gpism::gmres_solve(op, rhs, x, opts);
   if (!res.converged) {

@@ -312,6 +312,9 @@
 
   * [x] under-relaxation of U or nuH
   * [x] viscosity floor/ceiling
+* [x] Add MPI halo exchange for SSA solver fields (nuH, vel, rhs, beta)
+* [x] Add Picard convergence test on non-trivial geometry (single-rank)
+* [x] Add MPI Picard convergence test (1 vs 2 ranks)
 * [-] Regression tests: consistent results across GPU/CPU (tolerance-based) — blocked on host-only SSA solve path
 
 ### M7 Definition of Done
@@ -560,6 +563,9 @@
   * Verified CUDA+MPI SSA operator smoke with finite residual norms.
   * Verified GMRES MPI smoke (1 vs 2 ranks) with stable iteration counts.
   * Verified MG preconditioner reduces GMRES iterations and scales gently with refinement.
+  * Added MPI halo exchanges for SSA solver fields and halo-aware SSA apply.
+  * Added global MPI reductions for GMRES dot/norms and Picard convergence checks.
+  * Added MPI SSA Picard smoke tests (1 and 2 ranks) and enforced convergence in non-trivial Picard test.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.

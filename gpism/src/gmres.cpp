@@ -4,7 +4,13 @@
 #include <cmath>
 #include <vector>
 
+#include "gpism/config.h"
+#include "gpism/context.h"
 #include "gpism/linear_algebra.h"
+
+#if GPISM_HAVE_MPI
+#include <mpi.h>
+#endif
 
 namespace gpism {
 namespace {
@@ -36,6 +42,18 @@ void compute_givens(double a, double b, double& c, double& s) {
   }
 }
 
+double global_sum(const Context* context, double local_value) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    double global_value = 0.0;
+    MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_SUM,
+                  MPI_COMM_WORLD);
+    return global_value;
+  }
+#endif
+  return local_value;
+}
+
 }  // namespace
 
 void IdentityPreconditioner::apply(const FieldStag2D<double>& x,
@@ -63,7 +81,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   axpy(-1.0, Ax, r);
   M->apply(r, z);
 
-  double beta = norm2(z);
+  double beta = std::sqrt(global_sum(options.context, dot(z, z)));
   result.residual = beta;
   result.residuals.push_back(result.residual);
   if (beta <= options.tol) {
@@ -94,13 +112,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
       M->apply(Ax, w);
 
       for (int i = 0; i <= j; ++i) {
-        const double hij = dot(w, V[i]);
+        const double hij = global_sum(options.context, dot(w, V[i]));
         H[static_cast<std::size_t>(i) +
           static_cast<std::size_t>(restart + 1) * j] = hij;
         axpy(-hij, V[i], w);
       }
 
-      const double h_next = norm2(w);
+      const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
       H[static_cast<std::size_t>(j + 1) +
         static_cast<std::size_t>(restart + 1) * j] = h_next;
       if (h_next != 0.0) {
@@ -168,7 +186,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     copy(b, r);
     axpy(-1.0, Ax, r);
     M->apply(r, z);
-    beta = norm2(z);
+    beta = std::sqrt(global_sum(options.context, dot(z, z)));
     result.residual = beta;
     result.residuals.push_back(result.residual);
     if (result.residual <= options.tol) {
