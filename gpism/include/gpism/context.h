@@ -23,6 +23,7 @@ public:
   bool mpi_enabled() const;
   int device_id() const;
   int device_count() const;
+  bool cuda_aware_mpi() const;
   NeighborRanks neighbors_2d(int dims_x, int dims_y) const;
 
 private:

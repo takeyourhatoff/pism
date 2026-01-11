@@ -80,7 +80,7 @@
 ### M1 Definition of Done
 
 * [x] Multi-rank run successfully exchanges halos for `Field2D` and `FieldStag2D`
-* [ ] No host roundtrips inside the halo exchange except the MPI buffers (and those can be device buffers if CUDA-aware MPI)
+* [x] No host roundtrips inside the halo exchange except the MPI buffers (device buffers supported if CUDA-aware MPI is enabled)
 
 ---
 
@@ -488,6 +488,7 @@
   * Added host staging buffers + optional CUDA device allocations in `Field2D`.
   * Added `Context::neighbors_2d` helper for rank neighbor lookup.
   * Selected SSA solver Strategy A (native matrix-free multigrid + Krylov).
+  * Added optional CUDA-aware MPI halo exchange path (device buffers).
 * 🎯 Next:
 
   * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.

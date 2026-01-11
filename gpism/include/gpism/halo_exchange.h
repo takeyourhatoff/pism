@@ -11,6 +11,9 @@
 #if GPISM_HAVE_MPI
 #include <mpi.h>
 #endif
+#if GPISM_HAVE_CUDA
+#include <cuda_runtime.h>
+#endif
 
 namespace gpism {
 
@@ -54,6 +57,164 @@ public:
     const int tag_east = 101;
     const int tag_south = 102;
     const int tag_north = 103;
+
+#if GPISM_HAVE_CUDA
+    const bool use_device =
+        context.cuda_aware_mpi() && field.device_data() != nullptr;
+#else
+    const bool use_device = false;
+#endif
+
+#if GPISM_HAVE_CUDA
+    if (use_device) {
+      const int stride = field.stride();
+
+      auto idx = [&](int i, int j) {
+        return (j + gw) * stride + (i + gw);
+      };
+
+      const std::size_t west_east_count = static_cast<std::size_t>(gw) *
+                                          static_cast<std::size_t>(local_my);
+      const std::size_t north_south_count = static_cast<std::size_t>(gw) *
+                                            static_cast<std::size_t>(local_mx);
+
+      T* send_west = nullptr;
+      T* send_east = nullptr;
+      T* send_south = nullptr;
+      T* send_north = nullptr;
+      T* recv_west = nullptr;
+      T* recv_east = nullptr;
+      T* recv_south = nullptr;
+      T* recv_north = nullptr;
+
+      auto alloc = [](std::size_t count, T** ptr) {
+        if (count == 0) {
+          *ptr = nullptr;
+          return;
+        }
+        cudaMalloc(reinterpret_cast<void**>(ptr), count * sizeof(T));
+      };
+
+      auto release = [](T** ptr) {
+        if (*ptr) {
+          cudaFree(*ptr);
+          *ptr = nullptr;
+        }
+      };
+
+      if (west >= 0) {
+        alloc(west_east_count, &send_west);
+        alloc(west_east_count, &recv_west);
+      }
+      if (east >= 0) {
+        alloc(west_east_count, &send_east);
+        alloc(west_east_count, &recv_east);
+      }
+      if (south >= 0) {
+        alloc(north_south_count, &send_south);
+        alloc(north_south_count, &recv_south);
+      }
+      if (north >= 0) {
+        alloc(north_south_count, &send_north);
+        alloc(north_south_count, &recv_north);
+      }
+
+      const T* device_ptr = field.device_data();
+
+      if (west >= 0) {
+        const T* src = device_ptr + idx(0, 0);
+        cudaMemcpy2D(send_west, gw * sizeof(T), src, stride * sizeof(T),
+                     gw * sizeof(T), local_my, cudaMemcpyDeviceToDevice);
+      }
+      if (east >= 0) {
+        const T* src = device_ptr + idx(local_mx - gw, 0);
+        cudaMemcpy2D(send_east, gw * sizeof(T), src, stride * sizeof(T),
+                     gw * sizeof(T), local_my, cudaMemcpyDeviceToDevice);
+      }
+      if (south >= 0) {
+        const T* src = device_ptr + idx(0, 0);
+        cudaMemcpy2D(send_south, local_mx * sizeof(T), src, stride * sizeof(T),
+                     local_mx * sizeof(T), gw, cudaMemcpyDeviceToDevice);
+      }
+      if (north >= 0) {
+        const T* src = device_ptr + idx(0, local_my - gw);
+        cudaMemcpy2D(send_north, local_mx * sizeof(T), src, stride * sizeof(T),
+                     local_mx * sizeof(T), gw, cudaMemcpyDeviceToDevice);
+      }
+
+      std::vector<MPI_Request> requests;
+      requests.reserve(8);
+
+      auto post_recv = [&](int neighbor, int tag, T* buffer, std::size_t count) {
+        if (neighbor < 0 || count == 0) {
+          return;
+        }
+        MPI_Request req{};
+        MPI_Irecv(buffer, static_cast<int>(count), MpiType<T>::value(), neighbor,
+                  tag, MPI_COMM_WORLD, &req);
+        requests.push_back(req);
+      };
+
+      auto post_send = [&](int neighbor, int tag, T* buffer, std::size_t count) {
+        if (neighbor < 0 || count == 0) {
+          return;
+        }
+        MPI_Request req{};
+        MPI_Isend(buffer, static_cast<int>(count), MpiType<T>::value(), neighbor,
+                  tag, MPI_COMM_WORLD, &req);
+        requests.push_back(req);
+      };
+
+      post_recv(west, tag_east, recv_west, west_east_count);
+      post_recv(east, tag_west, recv_east, west_east_count);
+      post_recv(south, tag_north, recv_south, north_south_count);
+      post_recv(north, tag_south, recv_north, north_south_count);
+
+      post_send(west, tag_west, send_west, west_east_count);
+      post_send(east, tag_east, send_east, west_east_count);
+      post_send(south, tag_south, send_south, north_south_count);
+      post_send(north, tag_north, send_north, north_south_count);
+
+      if (!requests.empty()) {
+        MPI_Waitall(static_cast<int>(requests.size()), requests.data(),
+                    MPI_STATUSES_IGNORE);
+      }
+
+      T* device_dest = field.device_data();
+
+      if (west >= 0) {
+        T* dst = device_dest + idx(-gw, 0);
+        cudaMemcpy2D(dst, stride * sizeof(T), recv_west, gw * sizeof(T),
+                     gw * sizeof(T), local_my, cudaMemcpyDeviceToDevice);
+      }
+      if (east >= 0) {
+        T* dst = device_dest + idx(local_mx, 0);
+        cudaMemcpy2D(dst, stride * sizeof(T), recv_east, gw * sizeof(T),
+                     gw * sizeof(T), local_my, cudaMemcpyDeviceToDevice);
+      }
+      if (south >= 0) {
+        T* dst = device_dest + idx(0, -gw);
+        cudaMemcpy2D(dst, stride * sizeof(T), recv_south, local_mx * sizeof(T),
+                     local_mx * sizeof(T), gw, cudaMemcpyDeviceToDevice);
+      }
+      if (north >= 0) {
+        T* dst = device_dest + idx(0, local_my);
+        cudaMemcpy2D(dst, stride * sizeof(T), recv_north, local_mx * sizeof(T),
+                     local_mx * sizeof(T), gw, cudaMemcpyDeviceToDevice);
+      }
+
+      release(&send_west);
+      release(&send_east);
+      release(&send_south);
+      release(&send_north);
+      release(&recv_west);
+      release(&recv_east);
+      release(&recv_south);
+      release(&recv_north);
+
+      return;
+    }
+#endif
 
     std::vector<T> send_west;
     std::vector<T> send_east;
