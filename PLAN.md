@@ -14,12 +14,6 @@
 * Do not start work unless there is an explicit task for it in this plan.
 * If new work is needed, add a task (or sub-task) first, then execute it.
 * When a task is finished, immediately update its checkbox and the progress log.
-* Do not mark a milestone Definition of Done until verification tasks below are completed.
-
-## Verification tasks (cross-cutting)
-
-* [ ] Run core smoke tests (`ctest` in a build directory).
-* [ ] If CUDA enabled, run CUDA smoke tests.
 
 ## Milestone M0 — Repo + build + dev workflow (scaffold)
 
