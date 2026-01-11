@@ -272,10 +272,10 @@
   * [x] prolongate correction
   * [x] post-smooth
 * [x] Integrate as preconditioner in FGMRES
-* [ ] Multigrid tests
+* [~] Multigrid tests
 
-  * [ ] constant coefficient cases
-  * [ ] variable coefficient cases (nuH varies)
+  * [x] constant coefficient cases
+  * [x] variable coefficient cases (nuH varies)
   * [ ] scaling test: iterations vs resolution
 
 ### M6 Definition of Done
@@ -543,6 +543,7 @@
   * Added Chebyshev-Jacobi smoother with a diagonal smoke test.
   * Added residual computation + V-cycle scaffold with smoke coverage.
   * Added multigrid preconditioner wrapper with a smoke test.
+  * Added multigrid constant/variable coefficient residual reduction tests.
 * 🎯 Next:
 
-  * Add multigrid tests for constant/variable coefficient cases.
+  * Add multigrid scaling test (iterations vs resolution).

@@ -256,6 +256,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-mg-preconditioner-smoke PRIVATE gpism-core)
   add_test(NAME gpism-mg-preconditioner-smoke COMMAND gpism-mg-preconditioner-smoke)
 
+  add_executable(gpism-multigrid-coeff-smoke tests/multigrid_coeff_smoke.cpp)
+  target_link_libraries(gpism-multigrid-coeff-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-coeff-smoke COMMAND gpism-multigrid-coeff-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
