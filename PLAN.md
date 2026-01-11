@@ -489,4 +489,5 @@
   * Added `Context::neighbors_2d` helper for rank neighbor lookup.
 * 🎯 Next:
 
-  * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
+  * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.
+  * Decide whether to proceed to M2 CLI/config scaffolding after M1 DoD.
