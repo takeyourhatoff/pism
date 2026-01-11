@@ -13,6 +13,11 @@ struct SSASolverOptions {
   double tol_nuH = 1e-6;
   double tol_vel = 1e-6;
 
+  double vel_relax = 1.0;
+  double nuH_relax = 1.0;
+  double nuH_min = 0.0;
+  double nuH_max = 0.0;
+
   int gmres_restart = 30;
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;

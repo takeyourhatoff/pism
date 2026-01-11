@@ -81,6 +81,16 @@ double diff_norm1(const FieldStag2D<double>& a,
   return sum;
 }
 
+double clamp_value(double value, double min_value, double max_value) {
+  if (max_value > 0.0 && value > max_value) {
+    value = max_value;
+  }
+  if (min_value > 0.0 && value < min_value) {
+    value = min_value;
+  }
+  return value;
+}
+
 class SSAApplyOperator : public LinearOperator {
 public:
   SSAApplyOperator(const SSAOperator& op, const Grid2D& grid,
@@ -210,6 +220,22 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     }
 
     viscosity_.compute_nuH(grid_, thk, vel, nuH);
+    if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
+        options.nuH_relax < 1.0) {
+      for (int j = 0; j < grid_.local_my(); ++j) {
+        for (int i = 0; i < grid_.local_mx(); ++i) {
+          for (int comp = 0; comp < 2; ++comp) {
+            double value = nuH(i, j, comp);
+            value = clamp_value(value, options.nuH_min, options.nuH_max);
+            if (options.nuH_relax < 1.0) {
+              value = options.nuH_relax * value +
+                      (1.0 - options.nuH_relax) * nuH_prev(i, j, comp);
+            }
+            nuH(i, j, comp) = value;
+          }
+        }
+      }
+    }
     sync_host_to_device(nuH);
     sync_host_to_device(vel);
 
@@ -225,6 +251,17 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
 
     sync_device_to_host(vel);
     sync_device_to_host(nuH);
+
+    if (options.vel_relax < 1.0) {
+      for (int j = 0; j < grid_.local_my(); ++j) {
+        for (int i = 0; i < grid_.local_mx(); ++i) {
+          vel(i, j, 0) = options.vel_relax * vel(i, j, 0) +
+                         (1.0 - options.vel_relax) * vel_prev(i, j, 0);
+          vel(i, j, 1) = options.vel_relax * vel(i, j, 1) +
+                         (1.0 - options.vel_relax) * vel_prev(i, j, 1);
+        }
+      }
+    }
 
     const double nuH_diff = diff_norm1(nuH, nuH_prev);
     const double nuH_norm = std::max(norm1(nuH_prev), 1e-12);

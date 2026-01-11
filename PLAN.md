@@ -302,10 +302,10 @@
   * [x] L1 norm change of `nuH` (recommended)
   * [x] optional U-change norm
   * [x] max iterations + fallback
-* [ ] Add stabilization options
+* [x] Add stabilization options
 
-  * [ ] under-relaxation of U or nuH
-  * [ ] viscosity floor/ceiling
+  * [x] under-relaxation of U or nuH
+  * [x] viscosity floor/ceiling
 * [~] Regression tests: consistent results across GPU/CPU (tolerance-based)
 
 ### M7 Definition of Done
@@ -546,6 +546,7 @@
   * Added multigrid constant/variable coefficient residual reduction tests.
   * Added multigrid scaling smoke test (8x8 vs 16x16).
   * Added SSA Picard solver scaffold with convergence checks and a smoke test.
+  * Added Picard stabilization options (relaxation + nuH bounds).
 * 🎯 Next:
 
-  * Add Picard stabilization options (under-relaxation, viscosity bounds).
+  * Add regression coverage for Picard (GPU/CPU tolerance checks).
