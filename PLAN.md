@@ -598,7 +598,6 @@
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
-  * Pushed GMRES orthogonalization further by reusing basis pointers and batching h_next; D2H copies drop to ~160 per timestep GPU smoke run (still not zero).
 * 🧱 Blocked:
 
   * -
