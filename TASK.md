@@ -4,6 +4,9 @@ Below is a concrete architecture + execution plan for **gpism**: a PISM‑compat
 
 ## 1) Define the compatibility contract (what users see)
 
+**Reference:** Use the original PISM codebase as a primary reference when implementing
+compatibility behavior, option semantics, and I/O conventions.
+
 ### 1.1 Command-line + configuration compatibility
 
 Implement gpism so that:
