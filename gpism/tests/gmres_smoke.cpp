@@ -223,6 +223,55 @@ int main() {
     return 1;
   }
 
+  gpism::Field2D<double> tauc2(mx, my, gw);
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      tauc2(i, j) = 200.0;
+    }
+  }
+
+  gpism::FieldStag2D<double> beta2(mx, my, gw);
+  gpism::FieldStag2D<double> nuH2(mx, my, gw);
+  gpism::FieldStag2D<double> x_true(mx, my, gw);
+  gpism::FieldStag2D<double> b_op(mx, my, gw);
+  gpism::FieldStag2D<double> x_guess(mx, my, gw);
+  gpism::FieldStag2D<double> err(mx, my, gw);
+
+  for (int j = -gw; j < my + gw; ++j) {
+    for (int i = -gw; i < mx + gw; ++i) {
+      x_true(i, j, 0) = static_cast<double>(i + 1.5 * j);
+      x_true(i, j, 1) = static_cast<double>(-2.0 + 0.5 * i - j);
+    }
+  }
+
+  sync_host_to_device(tauc2);
+  sync_host_to_device(x_true);
+
+  gpism::set(0.5, nuH2);
+  ssa.compute_basal_drag(grid, tauc2, beta2);
+
+  SSAOperatorWrapper ssa_op2(ssa, grid, nuH2, beta2, nullptr);
+  ssa_op2.apply(x_true, b_op);
+
+  gpism::GMRESOptions opts_ssa = opts;
+  opts_ssa.max_iter = 80;
+  opts_ssa.tol = 1e-8;
+  gpism::set(0.0, x_guess);
+  res = gpism::gmres_solve(ssa_op2, b_op, x_guess, opts_ssa);
+  if (!res.converged) {
+    std::cerr << "GMRES SSA non-trivial solve did not converge\n";
+    return 1;
+  }
+
+  gpism::copy(x_guess, err);
+  gpism::axpy(-1.0, x_true, err);
+  const double rel_err = gpism::norm2(err) / gpism::norm2(x_true);
+  if (rel_err > 1e-6) {
+    std::cerr << "GMRES SSA non-trivial relative error too high: " << rel_err
+              << "\n";
+    return 1;
+  }
+
   std::cout << "gmres_smoke passed\n";
   return 0;
 }

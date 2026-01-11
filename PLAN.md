@@ -235,6 +235,7 @@
   * [x] solve a known linear system from a frozen coefficient operator
   * [x] measure iterations, residual curves
   * [x] SSA operator smoke solve (few GMRES iterations, residual drops)
+* [x] Add non-trivial SSA GMRES regression (nuH>0, known solution)
 
 ### M5 Definition of Done
 
@@ -535,6 +536,7 @@
   * Added device-capable linear algebra ops (axpy/scal/dot/norms) with a smoke test.
   * Added restart GMRES with identity preconditioner and a basic solver smoke test.
   * Extended GMRES harness with residual tracking and SSA operator smoke solve.
+  * Added non-trivial SSA GMRES regression with nuH>0 and known solution.
 * 🎯 Next:
 
-  * Assess GMRES residual norms on non-trivial SSA coefficients.
+  * Start M6 multigrid level builder (grid coarsening + per-level fields).
