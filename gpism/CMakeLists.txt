@@ -105,6 +105,7 @@ configure_file(
 
 set(GPISM_CORE_SOURCES
   src/context.cpp
+  src/device_policy.cpp
   src/grid2d.cpp
   src/runtime_config.cpp
   src/geometry.cpp
@@ -323,5 +324,9 @@ if(GPISM_BUILD_TESTS)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
     add_test(NAME gpism-ssa-operator-cuda-smoke COMMAND gpism-ssa-operator-cuda-smoke)
+
+    add_executable(gpism-ssa-picard-parity-smoke tests/ssa_picard_parity_smoke.cpp)
+    target_link_libraries(gpism-ssa-picard-parity-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-ssa-picard-parity-smoke COMMAND gpism-ssa-picard-parity-smoke)
   endif()
 endif()

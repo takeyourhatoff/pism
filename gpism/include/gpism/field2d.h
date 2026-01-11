@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "gpism/config.h"
+#include "gpism/device_policy.h"
 
 #if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
@@ -60,8 +61,10 @@ public:
   T* data() { return data_.data(); }
   const T* data() const { return data_.data(); }
 
-  T* device_data() { return device_data_; }
-  const T* device_data() const { return device_data_; }
+  T* device_data() { return device_enabled() ? device_data_ : nullptr; }
+  const T* device_data() const {
+    return device_enabled() ? device_data_ : nullptr;
+  }
 
   T* host_staging_data() {
 #if GPISM_HAVE_CUDA
@@ -80,7 +83,7 @@ public:
 
   void copy_host_to_device() {
 #if GPISM_HAVE_CUDA
-    if (device_data_ && host_staging_) {
+    if (device_enabled() && device_data_ && host_staging_) {
       cudaMemcpy(device_data_, host_staging_,
                  elements() * sizeof(T), cudaMemcpyHostToDevice);
     }
@@ -89,7 +92,7 @@ public:
 
   void copy_device_to_host() {
 #if GPISM_HAVE_CUDA
-    if (device_data_ && host_staging_) {
+    if (device_enabled() && device_data_ && host_staging_) {
       cudaMemcpy(host_staging_, device_data_,
                  elements() * sizeof(T), cudaMemcpyDeviceToHost);
     }
@@ -106,7 +109,9 @@ public:
     return data_[index(i, j)];
   }
 
-  bool has_device_data() const { return device_data_ != nullptr; }
+  bool has_device_data() const {
+    return device_enabled() && device_data_ != nullptr;
+  }
 
   void fill(const T& value) {
     std::fill(data_.begin(), data_.end(), value);

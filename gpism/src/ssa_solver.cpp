@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/gmres.h"
 #include "gpism/halo_exchange.h"
 
@@ -18,6 +19,9 @@ namespace {
 template <typename T>
 void sync_host_to_device(Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!device_enabled()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
@@ -32,6 +36,9 @@ void sync_host_to_device(Field2D<T>& field) {
 template <typename T>
 void sync_device_to_host(Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!device_enabled()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }

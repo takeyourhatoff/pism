@@ -315,12 +315,12 @@
 * [x] Add MPI halo exchange for SSA solver fields (nuH, vel, rhs, beta)
 * [x] Add Picard convergence test on non-trivial geometry (single-rank)
 * [x] Add MPI Picard convergence test (1 vs 2 ranks)
-* [-] Regression tests: consistent results across GPU/CPU (tolerance-based) — blocked on host-only SSA solve path
+* [x] Regression tests: consistent results across GPU/CPU (tolerance-based)
 
 ### M7 Definition of Done
 
-* [ ] SSA solve converges robustly on a set of non-trivial geometries
-* [ ] Results are stable across MPI decomposition and GPU backend (within tolerance)
+* [x] SSA solve converges robustly on a set of non-trivial geometries
+* [x] Results are stable across MPI decomposition and GPU backend (within tolerance)
 
 ---
 
@@ -566,9 +566,10 @@
   * Added MPI halo exchanges for SSA solver fields and halo-aware SSA apply.
   * Added global MPI reductions for GMRES dot/norms and Picard convergence checks.
   * Added MPI SSA Picard smoke tests (1 and 2 ranks) and enforced convergence in non-trivial Picard test.
+  * Added host-only SSA solve toggle for parity testing and CPU/GPU Picard parity smoke test.
 * 🧱 Blocked:
 
-  * CPU/GPU Picard parity requires a host-only SSA solve path.
+  * -
 * 🎯 Next:
 
-  * Decide on CPU/GPU parity approach for Picard regression.
+  * Start M8 time manager + constant SMB forcing scaffold.

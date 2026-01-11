@@ -1,5 +1,6 @@
 #include "gpism/config.h"
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/gmres.h"
 #include "gpism/linear_algebra.h"
 #include "gpism/ssa_operator.h"
@@ -81,6 +82,7 @@ struct SSAOperatorWrapper : public gpism::LinearOperator {
 
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
+  gpism::set_device_enabled(true);
 
 #if GPISM_HAVE_CUDA
   cudaSetDevice(context.device_id());

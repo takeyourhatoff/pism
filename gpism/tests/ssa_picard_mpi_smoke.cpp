@@ -1,5 +1,6 @@
 #include "gpism/config.h"
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/ssa_solver.h"
 
 #include <cmath>
@@ -40,6 +41,7 @@ double global_norm(const gpism::Context& context, double local_sum) {
 
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
+  gpism::set_device_enabled(true);
 
 #if GPISM_HAVE_CUDA
   cudaSetDevice(context.device_id());
