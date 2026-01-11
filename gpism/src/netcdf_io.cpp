@@ -160,6 +160,22 @@ bool put_global_attr_text(int ncid, const char* name, const std::string& value) 
          NC_NOERR;
 }
 
+void put_vel_bc_mask_attrs(int ncid, int varid) {
+  if (varid < 0) {
+    return;
+  }
+  const char* long_name = "SSA velocity Dirichlet mask";
+  nc_put_att_text(ncid, varid, "long_name", std::strlen(long_name), long_name);
+  const int flag_values[2] = {0, 1};
+  nc_put_att_int(ncid, varid, "flag_values", NC_INT, 2, flag_values);
+  const char* flag_meanings = "free dirichlet";
+  nc_put_att_text(ncid, varid, "flag_meanings", std::strlen(flag_meanings),
+                  flag_meanings);
+  const char* comment =
+      "1 enforces prescribed velocity (u_bc/v_bc) at faces; 0 leaves unconstrained";
+  nc_put_att_text(ncid, varid, "comment", std::strlen(comment), comment);
+}
+
 bool write_var_2d(int ncid, int varid, const Field2D<double>& field, int nx, int ny,
                   std::size_t t_index) {
   std::vector<double> buffer(static_cast<std::size_t>(nx) * ny);
@@ -252,6 +268,7 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   if (fields.has_vel_bc) {
     nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
     nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+    put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
   }
   const std::string history = "gpism write_output";
   nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());
@@ -496,6 +513,7 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       if (fields.has_vel_bc) {
         nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
         nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+        put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
       }
       const std::string history = "gpism write_output";
       nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());
@@ -673,6 +691,7 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   if (fields.has_vel_bc) {
     nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
     nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+    put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
   }
   const std::string history = "gpism write_output";
   nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());

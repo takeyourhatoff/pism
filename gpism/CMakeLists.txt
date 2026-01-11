@@ -110,6 +110,7 @@ set(GPISM_CORE_SOURCES
   src/geometry.cpp
   src/viscosity.cpp
   src/ssa_operator.cpp
+  src/linear_algebra.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -120,6 +121,7 @@ if(GPISM_ENABLE_CUDA)
   list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
   list(APPEND GPISM_CORE_SOURCES src/geometry_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
+  list(APPEND GPISM_CORE_SOURCES src/linear_algebra_cuda.cu)
 endif()
 
 add_library(gpism-core ${GPISM_CORE_SOURCES})
@@ -218,4 +220,14 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-ssa-operator-smoke tests/ssa_operator_smoke.cpp)
   target_link_libraries(gpism-ssa-operator-smoke PRIVATE gpism-core)
   add_test(NAME gpism-ssa-operator-smoke COMMAND gpism-ssa-operator-smoke)
+
+  add_executable(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
+  target_link_libraries(gpism-linear-algebra-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-linear-algebra-smoke COMMAND gpism-linear-algebra-smoke)
+
+  if(GPISM_ENABLE_CUDA)
+    add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
+    target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-ssa-operator-cuda-smoke COMMAND gpism-ssa-operator-cuda-smoke)
+  endif()
 endif()

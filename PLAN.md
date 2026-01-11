@@ -141,7 +141,7 @@
   * [x] write core fields
   * [x] write SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`)
   * [x] write metadata (units/history)
-  * [ ] add BC metadata (long_name, flag values/meanings for `vel_bc_mask`)
+  * [x] add BC metadata (long_name, flag values/meanings for `vel_bc_mask`)
   * [x] enforce dimension order convention consistently (time,y,x)
   * [x] enable NetCDF4/parallel output when library support is available
 * [x] Implement restart semantics (minimum viable)
@@ -202,8 +202,8 @@
   * [x] “zero solution” sanity test with zero slopes + no forcing
   * [x] symmetry-ish checks on simple constant coefficient cases (as applicable)
   * [ ] manufactured solution test (optional but recommended)
-  * [ ] CUDA smoke test exercises device path (when GPISM_ENABLE_CUDA=ON)
-  * [ ] CPU/GPU parity check on a tiny grid (tolerances)
+  * [x] CUDA smoke test exercises device path (when GPISM_ENABLE_CUDA=ON)
+  * [x] CPU/GPU parity check on a tiny grid (tolerances)
 
 ### M4 Definition of Done
 
@@ -218,11 +218,11 @@
 
 ### M5 Tasks
 
-* [ ] Implement vector operations on device
+* [~] Implement vector operations on device
 
-  * [ ] axpy, scal, dot, norm2, norm1
+  * [x] axpy, scal, dot, norm2, norm1
   * [ ] reductions are deterministic option (optional)
-  * [ ] validate with small device-side unit tests
+  * [x] validate with small device-side unit tests
 * [ ] Implement GMRES (start with restart GMRES(m))
 
   * [ ] device-side orthogonalization (modified Gram-Schmidt)
@@ -530,8 +530,9 @@
   * Added simple SSA operator coupling term and symmetry-ish check.
   * Added NetCDF I/O for SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`).
   * Added CUDA kernels for SSA operator apply/RHS/basal drag (device path).
+  * Added `vel_bc_mask` metadata (long_name + flag values/meanings) in NetCDF output.
+  * Added CUDA SSA operator smoke test with CPU/GPU parity checks.
+  * Added device-capable linear algebra ops (axpy/scal/dot/norms) with a smoke test.
 * 🎯 Next:
 
-  * Add BC metadata for `vel_bc_mask` (flag values/meanings).
-  * Add CUDA SSA operator smoke + CPU/GPU parity test.
-  * Start SSA solver stack: device vector ops + GMRES scaffold.
+  * Start SSA solver stack: GMRES/FGMRES scaffold.
