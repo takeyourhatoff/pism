@@ -68,6 +68,8 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
   const double dy = grid.dy();
   const double inv_dx2 = 1.0 / (dx * dx);
   const double inv_dy2 = 1.0 / (dy * dy);
+  const double inv_2dx = 1.0 / (2.0 * dx);
+  const double inv_2dy = 1.0 / (2.0 * dy);
 
   const Field2D<double>& u = vel.component(0);
   const Field2D<double>& v = vel.component(1);
@@ -75,6 +77,12 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
   const Field2D<double>& nu_v = nuH.component(1);
   const Field2D<double>& beta_u = beta.component(0);
   const Field2D<double>& beta_v = beta.component(1);
+
+  auto shear = [&](int i, int j) {
+    const double du_dy = (u(i, j + 1) - u(i, j - 1)) * inv_2dy;
+    const double dv_dx = (v(i + 1, j) - v(i - 1, j)) * inv_2dx;
+    return du_dy + dv_dx;
+  };
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
@@ -88,7 +96,13 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
         const double flux_y =
             nu_u(i, j + 1) * (u(i, j + 1) - u_c) -
             nu_u(i, j - 1) * (u_c - u(i, j - 1));
-        out(i, j, 0) = flux_x * inv_dx2 + flux_y * inv_dy2 +
+        double coupling = 0.0;
+        if (j >= 1 && j <= grid.local_my() - 2) {
+          const double shear_p = shear(i, j + 1);
+          const double shear_m = shear(i, j - 1);
+          coupling = nu_u(i, j) * (shear_p - shear_m) * inv_2dy;
+        }
+        out(i, j, 0) = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
                        beta_u(i, j) * u_c;
       }
 
@@ -102,7 +116,13 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
         const double flux_y =
             nu_v(i, j + 1) * (v(i, j + 1) - v_c) -
             nu_v(i, j - 1) * (v_c - v(i, j - 1));
-        out(i, j, 1) = flux_x * inv_dx2 + flux_y * inv_dy2 +
+        double coupling = 0.0;
+        if (i >= 1 && i <= grid.local_mx() - 2) {
+          const double shear_p = shear(i + 1, j);
+          const double shear_m = shear(i - 1, j);
+          coupling = nu_v(i, j) * (shear_p - shear_m) * inv_2dx;
+        }
+        out(i, j, 1) = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
                        beta_v(i, j) * v_c;
       }
     }

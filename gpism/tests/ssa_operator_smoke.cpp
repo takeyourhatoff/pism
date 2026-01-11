@@ -118,8 +118,12 @@ int main() {
   auto dot = [&](const gpism::FieldStag2D<double>& a,
                  const gpism::FieldStag2D<double>& b) {
     double sum = 0.0;
-    for (int j = 0; j < my; ++j) {
-      for (int i = 0; i < mx; ++i) {
+    const int i_start = 1;
+    const int i_end = mx - 2;
+    const int j_start = 1;
+    const int j_end = my - 2;
+    for (int j = j_start; j <= j_end; ++j) {
+      for (int i = i_start; i <= i_end; ++i) {
         sum += a(i, j, 0) * b(i, j, 0) + a(i, j, 1) * b(i, j, 1);
       }
     }
