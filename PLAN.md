@@ -254,11 +254,11 @@
 
   * [x] coarsening rules for grid + halos
   * [x] allocate per-level fields `U_l, R_l, nuH_l` etc.
-* [ ] Implement restriction/prolongation for staggered fields
+* [x] Implement restriction/prolongation for staggered fields
 
-  * [ ] u-face restriction
-  * [ ] v-face restriction
-  * [ ] prolongation back to fine
+  * [x] u-face restriction
+  * [x] v-face restriction
+  * [x] prolongation back to fine
 * [ ] Implement smoother
 
   * [ ] Jacobi smoother first (easy)
@@ -538,6 +538,7 @@
   * Extended GMRES harness with residual tracking and SSA operator smoke solve.
   * Added non-trivial SSA GMRES regression with nuH>0 and known solution.
   * Added multigrid level builder with a sizing smoke test.
+  * Added staggered restriction/prolongation with transfer smoke test.
 * 🎯 Next:
 
-  * Implement restriction/prolongation for staggered fields (u/v faces).
+  * Implement multigrid smoother (Jacobi first).

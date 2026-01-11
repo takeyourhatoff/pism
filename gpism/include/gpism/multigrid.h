@@ -33,4 +33,7 @@ private:
   std::vector<MGLevel> levels_;
 };
 
+void restrict_stag(const FieldStag2D<double>& fine, FieldStag2D<double>& coarse);
+void prolong_stag(const FieldStag2D<double>& coarse, FieldStag2D<double>& fine);
+
 }  // namespace gpism

@@ -235,6 +235,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-multigrid-levels-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-levels-smoke COMMAND gpism-multigrid-levels-smoke)
 
+  add_executable(gpism-multigrid-transfer-smoke tests/multigrid_transfer_smoke.cpp)
+  target_link_libraries(gpism-multigrid-transfer-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-transfer-smoke COMMAND gpism-multigrid-transfer-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
