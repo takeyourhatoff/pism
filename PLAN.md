@@ -9,6 +9,12 @@
 
 ---
 
+## Plan discipline (do this every time)
+
+* Do not start work unless there is an explicit task for it in this plan.
+* If new work is needed, add a task (or sub-task) first, then execute it.
+* When a task is finished, immediately update its checkbox and the progress log.
+
 ## Milestone M0 — Repo + build + dev workflow (scaffold)
 
 **Goal:** You can compile/run a “hello timestep” executable on CPU + GPU backend.
@@ -126,12 +132,14 @@
 
   * [x] read grid metadata (Mx/My from dimensions)
   * [x] read core fields: `thk`, `topg`, `tauc` (at minimum)
+  * [x] read SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`)
   * [x] read dx/dy or coordinate variables
   * [x] handle missing optional fields with defaults
 * [x] Implement NetCDF writer
 
   * [x] define dimensions (include `time`)
   * [x] write core fields
+  * [x] write SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`)
   * [x] write metadata (units/history)
   * [x] enforce dimension order convention consistently (time,y,x)
   * [x] enable NetCDF4/parallel output when library support is available
@@ -192,6 +200,7 @@
   * [x] “zero solution” sanity test with zero slopes + no forcing
   * [x] symmetry-ish checks on simple constant coefficient cases (as applicable)
   * [ ] manufactured solution test (optional but recommended)
+  * [ ] CUDA smoke test exercises device path (when GPISM_ENABLE_CUDA=ON)
 
 ### M4 Definition of Done
 
@@ -516,5 +525,6 @@
   * Added CUDA kernels for SSA operator apply/RHS/basal drag (device path).
 * 🎯 Next:
 
-  * Wire SSA Dirichlet BC fields into solver state once SSA solve loop exists.
+  * Add CUDA SSA operator smoke test to exercise device path.
   * Implement SSA Picard loop + GMRES scaffolding.
+  * Wire SSA Dirichlet BC fields into solver state once SSA solve loop exists.
