@@ -144,7 +144,7 @@
   * [x] add BC metadata (long_name, flag values/meanings for `vel_bc_mask`)
   * [x] enforce dimension order convention consistently (time,y,x)
   * [x] enable NetCDF4/parallel output when library support is available
-  * [ ] verify parallel IO stack on this machine (MPI + HDF5 parallel + netcdf-c parallel)
+  * [x] verify parallel IO stack on this machine (MPI + HDF5 parallel + netcdf-c parallel)
 * [x] Implement restart semantics (minimum viable)
 
   * [x] read “state at time t” (last record or `io.time_index`)
@@ -551,6 +551,7 @@
   * Added non-trivial SSA Picard smoke test (non-zero slopes).
   * Verified CPU build (NetCDF disabled) and ran `ctest` for core smoke tests.
   * Verified CUDA build (NetCDF disabled) and ran `ctest` including CUDA smoke tests.
+  * Verified parallel NetCDF stack (HDF5-par + netcdf-c-par) and MPI `gpism-io-smoke-mpi` test.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.
