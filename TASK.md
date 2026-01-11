@@ -185,6 +185,9 @@ You have two viable strategies:
 **Strategy A (recommended for “full GPU use”)**
 Write your own matrix-free multigrid + Krylov inside gpism-core.
 
+**Decision (2026-01-11):** Select **Strategy A** for gpism. The SSA/hybrid solver will be
+implemented as a native matrix-free multigrid + Krylov stack inside `gpism-core`.
+
 **Strategy B (pragmatic early path)**
 Use PETSc but force GPU types and keep vectors/mats on device:
 

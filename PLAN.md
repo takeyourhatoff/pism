@@ -487,6 +487,7 @@
   * Expanded smoke test to validate staggered field halo exchange.
   * Added host staging buffers + optional CUDA device allocations in `Field2D`.
   * Added `Context::neighbors_2d` helper for rank neighbor lookup.
+  * Selected SSA solver Strategy A (native matrix-free multigrid + Krylov).
 * 🎯 Next:
 
   * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.
