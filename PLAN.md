@@ -259,9 +259,9 @@
   * [x] u-face restriction
   * [x] v-face restriction
   * [x] prolongation back to fine
-* [ ] Implement smoother
+* [~] Implement smoother
 
-  * [ ] Jacobi smoother first (easy)
+  * [x] Jacobi smoother first (easy)
   * [ ] Chebyshev-Jacobi smoother next (recommended for GPU)
 * [ ] Implement residual computation per level
 * [ ] Implement V-cycle
@@ -539,6 +539,7 @@
   * Added non-trivial SSA GMRES regression with nuH>0 and known solution.
   * Added multigrid level builder with a sizing smoke test.
   * Added staggered restriction/prolongation with transfer smoke test.
+  * Added host-side Jacobi smoother with a smoke test.
 * 🎯 Next:
 
-  * Implement multigrid smoother (Jacobi first).
+  * Add Chebyshev-Jacobi smoother and residual computation per level.

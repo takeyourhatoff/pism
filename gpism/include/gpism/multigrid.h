@@ -7,6 +7,8 @@
 
 namespace gpism {
 
+struct SSABoundaryCondition;
+
 struct MGLevel {
   Grid2D grid;
   FieldStag2D<double> u;
@@ -35,5 +37,9 @@ private:
 
 void restrict_stag(const FieldStag2D<double>& fine, FieldStag2D<double>& coarse);
 void prolong_stag(const FieldStag2D<double>& coarse, FieldStag2D<double>& fine);
+void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                   const FieldStag2D<double>& beta, const FieldStag2D<double>& b,
+                   FieldStag2D<double>& x, int iterations, double omega,
+                   const SSABoundaryCondition* bc = nullptr);
 
 }  // namespace gpism

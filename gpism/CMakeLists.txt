@@ -239,6 +239,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-multigrid-transfer-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-transfer-smoke COMMAND gpism-multigrid-transfer-smoke)
 
+  add_executable(gpism-multigrid-jacobi-smoke tests/multigrid_jacobi_smoke.cpp)
+  target_link_libraries(gpism-multigrid-jacobi-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-jacobi-smoke COMMAND gpism-multigrid-jacobi-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
