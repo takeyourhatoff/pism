@@ -110,6 +110,7 @@ set(GPISM_CORE_SOURCES
   src/runtime_config.cpp
   src/time_manager.cpp
   src/profile.cpp
+  src/sync_stats.cpp
   src/thermodynamics.cpp
   src/geometry.cpp
   src/thickness.cpp

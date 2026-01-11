@@ -2,6 +2,7 @@
 #include "gpism/device_policy.h"
 #include "gpism/field_sync.h"
 #include "gpism/geometry.h"
+#include "gpism/sync_stats.h"
 #include "gpism/ssa_solver.h"
 #include "gpism/thermodynamics.h"
 #include "gpism/thickness.h"
@@ -77,6 +78,9 @@ int main() {
   gpism::sync_host_to_device(enthalpy);
   gpism::sync_host_to_device(enthalpy_next);
 
+  gpism::SyncStats::reset();
+  gpism::SyncStats::enable(true);
+
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
   gpism::SSASolverOptions ssa_options;
@@ -109,6 +113,15 @@ int main() {
                                    enthalpy_next);
     std::swap(enthalpy, enthalpy_next);
   }
+
+  const std::size_t h2d_calls = gpism::SyncStats::h2d_calls();
+  const std::size_t d2h_calls = gpism::SyncStats::d2h_calls();
+  if (h2d_calls != 0 || d2h_calls != 0) {
+    std::cerr << "unexpected field syncs during hot loop (h2d=" << h2d_calls
+              << ", d2h=" << d2h_calls << ")\n";
+    return 1;
+  }
+  gpism::SyncStats::enable(false);
 
   gpism::sync_device_to_host(thk);
   gpism::sync_device_to_host(uvel);

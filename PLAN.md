@@ -409,6 +409,7 @@
   * [x] batch GMRES orthogonalization reductions on device (keep H/g + Givens on host)
   * [ ] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
+  * [x] add hot-loop sync audit to `gpism-timestep-gpu-smoke` (fail if field syncs occur during the loop)
   * [ ] I/O staging is async and double-buffered when possible; GPU work can overlap output
   * [x] add GPU timestep smoke test (no NetCDF) to exercise full DAG + profile host/device transfers
 * [ ] Overlap comm/compute
@@ -596,6 +597,7 @@
   * Added a thermodynamics scale smoke test, fixed `Field3D` move semantics for swap safety, and verified minimal host/device transfers with Nsight Systems.
   * Added a GPU timestep smoke test covering SSA + transport + thermodynamics, and profiled it to confirm device-resident fields (with scalar reduction syncs noted).
   * Audited hot-loop field residency: primary state fields remain device-resident; host syncs occur only at I/O boundaries and MPI staging when CUDA-aware MPI is unavailable.
+  * Added a hot-loop sync audit to the GPU timestep smoke test (fails if field syncs occur inside the loop).
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).

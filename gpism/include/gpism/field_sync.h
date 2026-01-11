@@ -7,6 +7,7 @@
 #include "gpism/field2d.h"
 #include "gpism/field3d.h"
 #include "gpism/field_stag2d.h"
+#include "gpism/sync_stats.h"
 
 namespace gpism {
 
@@ -19,6 +20,7 @@ void sync_host_to_device(Field2D<T>& field) {
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
+  SyncStats::record_h2d(field.elements() * sizeof(T));
   std::memcpy(field.host_staging_data(), field.data(),
               field.elements() * sizeof(T));
   field.copy_host_to_device();
@@ -36,6 +38,7 @@ void sync_device_to_host(Field2D<T>& field) {
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
+  SyncStats::record_d2h(field.elements() * sizeof(T));
   field.copy_device_to_host();
   std::memcpy(field.data(), field.host_staging_data(),
               field.elements() * sizeof(T));
@@ -65,6 +68,7 @@ void sync_host_to_device(Field3D<T>& field) {
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
+  SyncStats::record_h2d(field.elements() * sizeof(T));
   std::memcpy(field.host_staging_data(), field.data(),
               field.elements() * sizeof(T));
   field.copy_host_to_device();
@@ -82,6 +86,7 @@ void sync_device_to_host(Field3D<T>& field) {
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
+  SyncStats::record_d2h(field.elements() * sizeof(T));
   field.copy_device_to_host();
   std::memcpy(field.data(), field.host_staging_data(),
               field.elements() * sizeof(T));
