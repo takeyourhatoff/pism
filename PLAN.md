@@ -291,22 +291,22 @@
 
 ### M7 Tasks
 
-* [ ] Implement Picard outer loop
+* [x] Implement Picard outer loop
 
-  * [ ] initialize U (from file if available; else zeros)
-  * [ ] update `nuH(U)` each iteration
-  * [ ] solve linear system for U
-  * [ ] wire `vel_bc_mask/u_bc/v_bc` into solver state (config-gated)
-* [ ] Implement Picard convergence checks
+  * [x] initialize U (from file if available; else zeros)
+  * [x] update `nuH(U)` each iteration
+  * [x] solve linear system for U
+  * [x] wire `vel_bc_mask/u_bc/v_bc` into solver state (config-gated)
+* [x] Implement Picard convergence checks
 
-  * [ ] L1 norm change of `nuH` (recommended)
-  * [ ] optional U-change norm
-  * [ ] max iterations + fallback
+  * [x] L1 norm change of `nuH` (recommended)
+  * [x] optional U-change norm
+  * [x] max iterations + fallback
 * [ ] Add stabilization options
 
   * [ ] under-relaxation of U or nuH
   * [ ] viscosity floor/ceiling
-* [ ] Regression tests: consistent results across GPU/CPU (tolerance-based)
+* [~] Regression tests: consistent results across GPU/CPU (tolerance-based)
 
 ### M7 Definition of Done
 
@@ -545,6 +545,7 @@
   * Added multigrid preconditioner wrapper with a smoke test.
   * Added multigrid constant/variable coefficient residual reduction tests.
   * Added multigrid scaling smoke test (8x8 vs 16x16).
+  * Added SSA Picard solver scaffold with convergence checks and a smoke test.
 * 🎯 Next:
 
-  * Start M7 Picard loop for SSA nonlinearity.
+  * Add Picard stabilization options (under-relaxation, viscosity bounds).

@@ -114,6 +114,7 @@ set(GPISM_CORE_SOURCES
   src/gmres.cpp
   src/multigrid.cpp
   src/mg_preconditioner.cpp
+  src/ssa_solver.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -263,6 +264,10 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-multigrid-scaling-smoke tests/multigrid_scaling_smoke.cpp)
   target_link_libraries(gpism-multigrid-scaling-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-scaling-smoke COMMAND gpism-multigrid-scaling-smoke)
+
+  add_executable(gpism-ssa-picard-smoke tests/ssa_picard_smoke.cpp)
+  target_link_libraries(gpism-ssa-picard-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-picard-smoke COMMAND gpism-ssa-picard-smoke)
 
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
