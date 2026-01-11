@@ -406,6 +406,7 @@
   * [ ] primary state fields stay device-resident in the hot loop (thk/topg/tauc/vel/nuH/enthalpy); host access only at I/O boundaries
   * [x] timestep DAG runs on device: geometry → SSA solve → transport → thermodynamics → diagnostics (no CPU gridpoint loops)
   * [ ] halo exchange uses device buffers when CUDA-aware MPI is available; otherwise only pinned staging buffers
+  * [x] batch GMRES orthogonalization reductions on device (keep H/g + Givens on host)
   * [ ] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
   * [ ] I/O staging is async and double-buffered when possible; GPU work can overlap output
