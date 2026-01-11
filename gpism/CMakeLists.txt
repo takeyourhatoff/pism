@@ -109,6 +109,7 @@ set(GPISM_CORE_SOURCES
   src/runtime_config.cpp
   src/geometry.cpp
   src/viscosity.cpp
+  src/ssa_operator.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -212,4 +213,8 @@ if(GPISM_BUILD_TESTS)
       )
     endif()
   endif()
+
+  add_executable(gpism-ssa-operator-smoke tests/ssa_operator_smoke.cpp)
+  target_link_libraries(gpism-ssa-operator-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-operator-smoke COMMAND gpism-ssa-operator-smoke)
 endif()

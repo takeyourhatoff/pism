@@ -170,21 +170,21 @@
 
   * [x] strain rate invariants on staggered grid
   * [x] effective viscosity `nu` and `nuH`
-* [ ] Implement basal resistance term
+* [x] Implement basal resistance term
 
-  * [ ] v0: simple pseudo-plastic or linear drag using `tauc`
-* [ ] Implement RHS assembly kernel `b`
-* [ ] Implement matrix-free apply: `y = A(x)`
+  * [x] v0: simple pseudo-plastic or linear drag using `tauc`
+* [x] Implement RHS assembly kernel `b`
+* [x] Implement matrix-free apply: `y = A(x)`
 
-  * [ ] one kernel per component or fused kernel (start simple)
-  * [ ] uses halos correctly
-* [ ] Implement Dirichlet BCs
+  * [x] one kernel per component or fused kernel (start simple)
+  * [x] uses halos correctly
+* [x] Implement Dirichlet BCs
 
-  * [ ] support `vel_bc_mask`, `vel_bc_values` (or gpism equivalents)
-  * [ ] enforce in `A.apply` and in residual computation
-* [ ] Operator verification tests (non-physics)
+  * [x] support `vel_bc_mask`, `vel_bc_values` (or gpism equivalents)
+  * [x] enforce in `A.apply` and in residual computation
+* [~] Operator verification tests (non-physics)
 
-  * [ ] “zero solution” sanity test with zero slopes + no forcing
+  * [x] “zero solution” sanity test with zero slopes + no forcing
   * [ ] symmetry-ish checks on simple constant coefficient cases (as applicable)
   * [ ] manufactured solution test (optional but recommended)
 
@@ -504,7 +504,9 @@
   * Built MPI-enabled HDF5 + NetCDF-C with parallel NetCDF4 support.
   * Enabled NetCDF4 parallel output path in `NetcdfIO`.
   * Added gpism build/version/git metadata to NetCDF outputs.
+  * Implemented SSA basal drag, RHS assembly, and matrix-free apply (CPU v0).
+  * Added SSA operator smoke test (zero forcing/zero velocity).
 * 🎯 Next:
 
-  * Finish M2 logging metadata (write build + git hash into output files).
-  * Implement M4 basal resistance, RHS assembly, and matrix-free apply kernels.
+  * Add SSA operator coupling terms and validate symmetry-ish behavior.
+  * Implement SSA Dirichlet BC plumbing to match PISM mask/value fields in I/O.
