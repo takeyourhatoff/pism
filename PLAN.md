@@ -271,7 +271,7 @@
   * [x] coarse solve (few GMRES/Jacobi iterations)
   * [x] prolongate correction
   * [x] post-smooth
-* [ ] Integrate as preconditioner in FGMRES
+* [x] Integrate as preconditioner in FGMRES
 * [ ] Multigrid tests
 
   * [ ] constant coefficient cases
@@ -542,6 +542,7 @@
   * Added host-side Jacobi smoother with a smoke test.
   * Added Chebyshev-Jacobi smoother with a diagonal smoke test.
   * Added residual computation + V-cycle scaffold with smoke coverage.
+  * Added multigrid preconditioner wrapper with a smoke test.
 * 🎯 Next:
 
-  * Integrate multigrid as a preconditioner in FGMRES.
+  * Add multigrid tests for constant/variable coefficient cases.

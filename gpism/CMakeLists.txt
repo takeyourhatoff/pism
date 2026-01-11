@@ -113,6 +113,7 @@ set(GPISM_CORE_SOURCES
   src/linear_algebra.cpp
   src/gmres.cpp
   src/multigrid.cpp
+  src/mg_preconditioner.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -250,6 +251,10 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-multigrid-vcycle-smoke tests/multigrid_vcycle_smoke.cpp)
   target_link_libraries(gpism-multigrid-vcycle-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-vcycle-smoke COMMAND gpism-multigrid-vcycle-smoke)
+
+  add_executable(gpism-mg-preconditioner-smoke tests/mg_preconditioner_smoke.cpp)
+  target_link_libraries(gpism-mg-preconditioner-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-mg-preconditioner-smoke COMMAND gpism-mg-preconditioner-smoke)
 
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
