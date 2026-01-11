@@ -24,11 +24,11 @@
   * [x] GPU model: CUDA/HIP/SYCL, or portability layer (e.g., Kokkos)
   * [x] MPI library requirements (CUDA-aware MPI desired)
   * [x] NetCDF stack choice (netcdf-c + HDF5; optional PnetCDF later)
-* [ ] Set up build system (CMake recommended)
+* [~] Set up build system (CMake recommended)
 
-  * [ ] CPU-only build works
+  * [x] CPU-only build works
   * [ ] GPU build works (one backend first)
-  * [ ] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
+  * [x] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
 * [ ] Add formatting + linting + basic static analysis
 
   * [ ] clang-format config (or equivalent)
@@ -473,6 +473,7 @@
 * ✅ Completed:
 
   * Scaffolded `gpism/` directories and starter docs (`PROJECT_PLAN.md`, `CONTRIBUTING.md`, `docs/decisions.md`).
+  * Added a minimal gpism CMake build and `gpism --version` stub.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
