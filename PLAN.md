@@ -29,9 +29,9 @@
   * [-] CPU-only build works (cmake not available in current dev environment)
   * [ ] GPU build works (one backend first)
   * [x] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
-* [ ] Add formatting + linting + basic static analysis
+* [x] Add formatting + linting + basic static analysis
 
-  * [ ] clang-format config (or equivalent)
+  * [x] clang-format config (or equivalent)
 
 ### M0 Definition of Done
 
@@ -475,6 +475,7 @@
   * Scaffolded `gpism/` directories and starter docs (`PROJECT_PLAN.md`, `CONTRIBUTING.md`, `docs/decisions.md`).
   * Added a minimal gpism CMake build and `gpism --version` stub.
   * Added CMake cache options for backend/precision with optional MPI/NetCDF detection.
+  * Added clang-format target and optional clang-tidy integration in gpism CMake.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
