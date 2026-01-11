@@ -15,15 +15,15 @@
 
 ### M0 Tasks
 
-* [ ] Create repo structure
+* [x] Create repo structure (scaffolded under `gpism/`)
 
-  * [ ] `src/`, `include/`, `tests/`, `docs/`, `cmake/`, `examples/`
-  * [ ] Add `PROJECT_PLAN.md` (this doc) and `CONTRIBUTING.md`
-* [ ] Choose implementation stack (record decisions in `docs/decisions.md`)
+  * [x] `src/`, `include/`, `tests/`, `docs/`, `cmake/`, `examples/`
+  * [x] Add `PROJECT_PLAN.md` (this doc) and `CONTRIBUTING.md`
+* [x] Choose implementation stack (record decisions in `docs/decisions.md`)
 
-  * [ ] GPU model: CUDA/HIP/SYCL, or portability layer (e.g., Kokkos)
-  * [ ] MPI library requirements (CUDA-aware MPI desired)
-  * [ ] NetCDF stack choice (netcdf-c + HDF5; optional PnetCDF later)
+  * [x] GPU model: CUDA/HIP/SYCL, or portability layer (e.g., Kokkos)
+  * [x] MPI library requirements (CUDA-aware MPI desired)
+  * [x] NetCDF stack choice (netcdf-c + HDF5; optional PnetCDF later)
 * [ ] Set up build system (CMake recommended)
 
   * [ ] CPU-only build works
@@ -467,3 +467,12 @@
 * 🎯 Next:
 
   * -
+
+**Week of 2026-01-11**
+
+* ✅ Completed:
+
+  * Scaffolded `gpism/` directories and starter docs (`PROJECT_PLAN.md`, `CONTRIBUTING.md`, `docs/decisions.md`).
+* 🎯 Next:
+
+  * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
