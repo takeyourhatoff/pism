@@ -219,6 +219,7 @@
 
   * [ ] axpy, scal, dot, norm2, norm1
   * [ ] reductions are deterministic option (optional)
+  * [ ] validate with small device-side unit tests
 * [ ] Implement GMRES (start with restart GMRES(m))
 
   * [ ] device-side orthogonalization (modified Gram-Schmidt)
@@ -230,6 +231,7 @@
 
   * [ ] solve a known linear system from a frozen coefficient operator
   * [ ] measure iterations, residual curves
+  * [ ] SSA operator smoke solve (few GMRES iterations, residual drops)
 
 ### M5 Definition of Done
 
@@ -290,6 +292,7 @@
   * [ ] initialize U (from file if available; else zeros)
   * [ ] update `nuH(U)` each iteration
   * [ ] solve linear system for U
+  * [ ] wire `vel_bc_mask/u_bc/v_bc` into solver state (config-gated)
 * [ ] Implement Picard convergence checks
 
   * [ ] L1 norm change of `nuH` (recommended)
@@ -335,6 +338,7 @@
 * [ ] Add “end-to-end” test case
 
   * [ ] 10–50 steps, writes outputs, no blow-up
+  * [ ] SSA-only loop (no thickness evolution) as a first end-to-end test
 
 ### M8 Definition of Done
 
