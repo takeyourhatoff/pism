@@ -507,7 +507,8 @@
   * Implemented SSA basal drag, RHS assembly, and matrix-free apply (CPU v0).
   * Added SSA operator smoke test (zero forcing/zero velocity).
   * Added simple SSA operator coupling term and symmetry-ish check.
+  * Added NetCDF I/O for SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`).
 * 🎯 Next:
 
-  * Implement SSA Dirichlet BC plumbing to match PISM mask/value fields in I/O.
   * Add GPU kernels for SSA operator apply/RHS.
+  * Wire SSA Dirichlet BC fields into solver state once SSA solve loop exists.

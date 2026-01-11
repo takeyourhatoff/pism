@@ -12,6 +12,10 @@ struct IOFields2D {
   Field2D<double> thk;
   Field2D<double> topg;
   Field2D<double> tauc;
+  Field2D<double> u_bc;
+  Field2D<double> v_bc;
+  Field2D<int> vel_bc_mask;
+  bool has_vel_bc = false;
 };
 
 class NetcdfIO {
