@@ -14,6 +14,7 @@ set(GPISM_VERSION "0.0.0-dev")
 set(GPISM_BACKEND "cpu" CACHE STRING "Backend: cpu, cuda, hip, sycl")
 set(GPISM_PRECISION "double" CACHE STRING "Precision: double or mixed")
 
+option(GPISM_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(GPISM_ENABLE_MPI "Enable MPI support" ON)
 option(GPISM_ENABLE_NETCDF "Enable NetCDF support" ON)
 option(GPISM_ENABLE_CLANG_TIDY "Enable clang-tidy analysis" OFF)
@@ -37,6 +38,18 @@ set(GPISM_MPI "disabled")
 set(GPISM_NETCDF "disabled")
 set(GPISM_HAVE_MPI 0)
 set(GPISM_HAVE_NETCDF 0)
+
+if(GPISM_ENABLE_CUDA)
+  enable_language(CUDA)
+  if(NOT CMAKE_CUDA_STANDARD)
+    set(CMAKE_CUDA_STANDARD 14)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+  endif()
+  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+    set(CMAKE_CUDA_ARCHITECTURES 86)
+  endif()
+  set(GPISM_BACKEND "cuda" CACHE STRING "Backend: cpu, cuda, hip, sycl" FORCE)
+endif()
 
 if(GPISM_ENABLE_MPI)
   find_package(MPI QUIET)
@@ -75,10 +88,16 @@ configure_file(
   @ONLY
 )
 
-add_library(gpism-core
+set(GPISM_CORE_SOURCES
   src/context.cpp
   src/grid2d.cpp
 )
+
+if(GPISM_ENABLE_CUDA)
+  list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
+endif()
+
+add_library(gpism-core ${GPISM_CORE_SOURCES})
 
 target_include_directories(gpism-core
   PUBLIC

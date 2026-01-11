@@ -27,7 +27,7 @@
 * [x] Set up build system (CMake recommended)
 
   * [x] CPU-only build works
-  * [ ] GPU build works (one backend first)
+  * [x] GPU build works (one backend first)
   * [x] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
 * [x] Add formatting + linting + basic static analysis
 
@@ -482,6 +482,7 @@
   * Added env-driven device selection policy in `gpism::Context`.
   * Installed cmake and built gpism locally (including `gpism --version`).
   * Ran gpism field smoke test (single-rank) via CTest.
+  * Completed CUDA-enabled gpism build on Linux GPU host.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
