@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gpism/field2d.h"
+#include "gpism/field3d.h"
 #include "gpism/field_stag2d.h"
 #include "gpism/grid2d.h"
 
@@ -11,7 +12,10 @@ public:
   ViscosityModel(double A, double n, double eps0);
 
   void compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
-                   const FieldStag2D<double>& vel, FieldStag2D<double>& nuH) const;
+                   const FieldStag2D<double>& vel, FieldStag2D<double>& nuH,
+                   const Field3D<double>* enthalpy = nullptr,
+                   double enthalpy_gamma = 0.0,
+                   double enthalpy_ref = 0.0) const;
 
 private:
   double A_;

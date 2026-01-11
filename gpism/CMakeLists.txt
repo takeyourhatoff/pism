@@ -110,6 +110,7 @@ set(GPISM_CORE_SOURCES
   src/runtime_config.cpp
   src/time_manager.cpp
   src/profile.cpp
+  src/thermodynamics.cpp
   src/geometry.cpp
   src/thickness.cpp
   src/viscosity.cpp
@@ -133,6 +134,7 @@ if(GPISM_ENABLE_CUDA)
   list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/ssa_solver_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/linear_algebra_cuda.cu)
+  list(APPEND GPISM_CORE_SOURCES src/thermodynamics_cuda.cu)
 endif()
 
 add_library(gpism-core ${GPISM_CORE_SOURCES})
@@ -288,6 +290,14 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-thickness-smoke tests/thickness_smoke.cpp)
   target_link_libraries(gpism-thickness-smoke PRIVATE gpism-core)
   add_test(NAME gpism-thickness-smoke COMMAND gpism-thickness-smoke)
+
+  add_executable(gpism-vertical-diffusion-smoke tests/vertical_diffusion_smoke.cpp)
+  target_link_libraries(gpism-vertical-diffusion-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-vertical-diffusion-smoke COMMAND gpism-vertical-diffusion-smoke)
+
+  add_executable(gpism-viscosity-temperature-smoke tests/viscosity_temperature_smoke.cpp)
+  target_link_libraries(gpism-viscosity-temperature-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-viscosity-temperature-smoke COMMAND gpism-viscosity-temperature-smoke)
 
   add_executable(gpism-ssa-timestep-smoke tests/ssa_timestep_smoke.cpp)
   target_link_libraries(gpism-ssa-timestep-smoke PRIVATE gpism-core)

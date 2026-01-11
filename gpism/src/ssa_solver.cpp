@@ -255,7 +255,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     if (context && context->mpi_enabled()) {
       exchange_for_device(vel, grid_, *context);
     }
-    viscosity_.compute_nuH(grid_, thk, vel, nuH);
+    viscosity_.compute_nuH(grid_, thk, vel, nuH, options.enthalpy,
+                           options.enthalpy_gamma, options.enthalpy_ref);
     if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
         options.nuH_relax < 1.0) {
       apply_nuH_constraints(nuH, nuH_prev, options);

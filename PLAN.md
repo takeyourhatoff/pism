@@ -369,14 +369,14 @@
 
 * [ ] Decide thermodynamics model scope (v0)
 
-  * [ ] isothermal (skip) vs enthalpy diffusion/advection
-* [ ] Implement 3D field storage (`Field3D` column-contiguous)
-* [ ] Implement batched per-column vertical diffusion solve
+  * [x] enthalpy diffusion/advection (batched tridiagonal)
+* [x] Implement 3D field storage (`Field3D` column-contiguous)
+* [x] Implement batched per-column vertical diffusion solve
 
-  * [ ] tridiagonal assembly kernel
-  * [ ] batched tridiagonal solve kernel
-* [ ] Couple temperature/enthalpy to viscosity
-* [ ] Add thermodynamics validation cases (column tests)
+  * [x] tridiagonal assembly kernel
+  * [x] batched tridiagonal solve kernel
+* [x] Couple temperature/enthalpy to viscosity
+* [x] Add thermodynamics validation cases (column tests)
 
 ### M9 Definition of Done
 
@@ -580,9 +580,11 @@
   * Added CUDA viscosity path, GPU diff norms, and shared field sync helpers; updated GPU-facing tests to sync device/host data.
   * Profiled CUDA build with Nsight Systems; SSA operator + thickness tests show GPU kernels executing (no stray device-wide syncs).
   * Added lightweight profiling hooks (CUDA event timers + halo exchange timers) and validated output via `GPISM_PROFILE=1` on GPU GMRES smoke.
+  * Implemented `Field3D` and GPU/CPU vertical diffusion (tridiagonal assembly + batched solve) with a new parity smoke test.
+  * Added enthalpy-coupled viscosity scaling with CPU/GPU parity test coverage.
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Decide M9 thermodynamics scope (isothermal vs enthalpy) or start M10 profiling hooks (CUDA event timers).
+  * Wire thermodynamics step into timestep (enthalpy field + diffusion update) and validate SSA response to temperature changes.
