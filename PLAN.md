@@ -506,7 +506,8 @@
   * Added gpism build/version/git metadata to NetCDF outputs.
   * Implemented SSA basal drag, RHS assembly, and matrix-free apply (CPU v0).
   * Added SSA operator smoke test (zero forcing/zero velocity).
+  * Added simple SSA operator coupling term and symmetry-ish check.
 * 🎯 Next:
 
-  * Add SSA operator coupling terms and validate symmetry-ish behavior.
   * Implement SSA Dirichlet BC plumbing to match PISM mask/value fields in I/O.
+  * Add GPU kernels for SSA operator apply/RHS.
