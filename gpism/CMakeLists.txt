@@ -269,6 +269,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-ssa-picard-smoke PRIVATE gpism-core)
   add_test(NAME gpism-ssa-picard-smoke COMMAND gpism-ssa-picard-smoke)
 
+  add_executable(gpism-ssa-picard-nontrivial-smoke tests/ssa_picard_nontrivial_smoke.cpp)
+  target_link_libraries(gpism-ssa-picard-nontrivial-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-picard-nontrivial-smoke COMMAND gpism-ssa-picard-nontrivial-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)

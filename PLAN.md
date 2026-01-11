@@ -547,6 +547,7 @@
   * Added multigrid scaling smoke test (8x8 vs 16x16).
   * Added SSA Picard solver scaffold with convergence checks and a smoke test.
   * Added Picard stabilization options (relaxation + nuH bounds).
+  * Added non-trivial SSA Picard smoke test (non-zero slopes).
 * 🎯 Next:
 
-  * Add regression coverage for Picard (GPU/CPU tolerance checks).
+  * Decide on CPU/GPU parity approach for Picard regression.
