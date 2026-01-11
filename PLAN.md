@@ -397,8 +397,8 @@
   * [ ] MPI timing for halo exchange
 * [ ] Reduce host-device traffic audit
 
-  * [ ] confirm timestep loop is device-resident
-  * [ ] no hidden syncs in reductions
+  * [x] confirm timestep loop is device-resident
+  * [x] no hidden syncs in reductions
   * [x] remove unconditional `cudaDeviceSynchronize()` calls from CUDA ops (use error checks + sync only at host reads)
   * [x] move timestep kernels (geometry, thickness, velocity) and SSA Picard norms/relax to device; stage to host only for IO
 * [ ] Overlap comm/compute
@@ -578,9 +578,10 @@
   * Added append-to-time NetCDF outputs (single file, multiple records) and verified `gpism-timestep-io-smoke`.
   * Removed unconditional CUDA syncs and added device-resident thickness/velocity/SSA Picard updates with host staging only for IO.
   * Added CUDA viscosity path, GPU diff norms, and shared field sync helpers; updated GPU-facing tests to sync device/host data.
+  * Profiled CUDA build with Nsight Systems; SSA operator + thickness tests show GPU kernels executing (no stray device-wide syncs).
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Verify device-resident timestep with profiler-based sync audit, then decide M9 thermodynamics scope or start M10 profiling hooks.
+  * Decide M9 thermodynamics scope (isothermal vs enthalpy) or start M10 profiling hooks (CUDA event timers).
