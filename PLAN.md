@@ -377,11 +377,12 @@
   * [x] batched tridiagonal solve kernel
 * [x] Couple temperature/enthalpy to viscosity
 * [x] Add thermodynamics validation cases (column tests)
+* [x] Add thermodynamics scale smoke test + host-transfer audit (GPU)
 * [x] Wire thermodynamics update into timestep loop (config + init + diffusion step)
 
 ### M9 Definition of Done
 
-* [ ] Thermodynamics step runs at scale on GPU without excessive host transfers
+* [x] Thermodynamics step runs at scale on GPU without excessive host transfers
 * [x] viscosity changes impact SSA in expected ways
 
 ---
@@ -584,9 +585,10 @@
   * Implemented `Field3D` and GPU/CPU vertical diffusion (tridiagonal assembly + batched solve) with a new parity smoke test.
   * Added enthalpy-coupled viscosity scaling with CPU/GPU parity test coverage.
   * Wired thermodynamics into the timestep loop and added an SSA temperature-response smoke test.
+  * Added a thermodynamics scale smoke test, fixed `Field3D` move semantics for swap safety, and verified minimal host/device transfers with Nsight Systems.
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Scale-test thermodynamics GPU step and check host-transfer volume, then update M9 DoD.
+  * Pick the next M10 performance tasks (overlap or bandwidth) and add explicit subtasks before starting.

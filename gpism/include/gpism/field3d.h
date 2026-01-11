@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include "gpism/config.h"
@@ -40,6 +41,65 @@ public:
 #endif
         device_data_(nullptr) {
     resize_storage();
+  }
+
+  Field3D(const Field3D&) = delete;
+  Field3D& operator=(const Field3D&) = delete;
+
+  Field3D(Field3D&& other) noexcept
+      : local_mx_(other.local_mx_),
+        local_my_(other.local_my_),
+        local_mz_(other.local_mz_),
+        ghost_width_(other.ghost_width_),
+        stride_x_(other.stride_x_),
+        data_(std::move(other.data_)),
+#if GPISM_HAVE_CUDA
+        host_staging_(other.host_staging_),
+        host_staging_count_(other.host_staging_count_),
+#else
+        host_staging_(std::move(other.host_staging_)),
+#endif
+        device_data_(other.device_data_) {
+    other.local_mx_ = 0;
+    other.local_my_ = 0;
+    other.local_mz_ = 0;
+    other.ghost_width_ = 0;
+    other.stride_x_ = 0;
+#if GPISM_HAVE_CUDA
+    other.host_staging_ = nullptr;
+    other.host_staging_count_ = 0;
+#endif
+    other.device_data_ = nullptr;
+  }
+
+  Field3D& operator=(Field3D&& other) noexcept {
+    if (this == &other) {
+      return *this;
+    }
+    release_device();
+    release_host_staging();
+    local_mx_ = other.local_mx_;
+    local_my_ = other.local_my_;
+    local_mz_ = other.local_mz_;
+    ghost_width_ = other.ghost_width_;
+    stride_x_ = other.stride_x_;
+    data_ = std::move(other.data_);
+#if GPISM_HAVE_CUDA
+    host_staging_ = other.host_staging_;
+    host_staging_count_ = other.host_staging_count_;
+    other.host_staging_ = nullptr;
+    other.host_staging_count_ = 0;
+#else
+    host_staging_ = std::move(other.host_staging_);
+#endif
+    device_data_ = other.device_data_;
+    other.device_data_ = nullptr;
+    other.local_mx_ = 0;
+    other.local_my_ = 0;
+    other.local_mz_ = 0;
+    other.ghost_width_ = 0;
+    other.stride_x_ = 0;
+    return *this;
   }
 
   ~Field3D() {

@@ -295,6 +295,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-vertical-diffusion-smoke PRIVATE gpism-core)
   add_test(NAME gpism-vertical-diffusion-smoke COMMAND gpism-vertical-diffusion-smoke)
 
+  add_executable(gpism-thermo-scale-smoke tests/thermo_scale_smoke.cpp)
+  target_link_libraries(gpism-thermo-scale-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-thermo-scale-smoke COMMAND gpism-thermo-scale-smoke)
+
   add_executable(gpism-viscosity-temperature-smoke tests/viscosity_temperature_smoke.cpp)
   target_link_libraries(gpism-viscosity-temperature-smoke PRIVATE gpism-core)
   add_test(NAME gpism-viscosity-temperature-smoke COMMAND gpism-viscosity-temperature-smoke)
