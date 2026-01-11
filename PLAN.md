@@ -508,7 +508,8 @@
   * Added SSA operator smoke test (zero forcing/zero velocity).
   * Added simple SSA operator coupling term and symmetry-ish check.
   * Added NetCDF I/O for SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`).
+  * Added CUDA kernels for SSA operator apply/RHS/basal drag (device path).
 * 🎯 Next:
 
-  * Add GPU kernels for SSA operator apply/RHS.
   * Wire SSA Dirichlet BC fields into solver state once SSA solve loop exists.
+  * Implement SSA Picard loop + GMRES scaffolding.

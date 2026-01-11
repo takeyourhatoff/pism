@@ -119,6 +119,7 @@ endif()
 if(GPISM_ENABLE_CUDA)
   list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
   list(APPEND GPISM_CORE_SOURCES src/geometry_cuda.cu)
+  list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
 endif()
 
 add_library(gpism-core ${GPISM_CORE_SOURCES})
