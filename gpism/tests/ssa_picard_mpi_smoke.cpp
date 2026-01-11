@@ -2,9 +2,11 @@
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
 #include "gpism/field_sync.h"
+#include "gpism/sync_stats.h"
 #include "gpism/ssa_solver.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 
 #if GPISM_HAVE_MPI
@@ -90,8 +92,31 @@ int main(int argc, char** argv) {
   options.use_bc = false;
   options.context = &context;
 
+  vel.fill(0.0);
+  gpism::sync_host_to_device(vel);
+#if GPISM_HAVE_CUDA
+  gpism::SyncStats::enable(true);
+  gpism::SyncStats::reset();
+#endif
   gpism::SSASolverResult result =
       solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel, options);
+#if GPISM_HAVE_CUDA
+  const std::size_t device_syncs =
+      gpism::SyncStats::h2d_calls() + gpism::SyncStats::d2h_calls();
+  if (context.size() > 1) {
+    if (context.cuda_aware_mpi()) {
+      if (device_syncs != 0) {
+        std::cerr << "unexpected host staging with cuda-aware MPI (syncs="
+                  << device_syncs << ")\n";
+        return 1;
+      }
+    } else if (device_syncs == 0) {
+      std::cerr << "expected host staging when cuda-aware MPI unavailable\n";
+      return 1;
+    }
+  }
+  gpism::SyncStats::enable(false);
+#endif
   gpism::sync_device_to_host(vel);
 
   if (!result.converged) {

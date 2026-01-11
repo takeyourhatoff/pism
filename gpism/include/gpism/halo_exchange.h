@@ -4,6 +4,7 @@
 
 #include "gpism/config.h"
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/field2d.h"
 #include "gpism/field_stag2d.h"
 #include "gpism/grid2d.h"
@@ -226,37 +227,73 @@ public:
     }
 #endif
 
-    std::vector<T> send_west;
-    std::vector<T> send_east;
-    std::vector<T> send_south;
-    std::vector<T> send_north;
-    std::vector<T> recv_west;
-    std::vector<T> recv_east;
-    std::vector<T> recv_south;
-    std::vector<T> recv_north;
+    struct HostBuffer {
+      T* ptr = nullptr;
+      std::size_t count = 0;
+      std::vector<T> storage;
+#if GPISM_HAVE_CUDA
+      bool pinned = false;
+#endif
+      void allocate(std::size_t n) {
+        count = n;
+        if (n == 0) {
+          return;
+        }
+#if GPISM_HAVE_CUDA
+        if (device_enabled()) {
+          cudaHostAlloc(reinterpret_cast<void**>(&ptr),
+                        n * sizeof(T), cudaHostAllocDefault);
+          pinned = true;
+          return;
+        }
+#endif
+        storage.resize(n);
+        ptr = storage.data();
+      }
+      void release() {
+#if GPISM_HAVE_CUDA
+        if (pinned && ptr) {
+          cudaFreeHost(ptr);
+        }
+        pinned = false;
+#endif
+        storage.clear();
+        ptr = nullptr;
+        count = 0;
+      }
+    };
+
+    HostBuffer send_west;
+    HostBuffer send_east;
+    HostBuffer send_south;
+    HostBuffer send_north;
+    HostBuffer recv_west;
+    HostBuffer recv_east;
+    HostBuffer recv_south;
+    HostBuffer recv_north;
 
     if (west >= 0) {
-      send_west.resize(static_cast<size_t>(gw) * local_my);
-      recv_west.resize(static_cast<size_t>(gw) * local_my);
+      send_west.allocate(static_cast<size_t>(gw) * local_my);
+      recv_west.allocate(static_cast<size_t>(gw) * local_my);
     }
     if (east >= 0) {
-      send_east.resize(static_cast<size_t>(gw) * local_my);
-      recv_east.resize(static_cast<size_t>(gw) * local_my);
+      send_east.allocate(static_cast<size_t>(gw) * local_my);
+      recv_east.allocate(static_cast<size_t>(gw) * local_my);
     }
     if (south >= 0) {
-      send_south.resize(static_cast<size_t>(gw) * local_mx);
-      recv_south.resize(static_cast<size_t>(gw) * local_mx);
+      send_south.allocate(static_cast<size_t>(gw) * local_mx);
+      recv_south.allocate(static_cast<size_t>(gw) * local_mx);
     }
     if (north >= 0) {
-      send_north.resize(static_cast<size_t>(gw) * local_mx);
-      recv_north.resize(static_cast<size_t>(gw) * local_mx);
+      send_north.allocate(static_cast<size_t>(gw) * local_mx);
+      recv_north.allocate(static_cast<size_t>(gw) * local_mx);
     }
 
     if (west >= 0) {
       int idx = 0;
       for (int j = 0; j < local_my; ++j) {
         for (int i = 0; i < gw; ++i) {
-          send_west[idx++] = field(i, j);
+          send_west.ptr[idx++] = field(i, j);
         }
       }
     }
@@ -264,7 +301,7 @@ public:
       int idx = 0;
       for (int j = 0; j < local_my; ++j) {
         for (int i = local_mx - gw; i < local_mx; ++i) {
-          send_east[idx++] = field(i, j);
+          send_east.ptr[idx++] = field(i, j);
         }
       }
     }
@@ -272,7 +309,7 @@ public:
       int idx = 0;
       for (int j = 0; j < gw; ++j) {
         for (int i = 0; i < local_mx; ++i) {
-          send_south[idx++] = field(i, j);
+          send_south.ptr[idx++] = field(i, j);
         }
       }
     }
@@ -280,7 +317,7 @@ public:
       int idx = 0;
       for (int j = local_my - gw; j < local_my; ++j) {
         for (int i = 0; i < local_mx; ++i) {
-          send_north[idx++] = field(i, j);
+          send_north.ptr[idx++] = field(i, j);
         }
       }
     }
@@ -288,22 +325,22 @@ public:
     std::vector<MPI_Request> requests;
     requests.reserve(8);
 
-    auto post_recv = [&](int neighbor, int tag, std::vector<T>& buffer) {
+    auto post_recv = [&](int neighbor, int tag, HostBuffer& buffer) {
       if (neighbor < 0) {
         return;
       }
       MPI_Request req{};
-      MPI_Irecv(buffer.data(), static_cast<int>(buffer.size()), MpiType<T>::value(),
+      MPI_Irecv(buffer.ptr, static_cast<int>(buffer.count), MpiType<T>::value(),
                 neighbor, tag, MPI_COMM_WORLD, &req);
       requests.push_back(req);
     };
 
-    auto post_send = [&](int neighbor, int tag, std::vector<T>& buffer) {
+    auto post_send = [&](int neighbor, int tag, HostBuffer& buffer) {
       if (neighbor < 0) {
         return;
       }
       MPI_Request req{};
-      MPI_Isend(buffer.data(), static_cast<int>(buffer.size()), MpiType<T>::value(),
+      MPI_Isend(buffer.ptr, static_cast<int>(buffer.count), MpiType<T>::value(),
                 neighbor, tag, MPI_COMM_WORLD, &req);
       requests.push_back(req);
     };
@@ -326,7 +363,7 @@ public:
       int idx = 0;
       for (int j = 0; j < local_my; ++j) {
         for (int i = -gw; i < 0; ++i) {
-          field(i, j) = recv_west[idx++];
+          field(i, j) = recv_west.ptr[idx++];
         }
       }
     }
@@ -334,7 +371,7 @@ public:
       int idx = 0;
       for (int j = 0; j < local_my; ++j) {
         for (int i = local_mx; i < local_mx + gw; ++i) {
-          field(i, j) = recv_east[idx++];
+          field(i, j) = recv_east.ptr[idx++];
         }
       }
     }
@@ -342,7 +379,7 @@ public:
       int idx = 0;
       for (int j = -gw; j < 0; ++j) {
         for (int i = 0; i < local_mx; ++i) {
-          field(i, j) = recv_south[idx++];
+          field(i, j) = recv_south.ptr[idx++];
         }
       }
     }
@@ -350,10 +387,18 @@ public:
       int idx = 0;
       for (int j = local_my; j < local_my + gw; ++j) {
         for (int i = 0; i < local_mx; ++i) {
-          field(i, j) = recv_north[idx++];
+          field(i, j) = recv_north.ptr[idx++];
         }
       }
     }
+    send_west.release();
+    send_east.release();
+    send_south.release();
+    send_north.release();
+    recv_west.release();
+    recv_east.release();
+    recv_south.release();
+    recv_north.release();
 #else
     (void)field;
     (void)grid;

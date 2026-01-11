@@ -393,6 +393,8 @@
 
 ### M10 Tasks
 
+**Priority order (impact):** 1) halo exchange device buffers (CUDA-aware), 2) reductions/norms without implicit syncs (incl. "no hidden syncs"), 3) overlap comm/compute, 4) I/O async/double-buffered.
+
 * [ ] Add profiling hooks
 
   * [x] kernel timing (CUDA events / ROCm / SYCL profiling)
@@ -405,7 +407,8 @@
   * [x] move timestep kernels (geometry, thickness, velocity) and SSA Picard norms/relax to device; stage to host only for IO
   * [x] primary state fields stay device-resident in the hot loop (thk/topg/tauc/vel/nuH/enthalpy); host access only at I/O boundaries (plus MPI staging when not CUDA-aware)
   * [x] timestep DAG runs on device: geometry → SSA solve → transport → thermodynamics → diagnostics (no CPU gridpoint loops)
-  * [ ] halo exchange uses device buffers when CUDA-aware MPI is available; otherwise only pinned staging buffers
+  * [x] halo exchange uses device buffers when CUDA-aware MPI is available; otherwise only pinned staging buffers
+  * [x] add MPI sync audit to confirm cuda-aware exchange avoids host staging (and non-aware path stages)
   * [x] batch GMRES orthogonalization reductions on device (keep H/g + Givens on host)
   * [ ] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
@@ -598,6 +601,7 @@
   * Added a GPU timestep smoke test covering SSA + transport + thermodynamics, and profiled it to confirm device-resident fields (with scalar reduction syncs noted).
   * Audited hot-loop field residency: primary state fields remain device-resident; host syncs occur only at I/O boundaries and MPI staging when CUDA-aware MPI is unavailable.
   * Added a hot-loop sync audit to the GPU timestep smoke test (fails if field syncs occur inside the loop).
+  * Fixed CUDA surface-slope boundary handling to match CPU clamping and restore MPI Picard convergence; added MPI sync audit and pinned host staging for non-cuda-aware halo exchange.
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).

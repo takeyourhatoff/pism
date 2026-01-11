@@ -26,11 +26,15 @@ __global__ void slope_kernel(int mx, int my, const double* usurf, double* dhdx,
   if (i >= mx || j >= my) {
     return;
   }
+  const int il = (i == 0) ? 0 : (i - 1);
+  const int ir = (i == mx - 1) ? (mx - 1) : (i + 1);
+  const int jd = (j == 0) ? 0 : (j - 1);
+  const int ju = (j == my - 1) ? (my - 1) : (j + 1);
   int idx = (j + 1) * stride + (i + 1);
-  int idx_left = (j + 1) * stride + (i);
-  int idx_right = (j + 1) * stride + (i + 2);
-  int idx_down = (j)*stride + (i + 1);
-  int idx_up = (j + 2) * stride + (i + 1);
+  int idx_left = (j + 1) * stride + (il + 1);
+  int idx_right = (j + 1) * stride + (ir + 1);
+  int idx_down = (jd + 1) * stride + (i + 1);
+  int idx_up = (ju + 1) * stride + (i + 1);
 
   double left = usurf[idx_left];
   double right = usurf[idx_right];
