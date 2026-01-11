@@ -332,31 +332,31 @@
 
 * [ ] Implement time manager
 
-  * [ ] `t0`, `dt`, `t_end`, output intervals
-* [ ] Implement simple forcing module (v0)
+  * [x] `t0`, `dt`, `t_end`, output intervals
+* [x] Implement simple forcing module (v0)
 
-  * [ ] constant surface mass balance (SMB) or read from file
-* [ ] Implement thickness update (transport)
+  * [x] constant surface mass balance (SMB) or read from file
+* [x] Implement thickness update (transport)
 
-  * [ ] compute face fluxes `H_face * U_face`
-  * [ ] conservative divergence update
-  * [ ] positivity preservation (no negative thickness)
-* [ ] Implement mask update (minimal)
+  * [x] compute face fluxes `H_face * U_face`
+  * [x] conservative divergence update
+  * [x] positivity preservation (no negative thickness)
+* [x] Implement mask update (minimal)
 
-  * [ ] define ice-free vs ice-covered
-  * [ ] grounding/floating can be deferred (but leave hooks)
-* [ ] Output at intervals
+  * [x] define ice-free vs ice-covered
+  * [x] grounding/floating can be deferred (but leave hooks)
+* [x] Output at intervals
 
-  * [ ] thk, usurf, velocities, basic diagnostics
-* [ ] Add “end-to-end” test case
+  * [x] thk, usurf, velocities, basic diagnostics
+* [x] Add “end-to-end” test case
 
-  * [ ] 10–50 steps, writes outputs, no blow-up
-  * [ ] SSA-only loop (no thickness evolution) as a first end-to-end test
+  * [x] 10–50 steps, writes outputs, no blow-up
+  * [x] SSA-only loop (no thickness evolution) as a first end-to-end test
 
 ### M8 Definition of Done
 
 * [ ] `gpism` can run a short simulation end-to-end and write multiple time records
-* [ ] thickness remains non-negative and physically plausible
+* [x] thickness remains non-negative and physically plausible
 
 ---
 
@@ -567,9 +567,14 @@
   * Added global MPI reductions for GMRES dot/norms and Picard convergence checks.
   * Added MPI SSA Picard smoke tests (1 and 2 ranks) and enforced convergence in non-trivial Picard test.
   * Added host-only SSA solve toggle for parity testing and CPU/GPU Picard parity smoke test.
+  * Added time manager, constant SMB forcing, thickness transport update, and mask update utilities.
+  * Extended NetCDF IO to optionally read/write `uvel`, `vvel`, and `usurf`.
+  * Wired a minimal timestep loop into `gpism` with interval outputs (file-per-interval).
+  * Added thickness transport smoke test and SSA-only timestep loop smoke test.
+  * Added NetCDF timestep IO smoke test (conditional on NetCDF builds).
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Start M8 time manager + constant SMB forcing scaffold.
+  * Decide whether to append multiple time records to a single output file (M8 DoD).

@@ -16,6 +16,11 @@ struct IOFields2D {
   Field2D<double> v_bc;
   Field2D<int> vel_bc_mask;
   bool has_vel_bc = false;
+  Field2D<double> uvel;
+  Field2D<double> vvel;
+  Field2D<double> usurf;
+  bool has_velocity = false;
+  bool has_usurf = false;
 };
 
 class NetcdfIO {

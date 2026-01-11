@@ -108,7 +108,9 @@ set(GPISM_CORE_SOURCES
   src/device_policy.cpp
   src/grid2d.cpp
   src/runtime_config.cpp
+  src/time_manager.cpp
   src/geometry.cpp
+  src/thickness.cpp
   src/viscosity.cpp
   src/ssa_operator.cpp
   src/linear_algebra.cpp
@@ -256,6 +258,9 @@ if(GPISM_BUILD_TESTS)
                 $<TARGET_FILE:gpism-io-smoke> ${MPIEXEC_POSTFLAGS}
       )
     endif()
+    add_executable(gpism-timestep-io-smoke tests/timestep_io_smoke.cpp)
+    target_link_libraries(gpism-timestep-io-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-timestep-io-smoke COMMAND gpism-timestep-io-smoke)
   endif()
 
   if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE AND GPISM_ENABLE_CUDA)
@@ -275,6 +280,14 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
   target_link_libraries(gpism-linear-algebra-smoke PRIVATE gpism-core)
   add_test(NAME gpism-linear-algebra-smoke COMMAND gpism-linear-algebra-smoke)
+
+  add_executable(gpism-thickness-smoke tests/thickness_smoke.cpp)
+  target_link_libraries(gpism-thickness-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-thickness-smoke COMMAND gpism-thickness-smoke)
+
+  add_executable(gpism-ssa-timestep-smoke tests/ssa_timestep_smoke.cpp)
+  target_link_libraries(gpism-ssa-timestep-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-timestep-smoke COMMAND gpism-ssa-timestep-smoke)
 
   add_executable(gpism-gmres-smoke tests/gmres_smoke.cpp)
   target_link_libraries(gpism-gmres-smoke PRIVATE gpism-core)

@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -5,11 +6,21 @@
 
 #include "gpism/context.h"
 #include "gpism/runtime_config.h"
+#include "gpism/time_manager.h"
 #include "gpism/config.h"
 #include "gpism/version.h"
 
 #if GPISM_HAVE_NETCDF
 #include "gpism/netcdf_io.h"
+#endif
+#include "gpism/geometry.h"
+#include "gpism/halo_exchange.h"
+#include "gpism/ssa_solver.h"
+#include "gpism/thickness.h"
+#include "gpism/viscosity.h"
+
+#if GPISM_HAVE_CUDA
+#include <cuda_runtime.h>
 #endif
 
 namespace {
@@ -115,10 +126,25 @@ void log_rank0(const gpism::Context& context, const std::string& message) {
   }
 }
 
+std::string output_with_index(const std::string& base, int index) {
+  if (index == 0) {
+    return base;
+  }
+  const std::size_t dot = base.find_last_of('.');
+  const std::string stem = (dot == std::string::npos) ? base : base.substr(0, dot);
+  const std::string ext = (dot == std::string::npos) ? "" : base.substr(dot);
+  char suffix[32];
+  std::snprintf(suffix, sizeof(suffix), "_t%04d", index);
+  return stem + suffix + ext;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
+#if GPISM_HAVE_CUDA
+  cudaSetDevice(context.device_id());
+#endif
   Options options;
   try {
     if (!parse_args(argc, argv, &options)) {
@@ -175,15 +201,84 @@ int main(int argc, char** argv) {
       std::cerr << "Error: failed to read input file " << options.input << '\n';
       return 2;
     }
-    double time_value = 0.0;
-    if (config.has("time.start_year")) {
-      time_value = config.get_double("time.start_year");
+
+    const double start_year = config.get_double("time.start_year");
+    const double run_years = config.get_double("time.years");
+    const double dt = config.get_double("time.dt");
+    const double output_interval = config.get_double("time.output_interval");
+    gpism::TimeManager clock(start_year, dt, start_year + run_years,
+                             output_interval);
+
+    const double smb_constant = config.get_double("forcing.smb_constant");
+    gpism::Field2D<double> smb(grid.local_mx(), grid.local_my(), grid.ghost_width());
+    smb.fill(smb_constant);
+
+    gpism::FieldStag2D<double> vel(grid.local_mx(), grid.local_my(),
+                                   grid.ghost_width());
+    vel.fill(0.0);
+
+    gpism::FieldStag2D<double> flux(grid.local_mx(), grid.local_my(),
+                                    grid.ghost_width());
+    gpism::Field2D<int> mask(grid.local_mx(), grid.local_my(), grid.ghost_width());
+    gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
+    gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
+
+    gpism::SSASolverOptions ssa_options;
+    ssa_options.max_picard = config.get_int("ssa.max_picard");
+    ssa_options.gmres_max_iter = config.get_int("ssa.gmres_max_iter");
+    ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
+    ssa_options.tol_vel = config.get_double("ssa.tol_vel");
+    ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    ssa_options.use_bc = fields.has_vel_bc;
+    ssa_options.context = &context;
+
+    gpism::ThicknessUpdateOptions thickness_opts;
+    const bool evolve_thickness = config.get_bool("thickness.evolve");
+    const bool run_ssa = config.get_bool("ssa.enabled");
+
+    gpism::HaloExchange2D exchange;
+    int output_index = 0;
+
+    while (!clock.done()) {
+      if (clock.should_output()) {
+        gpism::GeometryDiagnostics::compute_usurf_cpu(grid, fields.thk,
+                                                      fields.topg, fields.usurf);
+        gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
+        fields.has_usurf = true;
+        fields.has_velocity = true;
+
+        const std::string out_path = output_with_index(options.output, output_index);
+        if (!io.write_output(out_path, context, grid, fields, clock.time())) {
+          std::cerr << "Error: failed to write output file " << out_path << '\n';
+          return 2;
+        }
+        log_rank0(context, "Wrote output to " + out_path);
+        clock.mark_output();
+        ++output_index;
+      }
+
+      if (run_ssa) {
+        solver.solve(fields.thk, fields.topg, fields.tauc,
+                     fields.has_vel_bc ? &fields.u_bc : nullptr,
+                     fields.has_vel_bc ? &fields.v_bc : nullptr,
+                     fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
+                     vel, ssa_options);
+      }
+
+      if (evolve_thickness) {
+        if (context.mpi_enabled()) {
+          exchange.exchange(fields.thk, grid, context, gpism::HaloExchange2D::Mode::Host);
+          exchange.exchange(vel, grid, context, gpism::HaloExchange2D::Mode::Host);
+        }
+        gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
+        gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
+                                fields.thk);
+        gpism::update_mask(grid, fields.thk, mask);
+      }
+
+      clock.advance();
     }
-    if (!io.write_output(options.output, context, grid, fields, time_value)) {
-      std::cerr << "Error: failed to write output file " << options.output << '\n';
-      return 2;
-    }
-    log_rank0(context, "Wrote output to " + options.output);
+
     return 0;
 #else
     std::cerr << "Error: NetCDF support not enabled in this build.\n";

@@ -46,6 +46,15 @@ void RuntimeConfig::load_defaults() {
   values_["time.start_year"] = "0";
   values_["time.years"] = "1";
   values_["time.dt"] = "0.1";
+  values_["time.output_interval"] = "1";
+  values_["forcing.smb_constant"] = "0";
+  values_["thickness.evolve"] = "1";
+  values_["ssa.enabled"] = "1";
+  values_["ssa.max_picard"] = "10";
+  values_["ssa.gmres_max_iter"] = "200";
+  values_["ssa.tol_nuH"] = "1e-6";
+  values_["ssa.tol_vel"] = "1e-6";
+  values_["ssa.gmres_tol"] = "1e-8";
   values_["io.format"] = "netcdf";
   values_["io.size"] = "small";
   values_["io.time_index"] = "-1";
