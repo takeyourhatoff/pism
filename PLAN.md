@@ -122,31 +122,31 @@
 
 ### M3 Tasks
 
-* [~] Implement NetCDF reader
+* [x] Implement NetCDF reader
 
   * [x] read grid metadata (Mx/My from dimensions)
   * [x] read core fields: `thk`, `topg`, `tauc` (at minimum)
-  * [ ] read dx/dy or coordinate variables
-  * [ ] handle missing optional fields with defaults
-* [~] Implement NetCDF writer
+  * [x] read dx/dy or coordinate variables
+  * [x] handle missing optional fields with defaults
+* [x] Implement NetCDF writer
 
-  * [x] define dimensions (x/y only; no `time` yet)
+  * [x] define dimensions (include `time`)
   * [x] write core fields
-  * [ ] write metadata (units/history/etc.)
-  * [ ] enforce dimension order convention consistently (document it)
-* [~] Implement restart semantics (minimum viable)
+  * [x] write metadata (units/history)
+  * [x] enforce dimension order convention consistently (time,y,x)
+* [x] Implement restart semantics (minimum viable)
 
-  * [ ] read “state at time t”
-  * [ ] write restart file at end of run
-* [~] Add I/O tests
+  * [x] read “state at time t” (last record or `io.time_index`)
+  * [x] write restart file at end of run
+* [x] Add I/O tests
 
   * [x] write then read round-trip test for each field type
-  * [ ] multi-rank output correctness (each rank writes its slab)
+  * [x] multi-rank output correctness (each rank writes its slab)
 
 ### M3 Definition of Done
 
 * [x] `gpism -i input.nc -o out.nc` produces a readable NetCDF with expected variables
-* [x] round-trip tests pass (single-rank)
+* [x] round-trip tests pass (single-rank and MPI)
 
 ---
 
@@ -158,9 +158,9 @@
 
 * [x] Define SSA discretization spec (write it down in `docs/ssa_discretization.md`)
 
-  * [ ] variable locations (cell-centered vs staggered faces)
-  * [ ] coefficient interpolation rules
-  * [ ] boundary condition treatment (v0: Dirichlet mask/value)
+  * [x] variable locations (cell-centered vs staggered faces)
+  * [x] coefficient interpolation rules
+  * [x] boundary condition treatment (v0: Dirichlet mask/value)
 * [ ] Implement geometry diagnostics kernels
 
   * [ ] compute `usurf = topg + thk` (or flotation-aware later)
@@ -496,6 +496,8 @@
   * Verified `gpism -i input.nc -o out.nc` writes expected NetCDF variables.
   * Added NetCDF round-trip CTest (io_smoke).
   * Wrote SSA discretization spec for M4.
+  * Completed remaining M3 subtasks (dx/dy, metadata, time dimension, multi-rank IO).
+  * Verified NetCDF IO smoke tests with MPI.
 * 🎯 Next:
 
   * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).

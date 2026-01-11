@@ -162,11 +162,19 @@ int main(int argc, char** argv) {
     gpism::Grid2D grid(0, 0, 1.0, 1.0, 1, context.rank(), context.size());
     gpism::IOFields2D fields;
     gpism::NetcdfIO io;
-    if (!io.read_restart(options.input, grid, fields)) {
+    int time_index = -1;
+    if (config.has("io.time_index")) {
+      time_index = config.get_int("io.time_index");
+    }
+    if (!io.read_restart(options.input, context, grid, fields, time_index)) {
       std::cerr << "Error: failed to read input file " << options.input << '\n';
       return 2;
     }
-    if (!io.write_output(options.output, grid, fields)) {
+    double time_value = 0.0;
+    if (config.has("time.start_year")) {
+      time_value = config.get_double("time.start_year");
+    }
+    if (!io.write_output(options.output, context, grid, fields, time_value)) {
       std::cerr << "Error: failed to write output file " << options.output << '\n';
       return 2;
     }

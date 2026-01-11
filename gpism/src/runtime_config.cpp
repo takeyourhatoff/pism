@@ -48,6 +48,7 @@ void RuntimeConfig::load_defaults() {
   values_["time.dt"] = "0.1";
   values_["io.format"] = "netcdf";
   values_["io.size"] = "small";
+  values_["io.time_index"] = "-1";
 }
 
 bool RuntimeConfig::load_file(const std::string& path, bool replace) {

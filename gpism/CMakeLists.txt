@@ -188,5 +188,12 @@ if(GPISM_BUILD_TESTS)
     add_executable(gpism-io-smoke tests/io_smoke.cpp)
     target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
     add_test(NAME gpism-io-smoke COMMAND gpism-io-smoke)
+    if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+      add_test(
+        NAME gpism-io-smoke-mpi
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+                $<TARGET_FILE:gpism-io-smoke> ${MPIEXEC_POSTFLAGS}
+      )
+    endif()
   endif()
 endif()
