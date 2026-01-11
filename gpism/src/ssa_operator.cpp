@@ -2,6 +2,30 @@
 
 #include <algorithm>
 
+#include "gpism/config.h"
+
+#if GPISM_HAVE_CUDA
+void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
+                                 const double* tauc, double* beta_u,
+                                 double* beta_v, double denom);
+void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
+                           int stride_dhdx, int stride_dhdy, int stride_rhs,
+                           const double* thk, const double* dhdx,
+                           const double* dhdy, double* rhs_u, double* rhs_v,
+                           double scale, const int* mask_u,
+                           const int* mask_v, const double* bc_u,
+                           const double* bc_v, int has_bc);
+void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                    int stride_nu_u, int stride_nu_v, int stride_beta_u,
+                    int stride_beta_v, int stride_out_u, int stride_out_v,
+                    const double* u, const double* v, const double* nu_u,
+                    const double* nu_v, const double* beta_u,
+                    const double* beta_v, double* out_u, double* out_v,
+                    double inv_dx2, double inv_dy2, double inv_2dx,
+                    double inv_2dy, const int* mask_u, const int* mask_v,
+                    int has_bc);
+#endif
+
 namespace gpism {
 namespace {
 
@@ -22,6 +46,18 @@ SSAOperator::SSAOperator(double rho, double g, double u_threshold)
 void SSAOperator::compute_basal_drag(const Grid2D& grid,
                                      const Field2D<double>& tauc,
                                      FieldStag2D<double>& beta) const {
+#if GPISM_HAVE_CUDA
+  if (tauc.has_device_data() && beta.component(0).has_device_data() &&
+      beta.component(1).has_device_data()) {
+    const double denom = std::max(u_threshold_, 1e-6);
+    ssa_compute_basal_drag_cuda(grid.local_mx(), grid.local_my(),
+                                tauc.ghost_width(), tauc.stride(),
+                                tauc.device_data(),
+                                beta.component(0).device_data(),
+                                beta.component(1).device_data(), denom);
+    return;
+  }
+#endif
   const double denom = std::max(u_threshold_, 1e-6);
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
@@ -38,6 +74,29 @@ void SSAOperator::assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
                                const Field2D<double>& dhdy,
                                FieldStag2D<double>& rhs,
                                const SSABoundaryCondition* bc) const {
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask && bc->values;
+  if (thk.has_device_data() && dhdx.has_device_data() && dhdy.has_device_data() &&
+      rhs.component(0).has_device_data() && rhs.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data() &&
+        bc->values->component(0).has_device_data() &&
+        bc->values->component(1).has_device_data()))) {
+    ssa_assemble_rhs_cuda(
+        grid.local_mx(), grid.local_my(), thk.ghost_width(), thk.stride(),
+        dhdx.stride(), dhdy.stride(), rhs.component(0).stride(),
+        thk.device_data(), dhdx.device_data(), dhdy.device_data(),
+        rhs.component(0).device_data(), rhs.component(1).device_data(),
+        rho_ * g_,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? bc->values->component(0).device_data() : nullptr,
+        has_bc ? bc->values->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    return;
+  }
+#endif
   const double scale = rho_ * g_;
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
@@ -70,6 +129,35 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
   const double inv_dy2 = 1.0 / (dy * dy);
   const double inv_2dx = 1.0 / (2.0 * dx);
   const double inv_2dy = 1.0 / (2.0 * dy);
+
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask && bc->values;
+  if (nuH.component(0).has_device_data() && nuH.component(1).has_device_data() &&
+      beta.component(0).has_device_data() && beta.component(1).has_device_data() &&
+      vel.component(0).has_device_data() && vel.component(1).has_device_data() &&
+      out.component(0).has_device_data() && out.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data() &&
+        bc->values->component(0).has_device_data() &&
+        bc->values->component(1).has_device_data()))) {
+    ssa_apply_cuda(
+        grid.local_mx(), grid.local_my(), vel.component(0).ghost_width(),
+        vel.component(0).stride(), vel.component(1).stride(),
+        nuH.component(0).stride(), nuH.component(1).stride(),
+        beta.component(0).stride(), beta.component(1).stride(),
+        out.component(0).stride(), out.component(1).stride(),
+        vel.component(0).device_data(), vel.component(1).device_data(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        out.component(0).device_data(), out.component(1).device_data(),
+        inv_dx2, inv_dy2, inv_2dx, inv_2dy,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    return;
+  }
+#endif
 
   const Field2D<double>& u = vel.component(0);
   const Field2D<double>& v = vel.component(1);
