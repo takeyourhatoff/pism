@@ -48,6 +48,12 @@ void RuntimeConfig::load_defaults() {
   values_["time.dt"] = "0.1";
   values_["time.output_interval"] = "1";
   values_["forcing.smb_constant"] = "0";
+  values_["thermo.enabled"] = "0";
+  values_["thermo.kappa"] = "1.0";
+  values_["thermo.surface_value"] = "0.0";
+  values_["thermo.basal_value"] = "0.0";
+  values_["thermo.enthalpy_gamma"] = "0.0";
+  values_["thermo.enthalpy_ref"] = "0.0";
   values_["thickness.evolve"] = "1";
   values_["ssa.enabled"] = "1";
   values_["ssa.max_picard"] = "10";

@@ -377,11 +377,12 @@
   * [x] batched tridiagonal solve kernel
 * [x] Couple temperature/enthalpy to viscosity
 * [x] Add thermodynamics validation cases (column tests)
+* [x] Wire thermodynamics update into timestep loop (config + init + diffusion step)
 
 ### M9 Definition of Done
 
 * [ ] Thermodynamics step runs at scale on GPU without excessive host transfers
-* [ ] viscosity changes impact SSA in expected ways
+* [x] viscosity changes impact SSA in expected ways
 
 ---
 
@@ -582,9 +583,10 @@
   * Added lightweight profiling hooks (CUDA event timers + halo exchange timers) and validated output via `GPISM_PROFILE=1` on GPU GMRES smoke.
   * Implemented `Field3D` and GPU/CPU vertical diffusion (tridiagonal assembly + batched solve) with a new parity smoke test.
   * Added enthalpy-coupled viscosity scaling with CPU/GPU parity test coverage.
+  * Wired thermodynamics into the timestep loop and added an SSA temperature-response smoke test.
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Wire thermodynamics step into timestep (enthalpy field + diffusion update) and validate SSA response to temperature changes.
+  * Scale-test thermodynamics GPU step and check host-transfer volume, then update M9 DoD.

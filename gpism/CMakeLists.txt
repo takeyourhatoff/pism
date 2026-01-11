@@ -299,6 +299,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-viscosity-temperature-smoke PRIVATE gpism-core)
   add_test(NAME gpism-viscosity-temperature-smoke COMMAND gpism-viscosity-temperature-smoke)
 
+  add_executable(gpism-ssa-temperature-response-smoke tests/ssa_temperature_response_smoke.cpp)
+  target_link_libraries(gpism-ssa-temperature-response-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-temperature-response-smoke COMMAND gpism-ssa-temperature-response-smoke)
+
   add_executable(gpism-ssa-timestep-smoke tests/ssa_timestep_smoke.cpp)
   target_link_libraries(gpism-ssa-timestep-smoke PRIVATE gpism-core)
   add_test(NAME gpism-ssa-timestep-smoke COMMAND gpism-ssa-timestep-smoke)

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "gpism/context.h"
 #include "gpism/field_sync.h"
@@ -17,6 +18,7 @@
 #include "gpism/halo_exchange.h"
 #include "gpism/ssa_solver.h"
 #include "gpism/thickness.h"
+#include "gpism/thermodynamics.h"
 #include "gpism/viscosity.h"
 
 #if GPISM_HAVE_CUDA
@@ -220,6 +222,39 @@ int main(int argc, char** argv) {
     ssa_options.use_bc = fields.has_vel_bc;
     ssa_options.context = &context;
 
+    const bool thermo_enabled = config.get_bool("thermo.enabled");
+    gpism::Field3D<double> enthalpy;
+    gpism::Field3D<double> enthalpy_next;
+    gpism::VerticalDiffusionOptions thermo_opts;
+    double dz = 0.0;
+    if (thermo_enabled) {
+      const int mz = config.get_int("grid.Mz");
+      const double Lz = config.get_double("grid.Lz");
+      dz = (mz > 0) ? (Lz / static_cast<double>(mz)) : 1.0;
+      enthalpy.resize(grid.local_mx(), grid.local_my(), mz, grid.ghost_width());
+      enthalpy_next.resize(grid.local_mx(), grid.local_my(), mz,
+                           grid.ghost_width());
+      thermo_opts.kappa = config.get_double("thermo.kappa");
+      thermo_opts.surface_value = config.get_double("thermo.surface_value");
+      thermo_opts.basal_value = config.get_double("thermo.basal_value");
+      thermo_opts.dirichlet = true;
+      ssa_options.enthalpy = &enthalpy;
+      ssa_options.enthalpy_gamma =
+          config.get_double("thermo.enthalpy_gamma");
+      ssa_options.enthalpy_ref = config.get_double("thermo.enthalpy_ref");
+
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          for (int k = 0; k < mz; ++k) {
+            const double t = (mz > 1) ? static_cast<double>(k) / (mz - 1) : 0.0;
+            enthalpy(i, j, k) =
+                (1.0 - t) * thermo_opts.surface_value +
+                t * thermo_opts.basal_value;
+          }
+        }
+      }
+    }
+
     gpism::ThicknessUpdateOptions thickness_opts;
     const bool evolve_thickness = config.get_bool("thickness.evolve");
     const bool run_ssa = config.get_bool("ssa.enabled");
@@ -231,6 +266,10 @@ int main(int argc, char** argv) {
     gpism::sync_host_to_device(fields.tauc);
     gpism::sync_host_to_device(smb);
     gpism::sync_host_to_device(vel);
+    if (thermo_enabled) {
+      gpism::sync_host_to_device(enthalpy);
+      gpism::sync_host_to_device(enthalpy_next);
+    }
 
     gpism::HaloExchange2D exchange;
     auto exchange_field2d = [&](auto& field) {
@@ -301,6 +340,13 @@ int main(int argc, char** argv) {
                      fields.has_vel_bc ? &fields.v_bc : nullptr,
                      fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
                      vel, ssa_options);
+      }
+
+      if (thermo_enabled) {
+        const int mz = enthalpy.local_mz();
+        gpism::vertical_diffusion_step(enthalpy, mz, dz, clock.dt(), thermo_opts,
+                                       enthalpy_next);
+        std::swap(enthalpy, enthalpy_next);
       }
 
       if (evolve_thickness) {
