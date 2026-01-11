@@ -59,13 +59,13 @@
   * [x] ghost width `gw` parameter
 * [x] Implement device-friendly `Field2D<T>`
 
-  * [ ] allocation includes halos
-  * [ ] indexing helpers for `(i,j)` with ghost offsets
+  * [x] allocation includes halos
+  * [x] indexing helpers for `(i,j)` with ghost offsets
   * [ ] device pointer access + host staging buffer (pinned if available)
 * [x] Implement device-friendly `FieldStag2D<T>` (staggered, 2 components)
 
-  * [ ] layout for `u-face` and `v-face` components
-  * [ ] halo storage + component-aware access
+  * [x] layout for `u-face` and `v-face` components
+  * [x] halo storage + component-aware access
 * [x] Implement halo exchange
 
   * [x] pack/unpack kernels (host buffers)
@@ -73,13 +73,13 @@
   * [x] correctness test for 1-rank and multi-rank cases
 * [x] Add a “field smoke test”
 
-  * [ ] fill field with a known pattern on each rank
-  * [ ] exchange halos
-  * [ ] verify halo values match neighbor interior
+  * [x] fill field with a known pattern on each rank
+  * [x] exchange halos
+  * [x] verify halo values match neighbor interior
 
 ### M1 Definition of Done
 
-* [ ] Multi-rank run successfully exchanges halos for `Field2D` and `FieldStag2D`
+* [x] Multi-rank run successfully exchanges halos for `Field2D` and `FieldStag2D`
 * [ ] No host roundtrips inside the halo exchange except the MPI buffers (and those can be device buffers if CUDA-aware MPI)
 
 ---
@@ -484,6 +484,7 @@
   * Ran gpism field smoke test (single-rank) via CTest.
   * Completed CUDA-enabled gpism build on Linux GPU host.
   * Ran gpism field smoke tests in MPI mode (2 ranks) and single-rank.
+  * Expanded smoke test to validate staggered field halo exchange.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
