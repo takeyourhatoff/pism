@@ -156,7 +156,7 @@
 
 ### M4 Tasks
 
-* [ ] Define SSA discretization spec (write it down in `docs/ssa_discretization.md`)
+* [x] Define SSA discretization spec (write it down in `docs/ssa_discretization.md`)
 
   * [ ] variable locations (cell-centered vs staggered faces)
   * [ ] coefficient interpolation rules
@@ -495,6 +495,7 @@
   * Added minimal NetCDF restart read/write path for `thk`, `topg`, `tauc`.
   * Verified `gpism -i input.nc -o out.nc` writes expected NetCDF variables.
   * Added NetCDF round-trip CTest (io_smoke).
+  * Wrote SSA discretization spec for M4.
 * 🎯 Next:
 
   * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).
