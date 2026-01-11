@@ -92,22 +92,22 @@
 
 * [x] Implement CLI parsing
 
-  * [ ] `-i`, `-o`, `-y`/`-time` style run length
-  * [ ] `-config`, `-config_override`
-  * [ ] gpism-only options prefixed `-gpism_*`
+  * [x] `-i`, `-o`, `-y`/`-time` style run length
+  * [x] `-config`, `-config_override`
+  * [x] gpism-only options prefixed `-gpism_*`
 * [x] Implement config system
 
-  * [ ] load defaults from `gpism_config.nc` (or embedded defaults)
-  * [ ] apply `-config` replacement
-  * [ ] apply `-config_override` (partial overrides)
-  * [ ] provide `get<T>(key)` accessors with type checks
-* [x] Implement logging + run metadata
+  * [x] load defaults from `gpism_config.nc` (or embedded defaults)
+  * [x] apply `-config` replacement
+  * [x] apply `-config_override` (partial overrides)
+  * [x] provide `get<T>(key)` accessors with type checks
+* [~] Implement logging + run metadata
 
-  * [ ] per-rank logging with rank 0 summary
+  * [x] per-rank logging with rank 0 summary
   * [ ] write build + git hash into output metadata when available
 * [x] Implement “dry run” mode
 
-  * [ ] `gpism -dry_run` prints resolved config and exits
+  * [x] `gpism -dry_run` prints resolved config and exits
 
 ### M2 Definition of Done
 
