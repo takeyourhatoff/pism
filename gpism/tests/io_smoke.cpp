@@ -23,6 +23,10 @@ int main(int argc, char** argv) {
   fields.thk.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.topg.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.tauc.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.u_bc.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.v_bc.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.vel_bc_mask.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.has_vel_bc = true;
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
@@ -31,6 +35,9 @@ int main(int argc, char** argv) {
       fields.thk(i, j) = 1.0 + gi + gj * 10.0;
       fields.topg(i, j) = -100.0 + gi;
       fields.tauc(i, j) = 42.0;
+      fields.u_bc(i, j) = 5.0 + gi;
+      fields.v_bc(i, j) = -3.0 + gj;
+      fields.vel_bc_mask(i, j) = (gi + gj) % 2;
     }
   }
 
@@ -57,7 +64,10 @@ int main(int argc, char** argv) {
     for (int i = 0; i < grid.local_mx(); ++i) {
       if (!nearly_equal(fields.thk(i, j), read_fields.thk(i, j)) ||
           !nearly_equal(fields.topg(i, j), read_fields.topg(i, j)) ||
-          !nearly_equal(fields.tauc(i, j), read_fields.tauc(i, j))) {
+          !nearly_equal(fields.tauc(i, j), read_fields.tauc(i, j)) ||
+          !nearly_equal(fields.u_bc(i, j), read_fields.u_bc(i, j)) ||
+          !nearly_equal(fields.v_bc(i, j), read_fields.v_bc(i, j)) ||
+          fields.vel_bc_mask(i, j) != read_fields.vel_bc_mask(i, j)) {
         std::cerr << "Round-trip mismatch at (" << i << "," << j << ")\n";
         return 1;
       }
