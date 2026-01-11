@@ -548,6 +548,8 @@
   * Added SSA Picard solver scaffold with convergence checks and a smoke test.
   * Added Picard stabilization options (relaxation + nuH bounds).
   * Added non-trivial SSA Picard smoke test (non-zero slopes).
+  * Verified CPU build (NetCDF disabled) and ran `ctest` for core smoke tests.
+  * Verified CUDA build (NetCDF disabled) and ran `ctest` including CUDA smoke tests.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.

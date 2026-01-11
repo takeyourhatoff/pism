@@ -1,12 +1,53 @@
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 namespace {
 
 bool nearly_equal(double a, double b, double tol = 1e-10) {
   return std::abs(a - b) <= tol;
+}
+
+template <typename T>
+void sync_host_to_device(gpism::Field2D<T>& field) {
+#if GPISM_HAVE_CUDA
+  if (!field.host_staging_data() || field.elements() == 0) {
+    return;
+  }
+  std::memcpy(field.host_staging_data(), field.data(),
+              field.elements() * sizeof(T));
+  field.copy_host_to_device();
+#else
+  (void)field;
+#endif
+}
+
+template <typename T>
+void sync_device_to_host(gpism::Field2D<T>& field) {
+#if GPISM_HAVE_CUDA
+  if (!field.host_staging_data() || field.elements() == 0) {
+    return;
+  }
+  field.copy_device_to_host();
+  std::memcpy(field.data(), field.host_staging_data(),
+              field.elements() * sizeof(T));
+#else
+  (void)field;
+#endif
+}
+
+template <typename T>
+void sync_host_to_device(gpism::FieldStag2D<T>& field) {
+  sync_host_to_device(field.component(0));
+  sync_host_to_device(field.component(1));
+}
+
+template <typename T>
+void sync_device_to_host(gpism::FieldStag2D<T>& field) {
+  sync_device_to_host(field.component(0));
+  sync_device_to_host(field.component(1));
 }
 
 }  // namespace
@@ -20,8 +61,10 @@ int main() {
 
   gpism::Field2D<double> tauc(mx, my, gw);
   tauc.fill(50.0);
+  sync_host_to_device(tauc);
   gpism::FieldStag2D<double> beta(mx, my, gw);
   op.compute_basal_drag(grid, tauc, beta);
+  sync_device_to_host(beta);
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
@@ -42,8 +85,12 @@ int main() {
   thk.fill(2.0);
   dhdx.fill(3.0);
   dhdy.fill(-4.0);
+  sync_host_to_device(thk);
+  sync_host_to_device(dhdx);
+  sync_host_to_device(dhdy);
   gpism::FieldStag2D<double> rhs(mx, my, gw);
   op.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
+  sync_device_to_host(rhs);
 
   const double expected_u = 910.0 * 9.81 * 2.0 * 3.0;
   const double expected_v = 910.0 * 9.81 * 2.0 * -4.0;
@@ -64,8 +111,11 @@ int main() {
   nuH.fill(1.0);
   gpism::FieldStag2D<double> vel(mx, my, gw);
   vel.fill(0.0);
+  sync_host_to_device(nuH);
+  sync_host_to_device(vel);
   gpism::FieldStag2D<double> out(mx, my, gw);
   op.apply(grid, nuH, beta, vel, out);
+  sync_device_to_host(out);
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
@@ -86,8 +136,11 @@ int main() {
   bc_values.fill(0.0);
   bc_mask(1, 1, 0) = 1;
   bc_values(1, 1, 0) = 2.0;
+  sync_host_to_device(bc_mask);
+  sync_host_to_device(bc_values);
   gpism::SSABoundaryCondition bc{&bc_mask, &bc_values};
   op.assemble_rhs(grid, thk, dhdx, dhdy, rhs, &bc);
+  sync_device_to_host(rhs);
   if (!nearly_equal(rhs(1, 1, 0), 2.0)) {
     std::cerr << "rhs BC override mismatch\n";
     return 1;
@@ -95,7 +148,9 @@ int main() {
 
   vel.fill(0.0);
   vel(1, 1, 0) = 7.0;
+  sync_host_to_device(vel);
   op.apply(grid, nuH, beta, vel, out, &bc);
+  sync_device_to_host(out);
   if (!nearly_equal(out(1, 1, 0), 7.0)) {
     std::cerr << "apply BC override mismatch\n";
     return 1;
@@ -112,8 +167,12 @@ int main() {
       vel_b(i, j, 1) = static_cast<double>(i + 4 * j + 1);
     }
   }
+  sync_host_to_device(vel);
+  sync_host_to_device(vel_b);
   op.apply(grid, nuH, beta, vel, out_a);
   op.apply(grid, nuH, beta, vel_b, out_b);
+  sync_device_to_host(out_a);
+  sync_device_to_host(out_b);
 
   auto dot = [&](const gpism::FieldStag2D<double>& a,
                  const gpism::FieldStag2D<double>& b) {

@@ -2,6 +2,7 @@
 
 #include "gpism/field2d.h"
 #include "gpism/field_stag2d.h"
+#include "gpism/geometry.h"
 #include "gpism/grid2d.h"
 #include "gpism/ssa_operator.h"
 #include "gpism/viscosity.h"
@@ -50,7 +51,6 @@ public:
 private:
   const Grid2D& grid_;
   SSAOperator ssa_;
-  GeometryDiagnostics geometry_;
   ViscosityModel viscosity_;
 };
 

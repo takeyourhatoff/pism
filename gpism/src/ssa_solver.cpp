@@ -183,8 +183,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     sync_host_to_device(bc_values);
   }
 
-  geometry_.compute_usurf(grid_, thk, topg, usurf);
-  geometry_.compute_surface_slopes(grid_, usurf, dhdx, dhdy);
+  GeometryDiagnostics::compute_usurf_cpu(grid_, thk, topg, usurf);
+  GeometryDiagnostics::compute_surface_slopes_cpu(grid_, usurf, dhdx, dhdy);
 
   Field2D<double> thk_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
   Field2D<double> tauc_dev(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());

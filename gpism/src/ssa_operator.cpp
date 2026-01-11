@@ -5,6 +5,7 @@
 #include "gpism/config.h"
 
 #if GPISM_HAVE_CUDA
+namespace gpism {
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
                                  const double* tauc, double* beta_u,
                                  double* beta_v, double denom);
@@ -24,6 +25,7 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, const int* mask_u, const int* mask_v,
                     int has_bc);
+}  // namespace gpism
 #endif
 
 namespace gpism {

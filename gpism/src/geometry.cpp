@@ -1,5 +1,7 @@
 #include "gpism/geometry.h"
 
+#include "gpism/config.h"
+
 namespace gpism {
 
 void GeometryDiagnostics::compute_usurf_cpu(const Grid2D& grid,
@@ -36,6 +38,7 @@ void GeometryDiagnostics::compute_surface_slopes_cpu(const Grid2D& grid,
   }
 }
 
+#if !GPISM_HAVE_CUDA
 void GeometryDiagnostics::compute_usurf(const Grid2D& grid, const Field2D<double>& thk,
                                         const Field2D<double>& topg,
                                         Field2D<double>& usurf) {
@@ -48,5 +51,6 @@ void GeometryDiagnostics::compute_surface_slopes(const Grid2D& grid,
                                                  Field2D<double>& dhdy) {
   compute_surface_slopes_cpu(grid, usurf, dhdx, dhdy);
 }
+#endif
 
 }  // namespace gpism
