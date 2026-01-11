@@ -1,5 +1,7 @@
 #include "gpism/thickness.h"
 
+#include "gpism/profile.h"
+
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -131,6 +133,7 @@ void compute_face_fluxes_cuda(int mx, int my, int gw, int stride_thk,
                               const double* thk, const double* vel_u,
                               const double* vel_v, double* flux_u,
                               double* flux_v) {
+  CudaEventTimer timer("thickness_flux");
   dim3 block(16, 16);
   dim3 grid_u((mx + gw + block.x - 1) / block.x,
               (my + 2 * gw + block.y - 1) / block.y);
@@ -149,6 +152,7 @@ void update_thickness_cuda(int mx, int my, int gw, int stride_thk,
                            const double* flux_v, const double* smb, double dt,
                            double inv_dx, double inv_dy,
                            int enforce_nonnegative, double* thk) {
+  CudaEventTimer timer("thickness_update");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   update_thickness_kernel<<<grid, block>>>(
@@ -158,6 +162,7 @@ void update_thickness_cuda(int mx, int my, int gw, int stride_thk,
 
 void update_mask_cuda(int mx, int my, int gw, int stride_thk, int stride_mask,
                       const double* thk, int* mask) {
+  CudaEventTimer timer("thickness_mask");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   update_mask_kernel<<<grid, block>>>(mx, my, gw, stride_thk, stride_mask, thk,
@@ -169,6 +174,7 @@ void compute_cell_center_velocity_cuda(int mx, int my, int gw, int stride_u,
                                        int stride_vvel, const double* u_face,
                                        const double* v_face, double* uvel,
                                        double* vvel) {
+  CudaEventTimer timer("velocity_center");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   cell_center_velocity_kernel<<<grid, block>>>(

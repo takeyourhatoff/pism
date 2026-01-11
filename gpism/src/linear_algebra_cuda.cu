@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "gpism/profile.h"
+
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -97,12 +99,14 @@ __global__ void diff_norm1_kernel(int mx, int my, int gw, int stride_a,
 
 void axpy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
               const double* x, double* y, double alpha) {
+  CudaEventTimer timer("la_axpy");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   axpy_kernel<<<grid, block>>>(mx, my, gw, stride_x, stride_y, x, y, alpha);
 }
 
 void scal_cuda(int mx, int my, int gw, int stride, double* x, double alpha) {
+  CudaEventTimer timer("la_scal");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   scal_kernel<<<grid, block>>>(mx, my, gw, stride, x, alpha);
@@ -110,12 +114,14 @@ void scal_cuda(int mx, int my, int gw, int stride, double* x, double alpha) {
 
 void copy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
                const double* x, double* y) {
+  CudaEventTimer timer("la_copy");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   copy_kernel<<<grid, block>>>(mx, my, gw, stride_x, stride_y, x, y);
 }
 
 void set_cuda(int mx, int my, int gw, int stride, double* x, double value) {
+  CudaEventTimer timer("la_set");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   set_kernel<<<grid, block>>>(mx, my, gw, stride, x, value);
@@ -123,6 +129,7 @@ void set_cuda(int mx, int my, int gw, int stride, double* x, double value) {
 
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                 const double* a, const double* b) {
+  CudaEventTimer timer("la_dot");
   double* d_out = nullptr;
   cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
   cudaMemset(d_out, 0, sizeof(double));
@@ -138,6 +145,7 @@ double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
+  CudaEventTimer timer("la_norm1");
   double* d_out = nullptr;
   cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
   cudaMemset(d_out, 0, sizeof(double));
@@ -154,6 +162,7 @@ double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
 
 double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                        const double* a, const double* b) {
+  CudaEventTimer timer("la_diff_norm1");
   double* d_out = nullptr;
   cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
   cudaMemset(d_out, 0, sizeof(double));

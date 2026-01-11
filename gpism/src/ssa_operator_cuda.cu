@@ -1,5 +1,7 @@
 #include "gpism/ssa_operator.h"
 
+#include "gpism/profile.h"
+
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -153,6 +155,7 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
                                  const double* tauc, double* beta_u,
                                  double* beta_v, double denom) {
+  CudaEventTimer timer("ssa_basal_drag");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
@@ -167,6 +170,7 @@ void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
                            double scale, const int* mask_u,
                            const int* mask_v, const double* bc_u,
                            const double* bc_v, int has_bc) {
+  CudaEventTimer timer("ssa_rhs");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
@@ -184,6 +188,7 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, const int* mask_u, const int* mask_v,
                     int has_bc) {
+  CudaEventTimer timer("ssa_apply");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);

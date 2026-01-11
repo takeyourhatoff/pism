@@ -393,8 +393,8 @@
 
 * [ ] Add profiling hooks
 
-  * [ ] kernel timing (CUDA events / ROCm / SYCL profiling)
-  * [ ] MPI timing for halo exchange
+  * [x] kernel timing (CUDA events / ROCm / SYCL profiling)
+  * [x] MPI timing for halo exchange
 * [ ] Reduce host-device traffic audit
 
   * [x] confirm timestep loop is device-resident
@@ -579,6 +579,7 @@
   * Removed unconditional CUDA syncs and added device-resident thickness/velocity/SSA Picard updates with host staging only for IO.
   * Added CUDA viscosity path, GPU diff norms, and shared field sync helpers; updated GPU-facing tests to sync device/host data.
   * Profiled CUDA build with Nsight Systems; SSA operator + thickness tests show GPU kernels executing (no stray device-wide syncs).
+  * Added lightweight profiling hooks (CUDA event timers + halo exchange timers) and validated output via `GPISM_PROFILE=1` on GPU GMRES smoke.
 * 🧱 Blocked:
 
   * -

@@ -109,6 +109,7 @@ set(GPISM_CORE_SOURCES
   src/grid2d.cpp
   src/runtime_config.cpp
   src/time_manager.cpp
+  src/profile.cpp
   src/geometry.cpp
   src/thickness.cpp
   src/viscosity.cpp

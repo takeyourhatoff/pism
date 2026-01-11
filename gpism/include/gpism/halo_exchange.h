@@ -7,6 +7,7 @@
 #include "gpism/field2d.h"
 #include "gpism/field_stag2d.h"
 #include "gpism/grid2d.h"
+#include "gpism/profile.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -71,6 +72,8 @@ public:
     const bool use_device = false;
     (void)mode;
 #endif
+
+    ScopedTimer timer(use_device ? "halo_exchange_device" : "halo_exchange_host");
 
 #if GPISM_HAVE_CUDA
     if (use_device) {

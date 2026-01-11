@@ -1,5 +1,7 @@
 #include "gpism/geometry.h"
 
+#include "gpism/profile.h"
+
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -45,6 +47,7 @@ void GeometryDiagnostics::compute_usurf(const Grid2D& grid, const Field2D<double
                                         const Field2D<double>& topg,
                                         Field2D<double>& usurf) {
   if (thk.has_device_data() && topg.has_device_data() && usurf.has_device_data()) {
+    CudaEventTimer timer("geometry_usurf");
     dim3 block(16, 16);
     dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
                   (grid.local_my() + block.y - 1) / block.y);
@@ -61,6 +64,7 @@ void GeometryDiagnostics::compute_surface_slopes(const Grid2D& grid,
                                                  Field2D<double>& dhdx,
                                                  Field2D<double>& dhdy) {
   if (usurf.has_device_data() && dhdx.has_device_data() && dhdy.has_device_data()) {
+    CudaEventTimer timer("geometry_slopes");
     dim3 block(16, 16);
     dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
                   (grid.local_my() + block.y - 1) / block.y);

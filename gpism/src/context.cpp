@@ -3,6 +3,7 @@
 #include <cstdlib>
 
 #include "gpism/config.h"
+#include "gpism/profile.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -46,6 +47,7 @@ Context::Context(int* argc, char*** argv)
 }
 
 Context::~Context() {
+  Profiler::report(this);
 #if GPISM_HAVE_MPI
   if (owns_mpi_) {
     int finalized = 0;

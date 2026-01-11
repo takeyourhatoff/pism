@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "gpism/profile.h"
+
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -113,6 +115,7 @@ void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                 const double* u, const double* v, double* nuH_u,
                                 double* nuH_v, double B, double n_eff,
                                 double eps0, double inv_dx, double inv_dy) {
+  CudaEventTimer timer("viscosity_nuH");
   const std::size_t count = static_cast<std::size_t>(mx) * my;
   double* u_center = nullptr;
   double* v_center = nullptr;
