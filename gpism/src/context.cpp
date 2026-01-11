@@ -73,4 +73,22 @@ int Context::device_id() const { return device_id_; }
 
 int Context::device_count() const { return device_count_; }
 
+Context::NeighborRanks Context::neighbors_2d(int dims_x, int dims_y) const {
+  NeighborRanks neighbors{};
+  neighbors.dims_x = dims_x;
+  neighbors.dims_y = dims_y;
+  neighbors.coord_x = (dims_x > 0) ? (rank_ % dims_x) : 0;
+  neighbors.coord_y = (dims_x > 0) ? (rank_ / dims_x) : 0;
+
+  neighbors.west = (neighbors.coord_x > 0) ? rank_ - 1 : -1;
+  neighbors.east =
+      (neighbors.coord_x + 1 < dims_x) ? rank_ + 1 : -1;
+  neighbors.south =
+      (neighbors.coord_y > 0) ? rank_ - dims_x : -1;
+  neighbors.north =
+      (neighbors.coord_y + 1 < dims_y) ? rank_ + dims_x : -1;
+
+  return neighbors;
+}
+
 }  // namespace gpism

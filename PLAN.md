@@ -50,7 +50,7 @@
 
   * [x] MPI init / finalize
   * [x] rank, size
-  * [ ] neighbor ranks
+  * [x] neighbor ranks
   * [x] device selection policy (rank→GPU mapping)
 * [~] Implement `Grid2D`
 
@@ -61,7 +61,7 @@
 
   * [x] allocation includes halos
   * [x] indexing helpers for `(i,j)` with ghost offsets
-  * [ ] device pointer access + host staging buffer (pinned if available)
+  * [x] device pointer access + host staging buffer (pinned if available)
 * [x] Implement device-friendly `FieldStag2D<T>` (staggered, 2 components)
 
   * [x] layout for `u-face` and `v-face` components
@@ -485,6 +485,8 @@
   * Completed CUDA-enabled gpism build on Linux GPU host.
   * Ran gpism field smoke tests in MPI mode (2 ranks) and single-rank.
   * Expanded smoke test to validate staggered field halo exchange.
+  * Added host staging buffers + optional CUDA device allocations in `Field2D`.
+  * Added `Context::neighbors_2d` helper for rank neighbor lookup.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).

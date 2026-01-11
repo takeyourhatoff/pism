@@ -36,11 +36,13 @@ endif()
 
 set(GPISM_MPI "disabled")
 set(GPISM_NETCDF "disabled")
+set(GPISM_HAVE_CUDA 0)
 set(GPISM_HAVE_MPI 0)
 set(GPISM_HAVE_NETCDF 0)
 
 if(GPISM_ENABLE_CUDA)
   enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
   if(NOT CMAKE_CUDA_STANDARD)
     set(CMAKE_CUDA_STANDARD 14)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -49,6 +51,7 @@ if(GPISM_ENABLE_CUDA)
     set(CMAKE_CUDA_ARCHITECTURES 86)
   endif()
   set(GPISM_BACKEND "cuda" CACHE STRING "Backend: cpu, cuda, hip, sycl" FORCE)
+  set(GPISM_HAVE_CUDA 1)
 endif()
 
 if(GPISM_ENABLE_MPI)
@@ -107,6 +110,11 @@ target_include_directories(gpism-core
 
 if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND)
   target_link_libraries(gpism-core PUBLIC MPI::MPI_CXX)
+endif()
+
+if(GPISM_ENABLE_CUDA)
+  target_link_libraries(gpism-core PUBLIC CUDA::cudart)
+  target_include_directories(gpism-core PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
 endif()
 
 if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)

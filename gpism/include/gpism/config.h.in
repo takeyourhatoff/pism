@@ -1,4 +1,5 @@
 #pragma once
 
+#cmakedefine01 GPISM_HAVE_CUDA
 #cmakedefine01 GPISM_HAVE_MPI
 #cmakedefine01 GPISM_HAVE_NETCDF
