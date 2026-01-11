@@ -134,6 +134,7 @@
   * [x] write core fields
   * [x] write metadata (units/history)
   * [x] enforce dimension order convention consistently (time,y,x)
+  * [ ] enable NetCDF4/parallel output when library support is available
 * [x] Implement restart semantics (minimum viable)
 
   * [x] read “state at time t” (last record or `io.time_index`)
