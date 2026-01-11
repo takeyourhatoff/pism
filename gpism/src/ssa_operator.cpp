@@ -25,6 +25,16 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, const int* mask_u, const int* mask_v,
                     int has_bc);
+void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                           int stride_nu_u, int stride_nu_v, int stride_beta_u,
+                           int stride_beta_v, int stride_out_u, int stride_out_v,
+                           const double* u, const double* v, const double* nu_u,
+                           const double* nu_v, const double* beta_u,
+                           const double* beta_v, double* out_u, double* out_v,
+                           double inv_dx2, double inv_dy2, double inv_2dx,
+                           double inv_2dy, const int* mask_u, const int* mask_v,
+                           int has_bc, int i_start, int i_end, int j_start,
+                           int j_end);
 }  // namespace gpism
 #endif
 
@@ -120,11 +130,22 @@ void SSAOperator::assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
   }
 }
 
-void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
-                        const FieldStag2D<double>& beta,
-                        const FieldStag2D<double>& vel,
-                        FieldStag2D<double>& out,
-                        const SSABoundaryCondition* bc) const {
+void SSAOperator::apply_region(const Grid2D& grid,
+                               const FieldStag2D<double>& nuH,
+                               const FieldStag2D<double>& beta,
+                               const FieldStag2D<double>& vel,
+                               FieldStag2D<double>& out, int i_start,
+                               int i_end, int j_start, int j_end,
+                               const SSABoundaryCondition* bc) const {
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  const int i0 = std::max(0, i_start);
+  const int i1 = std::min(mx, i_end);
+  const int j0 = std::max(0, j_start);
+  const int j1 = std::min(my, j_end);
+  if (i0 >= i1 || j0 >= j1) {
+    return;
+  }
   const double dx = grid.dx();
   const double dy = grid.dy();
   const double inv_dx2 = 1.0 / (dx * dx);
@@ -143,8 +164,8 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
         bc->mask->component(1).has_device_data() &&
         bc->values->component(0).has_device_data() &&
         bc->values->component(1).has_device_data()))) {
-    ssa_apply_cuda(
-        grid.local_mx(), grid.local_my(), vel.component(0).ghost_width(),
+    ssa_apply_region_cuda(
+        mx, my, vel.component(0).ghost_width(),
         vel.component(0).stride(), vel.component(1).stride(),
         nuH.component(0).stride(), nuH.component(1).stride(),
         beta.component(0).stride(), beta.component(1).stride(),
@@ -156,7 +177,7 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
         inv_dx2, inv_dy2, inv_2dx, inv_2dy,
         has_bc ? bc->mask->component(0).device_data() : nullptr,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0);
+        has_bc ? 1 : 0, i0, i1, j0, j1);
     return;
   }
 #endif
@@ -174,8 +195,8 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
     return du_dy + dv_dx;
   };
 
-  for (int j = 0; j < grid.local_my(); ++j) {
-    for (int i = 0; i < grid.local_mx(); ++i) {
+  for (int j = j0; j < j1; ++j) {
+    for (int i = i0; i < i1; ++i) {
       if (is_dirichlet(bc, i, j, 0)) {
         out(i, j, 0) = u(i, j);
       } else {
@@ -217,6 +238,15 @@ void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
       }
     }
   }
+}
+
+void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                        const FieldStag2D<double>& beta,
+                        const FieldStag2D<double>& vel,
+                        FieldStag2D<double>& out,
+                        const SSABoundaryCondition* bc) const {
+  apply_region(grid, nuH, beta, vel, out, 0, grid.local_mx(), 0,
+               grid.local_my(), bc);
 }
 
 }  // namespace gpism

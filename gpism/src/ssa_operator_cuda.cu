@@ -150,6 +150,79 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
   }
 }
 
+__global__ void apply_region_kernel(
+    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
+    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_out_u,
+    int stride_out_v, const double* u, const double* v, const double* nu_u,
+    const double* nu_v, const double* beta_u, const double* beta_v,
+    double* out_u, double* out_v, double inv_dx2, double inv_dy2,
+    double inv_2dx, double inv_2dy, const int* mask_u, const int* mask_v,
+    int has_bc, int i_start, int i_end, int j_start, int j_end) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x + i_start;
+  int j = blockIdx.y * blockDim.y + threadIdx.y + j_start;
+  if (i >= i_end || j >= j_end) {
+    return;
+  }
+
+  const int c_u = idx(i, j, gw, stride_u);
+  const int c_v = idx(i, j, gw, stride_v);
+  if (has_bc && mask_u && mask_u[c_u] != 0) {
+    out_u[c_u] = u[c_u];
+  } else {
+    const int e = idx(i + 1, j, gw, stride_u);
+    const int w = idx(i - 1, j, gw, stride_u);
+    const int n = idx(i, j + 1, gw, stride_u);
+    const int s = idx(i, j - 1, gw, stride_u);
+    const int e_nu = idx(i + 1, j, gw, stride_nu_u);
+    const int w_nu = idx(i - 1, j, gw, stride_nu_u);
+    const int n_nu = idx(i, j + 1, gw, stride_nu_u);
+    const int s_nu = idx(i, j - 1, gw, stride_nu_u);
+
+    const double flux_x = nu_u[e_nu] * (u[e] - u[c_u]) -
+                          nu_u[w_nu] * (u[c_u] - u[w]);
+    const double flux_y = nu_u[n_nu] * (u[n] - u[c_u]) -
+                          nu_u[s_nu] * (u[c_u] - u[s]);
+    double coupling = 0.0;
+    if (j >= 1 && j <= my - 2) {
+      const double shear_p = shear(i, j + 1, gw, stride_u, stride_v, u, v,
+                                   inv_2dx, inv_2dy);
+      const double shear_m = shear(i, j - 1, gw, stride_u, stride_v, u, v,
+                                   inv_2dx, inv_2dy);
+      coupling = nu_u[c_u] * (shear_p - shear_m) * inv_2dy;
+    }
+    out_u[c_u] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
+                 beta_u[idx(i, j, gw, stride_beta_u)] * u[c_u];
+  }
+
+  if (has_bc && mask_v && mask_v[c_v] != 0) {
+    out_v[c_v] = v[c_v];
+  } else {
+    const int e = idx(i + 1, j, gw, stride_v);
+    const int w = idx(i - 1, j, gw, stride_v);
+    const int n = idx(i, j + 1, gw, stride_v);
+    const int s = idx(i, j - 1, gw, stride_v);
+    const int e_nu = idx(i + 1, j, gw, stride_nu_v);
+    const int w_nu = idx(i - 1, j, gw, stride_nu_v);
+    const int n_nu = idx(i, j + 1, gw, stride_nu_v);
+    const int s_nu = idx(i, j - 1, gw, stride_nu_v);
+
+    const double flux_x = nu_v[e_nu] * (v[e] - v[c_v]) -
+                          nu_v[w_nu] * (v[c_v] - v[w]);
+    const double flux_y = nu_v[n_nu] * (v[n] - v[c_v]) -
+                          nu_v[s_nu] * (v[c_v] - v[s]);
+    double coupling = 0.0;
+    if (i >= 1 && i <= mx - 2) {
+      const double shear_p = shear(i + 1, j, gw, stride_u, stride_v, u, v,
+                                   inv_2dx, inv_2dy);
+      const double shear_m = shear(i - 1, j, gw, stride_u, stride_v, u, v,
+                                   inv_2dx, inv_2dy);
+      coupling = nu_v[c_v] * (shear_p - shear_m) * inv_2dx;
+    }
+    out_v[c_v] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
+                 beta_v[idx(i, j, gw, stride_beta_v)] * v[c_v];
+  }
+}
+
 }  // namespace
 
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
@@ -198,6 +271,30 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                     nu_v, beta_u, beta_v, out_u, out_v, inv_dx2,
                                     inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
                                     has_bc);
+}
+
+void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                           int stride_nu_u, int stride_nu_v, int stride_beta_u,
+                           int stride_beta_v, int stride_out_u,
+                           int stride_out_v, const double* u, const double* v,
+                           const double* nu_u, const double* nu_v,
+                           const double* beta_u, const double* beta_v,
+                           double* out_u, double* out_v, double inv_dx2,
+                           double inv_dy2, double inv_2dx, double inv_2dy,
+                           const int* mask_u, const int* mask_v, int has_bc,
+                           int i_start, int i_end, int j_start, int j_end) {
+  CudaEventTimer timer("ssa_apply");
+  if (i_start >= i_end || j_start >= j_end) {
+    return;
+  }
+  dim3 block(16, 16);
+  dim3 grid_dim((i_end - i_start + block.x - 1) / block.x,
+                (j_end - j_start + block.y - 1) / block.y);
+  apply_region_kernel<<<grid_dim, block>>>(
+      mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v, stride_beta_u,
+      stride_beta_v, stride_out_u, stride_out_v, u, v, nu_u, nu_v, beta_u,
+      beta_v, out_u, out_v, inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
+      has_bc, i_start, i_end, j_start, j_end);
 }
 
 }  // namespace gpism

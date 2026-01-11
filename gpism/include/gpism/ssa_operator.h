@@ -27,6 +27,12 @@ public:
              const FieldStag2D<double>& beta, const FieldStag2D<double>& vel,
              FieldStag2D<double>& out,
              const SSABoundaryCondition* bc = nullptr) const;
+  void apply_region(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                    const FieldStag2D<double>& beta,
+                    const FieldStag2D<double>& vel,
+                    FieldStag2D<double>& out, int i_start, int i_end,
+                    int j_start, int j_end,
+                    const SSABoundaryCondition* bc = nullptr) const;
 
 private:
   double rho_;

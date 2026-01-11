@@ -153,9 +153,38 @@ public:
   void apply(const FieldStag2D<double>& x,
              FieldStag2D<double>& y) const override {
     if (context_ && context_->mpi_enabled()) {
-      // Update ghost cells for MPI stencils without touching owned values.
-      auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
-      exchange_for_device(mutable_x, grid_, *context_);
+      const int gw = x.ghost_width();
+      if (gw > 0) {
+        auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
+        HaloExchange2D exchange;
+        auto handle =
+            exchange.start_exchange(mutable_x, grid_, *context_,
+                                    HaloExchange2D::Mode::Auto);
+
+        const int mx = grid_.local_mx();
+        const int my = grid_.local_my();
+        const int i0 = gw;
+        const int i1 = mx - gw;
+        const int j0 = gw;
+        const int j1 = my - gw;
+        if (i0 < i1 && j0 < j1) {
+          op_.apply_region(grid_, nuH_, beta_, x, y, i0, i1, j0, j1, bc_);
+          exchange.finish_exchange(handle);
+
+          auto apply_band = [&](int is, int ie, int js, int je) {
+            if (is < ie && js < je) {
+              op_.apply_region(grid_, nuH_, beta_, x, y, is, ie, js, je, bc_);
+            }
+          };
+          apply_band(0, gw, 0, my);
+          apply_band(mx - gw, mx, 0, my);
+          apply_band(gw, mx - gw, 0, gw);
+          apply_band(gw, mx - gw, my - gw, my);
+          return;
+        }
+
+        exchange.finish_exchange(handle);
+      }
     }
     op_.apply(grid_, nuH_, beta_, x, y, bc_);
   }

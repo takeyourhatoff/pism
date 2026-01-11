@@ -415,9 +415,9 @@
   * [x] add hot-loop sync audit to `gpism-timestep-gpu-smoke` (fail if field syncs occur during the loop)
   * [ ] I/O staging is async and double-buffered when possible; GPU work can overlap output
   * [x] add GPU timestep smoke test (no NetCDF) to exercise full DAG + profile host/device transfers
-* [ ] Overlap comm/compute
+* [x] Overlap comm/compute
 
-  * [ ] interior compute while halos exchange
+  * [x] interior compute while halos exchange
   * [ ] boundary compute after halos arrive
 * [ ] Memory bandwidth optimization
 
@@ -603,6 +603,7 @@
   * Added a hot-loop sync audit to the GPU timestep smoke test (fails if field syncs occur inside the loop).
   * Fixed CUDA surface-slope boundary handling to match CPU clamping and restore MPI Picard convergence; added MPI sync audit and pinned host staging for non-cuda-aware halo exchange.
   * Switched reduction scalar reads to pinned async copies with explicit stream syncs to avoid implicit syncs in dot/norm paths.
+  * Added async halo exchange handles and SSA interior/boundary operator passes to overlap MPI halos with compute in the SSA apply path.
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
