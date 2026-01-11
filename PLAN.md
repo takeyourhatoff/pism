@@ -281,11 +281,13 @@
   * [x] constant coefficient cases
   * [x] variable coefficient cases (nuH varies)
   * [x] scaling test: iterations vs resolution
+  * [x] GMRES vs GMRES+MG iteration comparison smoke test
+  * [x] MG refinement sanity check (16x16 vs 32x32)
 
 ### M6 Definition of Done
 
-* [ ] FGMRES+MG converges in dramatically fewer iterations than GMRES alone
-* [ ] Iterations grow slowly (or not at all) with grid refinement on representative cases
+* [x] FGMRES+MG converges in dramatically fewer iterations than GMRES alone
+* [x] Iterations grow slowly (or not at all) with grid refinement on representative cases
 
 ---
 
@@ -557,6 +559,7 @@
   * Verified parallel NetCDF stack (HDF5-par + netcdf-c-par) and MPI `gpism-io-smoke-mpi` test.
   * Verified CUDA+MPI SSA operator smoke with finite residual norms.
   * Verified GMRES MPI smoke (1 vs 2 ranks) with stable iteration counts.
+  * Verified MG preconditioner reduces GMRES iterations and scales gently with refinement.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.

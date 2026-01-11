@@ -223,6 +223,12 @@ if(GPISM_BUILD_TESTS)
     )
   endif()
 
+  if(NOT GPISM_ENABLE_CUDA)
+    add_executable(gpism-gmres-mg-compare-smoke tests/gmres_mg_compare_smoke.cpp)
+    target_link_libraries(gpism-gmres-mg-compare-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-gmres-mg-compare-smoke COMMAND gpism-gmres-mg-compare-smoke)
+  endif()
+
   if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
     add_executable(gpism-io-smoke tests/io_smoke.cpp)
     target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
