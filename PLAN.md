@@ -141,6 +141,7 @@
   * [x] write core fields
   * [x] write SSA Dirichlet BC fields (`u_bc`, `v_bc`, `vel_bc_mask`)
   * [x] write metadata (units/history)
+  * [ ] add BC metadata (long_name, flag values/meanings for `vel_bc_mask`)
   * [x] enforce dimension order convention consistently (time,y,x)
   * [x] enable NetCDF4/parallel output when library support is available
 * [x] Implement restart semantics (minimum viable)
@@ -186,6 +187,7 @@
 
   * [x] one kernel per component or fused kernel (start simple)
   * [x] uses halos correctly
+  * [x] include basic u/v coupling term (shear contribution)
 * [x] Implement GPU kernels for SSA operator components
 
   * [x] basal drag (beta)
@@ -201,6 +203,7 @@
   * [x] symmetry-ish checks on simple constant coefficient cases (as applicable)
   * [ ] manufactured solution test (optional but recommended)
   * [ ] CUDA smoke test exercises device path (when GPISM_ENABLE_CUDA=ON)
+  * [ ] CPU/GPU parity check on a tiny grid (tolerances)
 
 ### M4 Definition of Done
 
@@ -529,6 +532,6 @@
   * Added CUDA kernels for SSA operator apply/RHS/basal drag (device path).
 * 🎯 Next:
 
-  * Add CUDA SSA operator smoke test to exercise device path.
-  * Implement SSA Picard loop + GMRES scaffolding.
-  * Wire SSA Dirichlet BC fields into solver state once SSA solve loop exists.
+  * Add BC metadata for `vel_bc_mask` (flag values/meanings).
+  * Add CUDA SSA operator smoke + CPU/GPU parity test.
+  * Start SSA solver stack: device vector ops + GMRES scaffold.
