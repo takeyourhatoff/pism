@@ -223,16 +223,16 @@
   * [x] axpy, scal, dot, norm2, norm1
   * [ ] reductions are deterministic option (optional)
   * [x] validate with small device-side unit tests
-* [ ] Implement GMRES (start with restart GMRES(m))
+* [x] Implement GMRES (start with restart GMRES(m))
 
-  * [ ] device-side orthogonalization (modified Gram-Schmidt)
-  * [ ] host-side small Hessenberg solve (acceptable v0) OR device-side small QR
-* [ ] Implement preconditioner interface
+  * [x] device-side orthogonalization (modified Gram-Schmidt)
+  * [x] host-side small Hessenberg solve (acceptable v0) OR device-side small QR
+* [x] Implement preconditioner interface
 
-  * [ ] Identity preconditioner first
-* [ ] Add solver test harness
+  * [x] Identity preconditioner first
+* [~] Add solver test harness
 
-  * [ ] solve a known linear system from a frozen coefficient operator
+  * [x] solve a known linear system from a frozen coefficient operator
   * [ ] measure iterations, residual curves
   * [ ] SSA operator smoke solve (few GMRES iterations, residual drops)
 
@@ -533,6 +533,7 @@
   * Added `vel_bc_mask` metadata (long_name + flag values/meanings) in NetCDF output.
   * Added CUDA SSA operator smoke test with CPU/GPU parity checks.
   * Added device-capable linear algebra ops (axpy/scal/dot/norms) with a smoke test.
+  * Added restart GMRES with identity preconditioner and a basic solver smoke test.
 * 🎯 Next:
 
-  * Start SSA solver stack: GMRES/FGMRES scaffold.
+  * Extend solver harness: SSA operator solve + residual tracking.

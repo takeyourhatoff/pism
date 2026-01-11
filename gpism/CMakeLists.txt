@@ -111,6 +111,7 @@ set(GPISM_CORE_SOURCES
   src/viscosity.cpp
   src/ssa_operator.cpp
   src/linear_algebra.cpp
+  src/gmres.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -224,6 +225,10 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
   target_link_libraries(gpism-linear-algebra-smoke PRIVATE gpism-core)
   add_test(NAME gpism-linear-algebra-smoke COMMAND gpism-linear-algebra-smoke)
+
+  add_executable(gpism-gmres-smoke tests/gmres_smoke.cpp)
+  target_link_libraries(gpism-gmres-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-gmres-smoke COMMAND gpism-gmres-smoke)
 
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)

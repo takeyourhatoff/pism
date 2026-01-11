@@ -34,6 +34,29 @@ __global__ void scal_kernel(int mx, int my, int gw, int stride, double* x,
   x[ix] *= alpha;
 }
 
+__global__ void copy_kernel(int mx, int my, int gw, int stride_x, int stride_y,
+                            const double* x, double* y) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int ix = idx(i, j, gw, stride_x);
+  const int iy = idx(i, j, gw, stride_y);
+  y[iy] = x[ix];
+}
+
+__global__ void set_kernel(int mx, int my, int gw, int stride, double* x,
+                           double value) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int ix = idx(i, j, gw, stride);
+  x[ix] = value;
+}
+
 __global__ void dot_kernel(int mx, int my, int gw, int stride_a, int stride_b,
                            const double* a, const double* b, double* out) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -71,6 +94,21 @@ void scal_cuda(int mx, int my, int gw, int stride, double* x, double alpha) {
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   scal_kernel<<<grid, block>>>(mx, my, gw, stride, x, alpha);
+  cudaDeviceSynchronize();
+}
+
+void copy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
+               const double* x, double* y) {
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  copy_kernel<<<grid, block>>>(mx, my, gw, stride_x, stride_y, x, y);
+  cudaDeviceSynchronize();
+}
+
+void set_cuda(int mx, int my, int gw, int stride, double* x, double value) {
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  set_kernel<<<grid, block>>>(mx, my, gw, stride, x, value);
   cudaDeviceSynchronize();
 }
 
