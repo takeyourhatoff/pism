@@ -5,6 +5,7 @@
 
 #include "gpism/context.h"
 #include "gpism/runtime_config.h"
+#include "gpism/config.h"
 #include "gpism/version.h"
 
 #if GPISM_HAVE_NETCDF
