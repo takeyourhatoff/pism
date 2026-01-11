@@ -596,6 +596,7 @@
   * Added a GPU timestep smoke test covering SSA + transport + thermodynamics, and profiled it to confirm device-resident fields (with scalar reduction syncs noted).
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
+  * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
 * 🧱 Blocked:
 
   * -

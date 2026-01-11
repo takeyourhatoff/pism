@@ -93,6 +93,25 @@ __global__ void dot_stag_kernel(int mx, int my, int gw, int stride_u, int stride
   atomicAdd(out, a_u[iu] * b_u[iu] + a_v[iv] * b_v[iv]);
 }
 
+__global__ void dot_stag_batch_kernel(int mx, int my, int gw, int stride_u,
+                                      int stride_v, const double* w_u,
+                                      const double* w_v, const double** V_u,
+                                      const double** V_v, int count,
+                                      double* out) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  const double wu = w_u[iu];
+  const double wv = w_v[iv];
+  for (int k = 0; k < count; ++k) {
+    atomicAdd(&out[k], wu * V_u[k][iu] + wv * V_v[k][iv]);
+  }
+}
+
 __global__ void norm1_kernel(int mx, int my, int gw, int stride, const double* a,
                              double* out) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -142,6 +161,29 @@ __global__ void diff_norm1_stag_kernel(int mx, int my, int gw, int stride_u,
   const int iu = idx(i, j, gw, stride_u);
   const int iv = idx(i, j, gw, stride_v);
   atomicAdd(out, fabs(a_u[iu] - b_u[iu]) + fabs(a_v[iv] - b_v[iv]));
+}
+
+__global__ void orthogonalize_stag_kernel(int mx, int my, int gw, int stride_u,
+                                          int stride_v, const double** V_u,
+                                          const double** V_v,
+                                          const double* hij, int count,
+                                          double* w_u, double* w_v) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  double wu = w_u[iu];
+  double wv = w_v[iv];
+  for (int k = 0; k < count; ++k) {
+    const double coeff = hij[k];
+    wu -= coeff * V_u[k][iu];
+    wv -= coeff * V_v[k][iv];
+  }
+  w_u[iu] = wu;
+  w_v[iv] = wv;
 }
 
 }  // namespace
@@ -206,6 +248,22 @@ double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   double result = 0.0;
   cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   return result;
+}
+
+void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                             double* w_u, double* w_v, const double** V_u,
+                             const double** V_v, int count, double* hij) {
+  CudaEventTimer timer("la_orthogonalize_stag");
+  if (count <= 0) {
+    return;
+  }
+  cudaMemset(hij, 0, static_cast<std::size_t>(count) * sizeof(double));
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  dot_stag_batch_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u,
+                                         w_v, V_u, V_v, count, hij);
+  orthogonalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v,
+                                             V_u, V_v, hij, count, w_u, w_v);
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {

@@ -2,15 +2,25 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <vector>
 
 #include "gpism/config.h"
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/linear_algebra.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
+#endif
+#if GPISM_HAVE_CUDA
+#include <cuda_runtime.h>
+namespace gpism {
+void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                             double* w_u, double* w_v, const double** V_u,
+                             const double** V_v, int count, double* hij);
+}  // namespace gpism
 #endif
 
 namespace gpism {
@@ -32,6 +42,16 @@ struct GMRESWorkspace {
   std::vector<double> sn;
   std::vector<double> g;
   std::vector<double> y;
+  std::vector<double> hij_host;
+#if GPISM_HAVE_CUDA
+  std::vector<const double*> V_u_host;
+  std::vector<const double*> V_v_host;
+  const double** V_u_dev = nullptr;
+  const double** V_v_dev = nullptr;
+  double* hij_dev = nullptr;
+  int hij_cap = 0;
+  int ptr_cap = 0;
+#endif
 
   void ensure(const FieldStag2D<double>& ref, int restart) {
     const int mx_new = ref.local_mx();
@@ -87,7 +107,39 @@ struct GMRESWorkspace {
     if (y.size() < static_cast<std::size_t>(restart)) {
       y.resize(static_cast<std::size_t>(restart));
     }
+    if (hij_host.size() < static_cast<std::size_t>(restart)) {
+      hij_host.resize(static_cast<std::size_t>(restart));
+    }
     initialized = true;
+
+#if GPISM_HAVE_CUDA
+    if (device_enabled()) {
+      const int needed = restart + 1;
+      if (static_cast<int>(V_u_host.size()) < needed) {
+        V_u_host.resize(static_cast<std::size_t>(needed));
+        V_v_host.resize(static_cast<std::size_t>(needed));
+      }
+      if (ptr_cap < needed) {
+        if (V_u_dev) {
+          cudaFree(const_cast<double**>(V_u_dev));
+          cudaFree(const_cast<double**>(V_v_dev));
+        }
+        cudaMalloc(reinterpret_cast<void**>(&V_u_dev),
+                   static_cast<std::size_t>(needed) * sizeof(double*));
+        cudaMalloc(reinterpret_cast<void**>(&V_v_dev),
+                   static_cast<std::size_t>(needed) * sizeof(double*));
+        ptr_cap = needed;
+      }
+      if (hij_cap < needed) {
+        if (hij_dev) {
+          cudaFree(hij_dev);
+        }
+        cudaMalloc(reinterpret_cast<void**>(&hij_dev),
+                   static_cast<std::size_t>(needed) * sizeof(double));
+        hij_cap = needed;
+      }
+    }
+#endif
   }
 };
 
@@ -192,12 +244,51 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
       op.apply(*V[static_cast<std::size_t>(j)], Ax);
       M->apply(Ax, w);
 
-      for (int i = 0; i <= j; ++i) {
-        const double hij = global_sum(options.context, dot(
-            w, *V[static_cast<std::size_t>(i)]));
-        H[static_cast<std::size_t>(i) +
-          static_cast<std::size_t>(restart + 1) * j] = hij;
-        axpy(-hij, *V[static_cast<std::size_t>(i)], w);
+#if GPISM_HAVE_CUDA
+      bool gpu_ortho = w.component(0).has_device_data() &&
+                       w.component(1).has_device_data();
+      if (gpu_ortho) {
+        const int count = j + 1;
+        for (int i = 0; i < count; ++i) {
+          const auto& Vi = *V[static_cast<std::size_t>(i)];
+          workspace.V_u_host[static_cast<std::size_t>(i)] =
+              Vi.component(0).device_data();
+          workspace.V_v_host[static_cast<std::size_t>(i)] =
+              Vi.component(1).device_data();
+        }
+        cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
+                   static_cast<std::size_t>(count) * sizeof(double*),
+                   cudaMemcpyHostToDevice);
+        cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
+                   static_cast<std::size_t>(count) * sizeof(double*),
+                   cudaMemcpyHostToDevice);
+        orthogonalize_stag_cuda(
+            w.local_mx(), w.local_my(), w.ghost_width(),
+            w.component(0).stride(), w.component(1).stride(),
+            w.component(0).device_data(), w.component(1).device_data(),
+            workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
+        cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
+                   static_cast<std::size_t>(count) * sizeof(double),
+                   cudaMemcpyDeviceToHost);
+        if (options.context && options.context->mpi_enabled()) {
+          MPI_Allreduce(MPI_IN_PLACE, workspace.hij_host.data(), count,
+                        MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        }
+        for (int i = 0; i < count; ++i) {
+          H[static_cast<std::size_t>(i) +
+            static_cast<std::size_t>(restart + 1) * j] =
+              workspace.hij_host[static_cast<std::size_t>(i)];
+        }
+      } else
+#endif
+      {
+        for (int i = 0; i <= j; ++i) {
+          const double hij = global_sum(options.context, dot(
+              w, *V[static_cast<std::size_t>(i)]));
+          H[static_cast<std::size_t>(i) +
+            static_cast<std::size_t>(restart + 1) * j] = hij;
+          axpy(-hij, *V[static_cast<std::size_t>(i)], w);
+        }
       }
 
       const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
