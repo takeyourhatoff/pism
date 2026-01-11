@@ -165,10 +165,10 @@
 
   * [x] compute `usurf = topg + thk` (or flotation-aware later)
   * [x] surface slopes `∂h/∂x, ∂h/∂y`
-* [ ] Implement viscosity update kernel (v0: isothermal)
+* [x] Implement viscosity update kernel (v0: isothermal)
 
-  * [ ] strain rate invariants on staggered grid
-  * [ ] effective viscosity `nu` and `nuH`
+  * [x] strain rate invariants on staggered grid
+  * [x] effective viscosity `nu` and `nuH`
 * [ ] Implement basal resistance term
 
   * [ ] v0: simple pseudo-plastic or linear drag using `tauc`
@@ -499,6 +499,7 @@
   * Completed remaining M3 subtasks (dx/dy, metadata, time dimension, multi-rank IO).
   * Verified NetCDF IO smoke tests with MPI.
   * Added geometry diagnostics (usurf + surface slopes) with CUDA-aware path.
+  * Implemented isothermal SSA viscosity update (strain-rate invariants + nuH).
 * 🎯 Next:
 
   * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).

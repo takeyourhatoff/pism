@@ -105,6 +105,7 @@ set(GPISM_CORE_SOURCES
   src/grid2d.cpp
   src/runtime_config.cpp
   src/geometry.cpp
+  src/viscosity.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
