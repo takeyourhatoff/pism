@@ -247,6 +247,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-multigrid-chebyshev-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-chebyshev-smoke COMMAND gpism-multigrid-chebyshev-smoke)
 
+  add_executable(gpism-multigrid-vcycle-smoke tests/multigrid_vcycle_smoke.cpp)
+  target_link_libraries(gpism-multigrid-vcycle-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-vcycle-smoke COMMAND gpism-multigrid-vcycle-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)

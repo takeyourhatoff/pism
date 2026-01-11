@@ -263,14 +263,14 @@
 
   * [x] Jacobi smoother first (easy)
   * [x] Chebyshev-Jacobi smoother next (recommended for GPU)
-* [ ] Implement residual computation per level
-* [ ] Implement V-cycle
+* [x] Implement residual computation per level
+* [x] Implement V-cycle
 
-  * [ ] pre-smooth
-  * [ ] restrict residual
-  * [ ] coarse solve (few GMRES/Jacobi iterations)
-  * [ ] prolongate correction
-  * [ ] post-smooth
+  * [x] pre-smooth
+  * [x] restrict residual
+  * [x] coarse solve (few GMRES/Jacobi iterations)
+  * [x] prolongate correction
+  * [x] post-smooth
 * [ ] Integrate as preconditioner in FGMRES
 * [ ] Multigrid tests
 
@@ -541,6 +541,7 @@
   * Added staggered restriction/prolongation with transfer smoke test.
   * Added host-side Jacobi smoother with a smoke test.
   * Added Chebyshev-Jacobi smoother with a diagonal smoke test.
+  * Added residual computation + V-cycle scaffold with smoke coverage.
 * 🎯 Next:
 
-  * Implement residual computation per level and V-cycle scaffold.
+  * Integrate multigrid as a preconditioner in FGMRES.

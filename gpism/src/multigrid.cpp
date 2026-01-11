@@ -210,6 +210,26 @@ void prolong_stag(const FieldStag2D<double>& coarse, FieldStag2D<double>& fine) 
   }
 }
 
+void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                      const FieldStag2D<double>& beta,
+                      const FieldStag2D<double>& b,
+                      const FieldStag2D<double>& x, FieldStag2D<double>& r,
+                      const SSABoundaryCondition* bc) {
+  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  ssa_apply_host(grid, nuH, beta, x, Ax, bc);
+  for (int j = 0; j < grid.local_my(); ++j) {
+    for (int i = 0; i < grid.local_mx(); ++i) {
+      for (int comp = 0; comp < 2; ++comp) {
+        if (is_dirichlet(bc, i, j, comp)) {
+          r(i, j, comp) = 0.0;
+        } else {
+          r(i, j, comp) = b(i, j, comp) - Ax(i, j, comp);
+        }
+      }
+    }
+  }
+}
+
 void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                    const FieldStag2D<double>& beta, const FieldStag2D<double>& b,
                    FieldStag2D<double>& x, int iterations, double omega,
@@ -336,6 +356,45 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
     if (denom != 0.0) {
       alpha = 1.0 / denom;
     }
+  }
+}
+
+void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
+             int coarse_iters, double omega) {
+  const int levels = mg.num_levels();
+  if (levels == 0) {
+    return;
+  }
+
+  for (int level = 0; level < levels - 1; ++level) {
+    MGLevel& fine = mg.level(level);
+    MGLevel& coarse = mg.level(level + 1);
+
+    jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, pre_iters,
+                  omega);
+    compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r);
+    restrict_stag(fine.r, coarse.rhs);
+    coarse.u.fill(0.0);
+  }
+
+  MGLevel& coarsest = mg.level(levels - 1);
+  jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
+                coarsest.u, coarse_iters, omega);
+
+  for (int level = levels - 2; level >= 0; --level) {
+    MGLevel& fine = mg.level(level);
+    MGLevel& coarse = mg.level(level + 1);
+    FieldStag2D<double> corr(fine.grid.local_mx(), fine.grid.local_my(),
+                             fine.grid.ghost_width());
+    prolong_stag(coarse.u, corr);
+    for (int j = 0; j < fine.grid.local_my(); ++j) {
+      for (int i = 0; i < fine.grid.local_mx(); ++i) {
+        fine.u(i, j, 0) += corr(i, j, 0);
+        fine.u(i, j, 1) += corr(i, j, 1);
+      }
+    }
+    jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, post_iters,
+                  omega);
   }
 }
 
