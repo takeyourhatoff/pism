@@ -94,6 +94,7 @@ configure_file(
 set(GPISM_CORE_SOURCES
   src/context.cpp
   src/grid2d.cpp
+  src/runtime_config.cpp
 )
 
 if(GPISM_ENABLE_CUDA)

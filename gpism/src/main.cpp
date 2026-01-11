@@ -1,7 +1,10 @@
 #include <cstring>
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "gpism/context.h"
+#include "gpism/runtime_config.h"
 #include "gpism/version.h"
 
 namespace {
@@ -11,11 +14,18 @@ void print_help() {
       << "gpism: GPU-first, PISM-compatible ice-sheet model (scaffold)\n"
       << "\n"
       << "Usage:\n"
-      << "  gpism [--help] [--version]\n"
+      << "  gpism [--help] [--version] [options]\n"
       << "\n"
       << "Options:\n"
       << "  --help       Show this help text\n"
-      << "  --version    Show build information\n";
+      << "  --version    Show build information\n"
+      << "  -i FILE      Input (restart) NetCDF file\n"
+      << "  -o FILE      Output NetCDF file\n"
+      << "  -y YEARS     Run length in years\n"
+      << "  -time YEARS  Run length in years (alias)\n"
+      << "  -config FILE Full config file (replaces defaults)\n"
+      << "  -config_override FILE  Config overrides (partial)\n"
+      << "  -dry_run     Print resolved config and exit\n";
 }
 
 void print_version() {
@@ -31,22 +41,123 @@ void print_version() {
             << "  NetCDF:     " << GPISM_NETCDF << "\n";
 }
 
+struct Options {
+  std::string input;
+  std::string output;
+  std::string config_path;
+  std::string config_override_path;
+  std::string run_years;
+  bool dry_run = false;
+  std::vector<std::string> gpism_opts;
+};
+
+bool parse_args(int argc, char** argv, Options* options) {
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    auto require_value = [&](const std::string& name) -> std::string {
+      if (i + 1 >= argc) {
+        throw std::runtime_error("Missing value for " + name);
+      }
+      return argv[++i];
+    };
+
+    if (arg == "--help" || arg == "-h") {
+      print_help();
+      return false;
+    }
+    if (arg == "--version" || arg == "-V") {
+      print_version();
+      return false;
+    }
+    if (arg == "-i") {
+      options->input = require_value(arg);
+      continue;
+    }
+    if (arg == "-o") {
+      options->output = require_value(arg);
+      continue;
+    }
+    if (arg == "-y" || arg == "-time") {
+      options->run_years = require_value(arg);
+      continue;
+    }
+    if (arg == "-config") {
+      options->config_path = require_value(arg);
+      continue;
+    }
+    if (arg == "-config_override") {
+      options->config_override_path = require_value(arg);
+      continue;
+    }
+    if (arg == "-dry_run") {
+      options->dry_run = true;
+      continue;
+    }
+    if (arg.rfind("-gpism_", 0) == 0) {
+      options->gpism_opts.push_back(arg);
+      continue;
+    }
+    if (arg.rfind("-", 0) == 0) {
+      throw std::runtime_error("Unknown option: " + arg);
+    }
+  }
+  return true;
+}
+
+void log_rank0(const gpism::Context& context, const std::string& message) {
+  if (context.rank() == 0) {
+    std::cout << message << '\n';
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
-  for (int i = 1; i < argc; ++i) {
-    if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-      print_help();
+  Options options;
+  try {
+    if (!parse_args(argc, argv, &options)) {
       return 0;
     }
-    if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-V") == 0) {
-      print_version();
-      return 0;
-    }
+  } catch (const std::exception& exc) {
+    std::cerr << "Error: " << exc.what() << '\n';
+    return 2;
   }
 
-  std::cout << "gpism scaffold: no simulation configured yet.\n";
-  std::cout << "Run `gpism --help` for available options.\n";
+  gpism::RuntimeConfig config;
+  if (!options.config_path.empty()) {
+    if (!config.load_file(options.config_path, true)) {
+      std::cerr << "Error: failed to read config file " << options.config_path
+                << '\n';
+      return 2;
+    }
+  }
+  if (!options.config_override_path.empty()) {
+    if (!config.apply_override(options.config_override_path)) {
+      std::cerr << "Error: failed to read override config file "
+                << options.config_override_path << '\n';
+      return 2;
+    }
+  }
+  if (!options.run_years.empty()) {
+    config.set("time.years", options.run_years);
+  }
+
+  if (!options.gpism_opts.empty() && context.rank() == 0) {
+    std::cout << "Ignoring gpism-only options:";
+    for (const auto& opt : options.gpism_opts) {
+      std::cout << ' ' << opt;
+    }
+    std::cout << '\n';
+  }
+
+  if (options.dry_run) {
+    log_rank0(context, "gpism dry run configuration:");
+    log_rank0(context, config.summary());
+    return 0;
+  }
+
+  log_rank0(context, "gpism scaffold: no simulation configured yet.");
+  log_rank0(context, "Run `gpism --help` for available options.");
   return 0;
 }

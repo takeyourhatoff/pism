@@ -90,29 +90,29 @@
 
 ### M2 Tasks
 
-* [ ] Implement CLI parsing
+* [x] Implement CLI parsing
 
   * [ ] `-i`, `-o`, `-y`/`-time` style run length
   * [ ] `-config`, `-config_override`
   * [ ] gpism-only options prefixed `-gpism_*`
-* [ ] Implement config system
+* [x] Implement config system
 
   * [ ] load defaults from `gpism_config.nc` (or embedded defaults)
   * [ ] apply `-config` replacement
   * [ ] apply `-config_override` (partial overrides)
   * [ ] provide `get<T>(key)` accessors with type checks
-* [ ] Implement logging + run metadata
+* [x] Implement logging + run metadata
 
   * [ ] per-rank logging with rank 0 summary
   * [ ] write build + git hash into output metadata when available
-* [ ] Implement “dry run” mode
+* [x] Implement “dry run” mode
 
   * [ ] `gpism -dry_run` prints resolved config and exits
 
 ### M2 Definition of Done
 
-* [ ] `gpism -dry_run -config X -config_override Y` produces a deterministic, readable resolved config summary
-* [ ] Unknown options produce helpful error messages (or warnings if you choose permissive mode)
+* [x] `gpism -dry_run -config X -config_override Y` produces a deterministic, readable resolved config summary
+* [x] Unknown options produce helpful error messages (or warnings if you choose permissive mode)
 
 ---
 
@@ -489,6 +489,7 @@
   * Added `Context::neighbors_2d` helper for rank neighbor lookup.
   * Selected SSA solver Strategy A (native matrix-free multigrid + Krylov).
   * Added optional CUDA-aware MPI halo exchange path (device buffers).
+  * Implemented CLI/config/dry-run scaffold for M2.
 * 🎯 Next:
 
   * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.
