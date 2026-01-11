@@ -75,30 +75,35 @@ configure_file(
   @ONLY
 )
 
-add_executable(gpism
-  src/main.cpp
+add_library(gpism-core
   src/context.cpp
   src/grid2d.cpp
 )
 
-target_include_directories(gpism
-  PRIVATE
+target_include_directories(gpism-core
+  PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND)
-  target_link_libraries(gpism PRIVATE MPI::MPI_CXX)
+  target_link_libraries(gpism-core PUBLIC MPI::MPI_CXX)
 endif()
 
 if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
   if(TARGET NetCDF::NetCDF)
-    target_link_libraries(gpism PRIVATE NetCDF::NetCDF)
+    target_link_libraries(gpism-core PUBLIC NetCDF::NetCDF)
   elseif(NetCDF_LIBRARIES)
-    target_link_libraries(gpism PRIVATE ${NetCDF_LIBRARIES})
-    target_include_directories(gpism PRIVATE ${NetCDF_INCLUDE_DIRS})
+    target_link_libraries(gpism-core PUBLIC ${NetCDF_LIBRARIES})
+    target_include_directories(gpism-core PUBLIC ${NetCDF_INCLUDE_DIRS})
   endif()
 endif()
+
+add_executable(gpism
+  src/main.cpp
+)
+
+target_link_libraries(gpism PRIVATE gpism-core)
 
 install(TARGETS gpism RUNTIME DESTINATION bin)
 
@@ -124,13 +129,6 @@ endif()
 if(GPISM_BUILD_TESTS)
   enable_testing()
   add_executable(gpism-field-smoke tests/field_smoke.cpp)
-  target_include_directories(gpism-field-smoke
-    PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/include
-      ${CMAKE_CURRENT_BINARY_DIR}/generated
-  )
-  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND)
-    target_link_libraries(gpism-field-smoke PRIVATE MPI::MPI_CXX)
-  endif()
+  target_link_libraries(gpism-field-smoke PRIVATE gpism-core)
   add_test(NAME gpism-field-smoke COMMAND gpism-field-smoke)
 endif()

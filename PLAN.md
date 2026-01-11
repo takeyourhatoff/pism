@@ -24,9 +24,9 @@
   * [x] GPU model: CUDA/HIP/SYCL, or portability layer (e.g., Kokkos)
   * [x] MPI library requirements (CUDA-aware MPI desired)
   * [x] NetCDF stack choice (netcdf-c + HDF5; optional PnetCDF later)
-* [~] Set up build system (CMake recommended)
+* [x] Set up build system (CMake recommended)
 
-  * [-] CPU-only build works (cmake not available in current dev environment)
+  * [x] CPU-only build works
   * [ ] GPU build works (one backend first)
   * [x] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
 * [x] Add formatting + linting + basic static analysis
@@ -35,8 +35,8 @@
 
 ### M0 Definition of Done
 
-* [ ] `gpism` builds locally
-* [ ] You can run `gpism --help` and `gpism --version`
+* [x] `gpism` builds locally
+* [x] You can run `gpism --help` and `gpism --version`
 
 ---
 
@@ -480,6 +480,7 @@
   * Added gpism `Context` (MPI-aware) and `Grid2D` decomposition stubs.
   * Added `Field2D`/`FieldStag2D` scaffolding and a halo exchange implementation with a smoke test executable.
   * Added env-driven device selection policy in `gpism::Context`.
+  * Installed cmake and built gpism locally (including `gpism --version`).
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
