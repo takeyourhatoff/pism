@@ -250,10 +250,10 @@
 
 ### M6 Tasks
 
-* [ ] Implement multigrid level builder
+* [x] Implement multigrid level builder
 
-  * [ ] coarsening rules for grid + halos
-  * [ ] allocate per-level fields `U_l, R_l, nuH_l` etc.
+  * [x] coarsening rules for grid + halos
+  * [x] allocate per-level fields `U_l, R_l, nuH_l` etc.
 * [ ] Implement restriction/prolongation for staggered fields
 
   * [ ] u-face restriction
@@ -537,6 +537,7 @@
   * Added restart GMRES with identity preconditioner and a basic solver smoke test.
   * Extended GMRES harness with residual tracking and SSA operator smoke solve.
   * Added non-trivial SSA GMRES regression with nuH>0 and known solution.
+  * Added multigrid level builder with a sizing smoke test.
 * 🎯 Next:
 
-  * Start M6 multigrid level builder (grid coarsening + per-level fields).
+  * Implement restriction/prolongation for staggered fields (u/v faces).

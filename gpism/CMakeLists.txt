@@ -112,6 +112,7 @@ set(GPISM_CORE_SOURCES
   src/ssa_operator.cpp
   src/linear_algebra.cpp
   src/gmres.cpp
+  src/multigrid.cpp
 )
 
 if(GPISM_ENABLE_NETCDF)
@@ -229,6 +230,10 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-gmres-smoke tests/gmres_smoke.cpp)
   target_link_libraries(gpism-gmres-smoke PRIVATE gpism-core)
   add_test(NAME gpism-gmres-smoke COMMAND gpism-gmres-smoke)
+
+  add_executable(gpism-multigrid-levels-smoke tests/multigrid_levels_smoke.cpp)
+  target_link_libraries(gpism-multigrid-levels-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-levels-smoke COMMAND gpism-multigrid-levels-smoke)
 
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
