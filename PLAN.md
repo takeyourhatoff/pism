@@ -71,7 +71,7 @@
   * [x] pack/unpack kernels (host buffers)
   * [x] MPI Isend/Irecv
   * [ ] correctness test for 1-rank and multi-rank cases
-* [~] Add a “field smoke test”
+* [x] Add a “field smoke test”
 
   * [ ] fill field with a known pattern on each rank
   * [ ] exchange halos
@@ -481,6 +481,7 @@
   * Added `Field2D`/`FieldStag2D` scaffolding and a halo exchange implementation with a smoke test executable.
   * Added env-driven device selection policy in `gpism::Context`.
   * Installed cmake and built gpism locally (including `gpism --version`).
+  * Ran gpism field smoke test (single-rank) via CTest.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).

@@ -108,10 +108,6 @@ bool check_ghosts(const gpism::Field2D<double>& field, const gpism::Grid2D& grid
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
 
-#if !GPISM_HAVE_MPI
-  std::cout << "MPI not enabled; skipping halo test.\n";
-  return 0;
-#else
   gpism::Grid2D grid(8, 8, 1.0, 1.0, 1, context.rank(), context.size());
   gpism::Field2D<double> field(grid.local_mx(), grid.local_my(), grid.ghost_width());
 
@@ -127,6 +123,15 @@ int main(int argc, char** argv) {
   exchange.exchange(field, grid, context);
 
   bool local_ok = check_ghosts(field, grid);
+
+#if !GPISM_HAVE_MPI
+  if (local_ok) {
+    std::cout << "Halo exchange smoke test (single rank): OK\n";
+  } else {
+    std::cout << "Halo exchange smoke test (single rank): FAILED\n";
+  }
+  return local_ok ? 0 : 1;
+#else
   int local_val = local_ok ? 1 : 0;
   int global_val = 0;
   MPI_Allreduce(&local_val, &global_val, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
