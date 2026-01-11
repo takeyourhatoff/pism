@@ -37,6 +37,15 @@ and SIA-only choices, and one with paleo-climate and SIA/SSA-hybrid choices.
 The first of these examples can be run in a few minutes of computer time,
 which should help you get started.
 
+## gpism quick check (minimal)
+
+After running `preprocess.sh`, you can run a minimal gpism check:
+
+    $ gpism -i pism_Greenland_5km_v1.1.nc -o gpism_minimal_out.nc -y 1
+
+gpism reads `thk` and `topg` from this file; `tauc` is optional and defaults to
+zero if missing.
+
 # SeaRISE Greenland background information
 
 The SeaRISE assessment process included PISM Greenland simulations among many
@@ -88,4 +97,3 @@ Results can be visualized using, e.g. `im-plot.py` from
     im-plot.py -v velsurf_mag --colorbar_label --inner_titles "q=0.1 f=0.01,q=0.25 f=0.01,q=0.8 f=0.01,q=0.1 f=0.02,q=0.25 f=0.02,q=0.1 f=0.02,q=0.8 f=0.0,q=0.1 f=0.05,q=0.25 f=0.05,q=0.8 f=0.05" -o nosgl.pdf g20km_*0.01_*.nc g20km_*0.02_*.nc g20km_*0.05_*.nc
 
     im-plot.py -v velsurf_mag --colorbar_label --inner_titles "q=0.1 f=0.01,q=0.25 f=0.01,q=0.8 f=0.01,q=0.1 f=0.02,q=0.25 f=0.02,q=0.1 f=0.02,q=0.8 f=0.0,q=0.1 f=0.05,q=0.25 f=0.05,q=0.8 f=0.05" -o sgl.pdf g20km_*0.01.nc g20km_*0.02.nc g20km_*0.05.nc
-

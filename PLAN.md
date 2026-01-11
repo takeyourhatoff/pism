@@ -448,6 +448,8 @@
 
 * [ ] Implement `-bootstrap` pathway (create initial fields from minimal inputs)
 * [ ] Support reading/writing SSA initial guess fields (`ubar_ssa`, `vbar_ssa`)
+* [x] Support legacy NetCDF dimension/coord aliases (e.g., `x1`/`y1`) when reading PISM inputs
+* [x] Add std-greenland compatibility smoke run (read `pism_Greenland_5km_v1.1.nc`, run minimal step, document any required fields)
 * [ ] Implement additional common diagnostics
 
   * [ ] `velbar`, `uvelsurf`, `vvelsurf`, flux diagnostics
@@ -607,6 +609,8 @@
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
+  * Added legacy `x1`/`y1` NetCDF dimension support in restart reader and a legacy-dims IO smoke test.
+  * Ran a minimal gpism std-greenland step and documented the gpism quick-check command in `examples/std-greenland/README.md`.
 * 🧱 Blocked:
 
   * -

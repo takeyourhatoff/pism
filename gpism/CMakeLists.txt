@@ -258,6 +258,9 @@ if(GPISM_BUILD_TESTS)
     add_executable(gpism-io-smoke tests/io_smoke.cpp)
     target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
     add_test(NAME gpism-io-smoke COMMAND gpism-io-smoke)
+    add_executable(gpism-io-legacy-dims-smoke tests/io_legacy_dims_smoke.cpp)
+    target_link_libraries(gpism-io-legacy-dims-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-io-legacy-dims-smoke COMMAND gpism-io-legacy-dims-smoke)
     if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
       add_test(
         NAME gpism-io-smoke-mpi

@@ -433,8 +433,19 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   std::size_t ny = 0;
   int dim_x = -1;
   int dim_y = -1;
-  if (!get_dim_len(ncid, "x", &nx, &dim_x) ||
-      !get_dim_len(ncid, "y", &ny, &dim_y)) {
+  const char* dim_x_name = nullptr;
+  const char* dim_y_name = nullptr;
+  if (get_dim_len(ncid, "x", &nx, &dim_x)) {
+    dim_x_name = "x";
+  } else if (get_dim_len(ncid, "x1", &nx, &dim_x)) {
+    dim_x_name = "x1";
+  }
+  if (get_dim_len(ncid, "y", &ny, &dim_y)) {
+    dim_y_name = "y";
+  } else if (get_dim_len(ncid, "y1", &ny, &dim_y)) {
+    dim_y_name = "y1";
+  }
+  if (!dim_x_name || !dim_y_name) {
     nc_close(ncid);
     return false;
   }
@@ -452,10 +463,10 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
 
   double dx = 1.0;
   double dy = 1.0;
-  if (!read_coord_spacing(ncid, "x", &dx)) {
+  if (!read_coord_spacing(ncid, dim_x_name, &dx)) {
     read_global_attr(ncid, "dx", &dx);
   }
-  if (!read_coord_spacing(ncid, "y", &dy)) {
+  if (!read_coord_spacing(ncid, dim_y_name, &dy)) {
     read_global_attr(ncid, "dy", &dy);
   }
 
