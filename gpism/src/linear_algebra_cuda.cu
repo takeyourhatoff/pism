@@ -21,6 +21,22 @@ double* scalar_device_buffer() {
   return buffer;
 }
 
+double* scalar_host_buffer() {
+  static double* buffer = nullptr;
+  if (!buffer) {
+    cudaHostAlloc(reinterpret_cast<void**>(&buffer),
+                  sizeof(double), cudaHostAllocDefault);
+  }
+  return buffer;
+}
+
+double read_scalar(double* d_out) {
+  double* h_out = scalar_host_buffer();
+  cudaMemcpyAsync(h_out, d_out, sizeof(double), cudaMemcpyDeviceToHost);
+  cudaStreamSynchronize(0);
+  return *h_out;
+}
+
 __global__ void axpy_kernel(int mx, int my, int gw, int stride_x, int stride_y,
                             const double* x, double* y, double alpha) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -228,9 +244,7 @@ double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   dot_kernel<<<grid, block>>>(mx, my, gw, stride_a, stride_b, a, b, d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -245,9 +259,7 @@ double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
                                    b_u, b_v, d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -275,9 +287,7 @@ double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   norm1_kernel<<<grid, block>>>(mx, my, gw, stride, a, d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 double norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -291,9 +301,7 @@ double norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   norm1_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
                                      d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
@@ -307,9 +315,7 @@ double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
   diff_norm1_kernel<<<grid, block>>>(mx, my, gw, stride_a, stride_b, a, b,
                                      d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -324,9 +330,7 @@ double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   diff_norm1_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u,
                                           a_v, b_u, b_v, d_out);
 
-  double result = 0.0;
-  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  return result;
+  return read_scalar(d_out);
 }
 
 }  // namespace gpism
