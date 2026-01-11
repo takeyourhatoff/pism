@@ -272,11 +272,11 @@
   * [x] prolongate correction
   * [x] post-smooth
 * [x] Integrate as preconditioner in FGMRES
-* [~] Multigrid tests
+* [x] Multigrid tests
 
   * [x] constant coefficient cases
   * [x] variable coefficient cases (nuH varies)
-  * [ ] scaling test: iterations vs resolution
+  * [x] scaling test: iterations vs resolution
 
 ### M6 Definition of Done
 
@@ -544,6 +544,7 @@
   * Added residual computation + V-cycle scaffold with smoke coverage.
   * Added multigrid preconditioner wrapper with a smoke test.
   * Added multigrid constant/variable coefficient residual reduction tests.
+  * Added multigrid scaling smoke test (8x8 vs 16x16).
 * 🎯 Next:
 
-  * Add multigrid scaling test (iterations vs resolution).
+  * Start M7 Picard loop for SSA nonlinearity.

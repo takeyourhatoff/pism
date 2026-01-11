@@ -260,6 +260,10 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-multigrid-coeff-smoke PRIVATE gpism-core)
   add_test(NAME gpism-multigrid-coeff-smoke COMMAND gpism-multigrid-coeff-smoke)
 
+  add_executable(gpism-multigrid-scaling-smoke tests/multigrid_scaling_smoke.cpp)
+  target_link_libraries(gpism-multigrid-scaling-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-multigrid-scaling-smoke COMMAND gpism-multigrid-scaling-smoke)
+
   if(GPISM_ENABLE_CUDA)
     add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
     target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
