@@ -34,11 +34,14 @@ endif()
 
 set(GPISM_MPI "disabled")
 set(GPISM_NETCDF "disabled")
+set(GPISM_HAVE_MPI 0)
+set(GPISM_HAVE_NETCDF 0)
 
 if(GPISM_ENABLE_MPI)
   find_package(MPI QUIET)
   if(MPI_CXX_FOUND)
     set(GPISM_MPI "enabled")
+    set(GPISM_HAVE_MPI 1)
   endif()
 endif()
 
@@ -46,6 +49,7 @@ if(GPISM_ENABLE_NETCDF)
   find_package(NetCDF QUIET)
   if(NetCDF_FOUND)
     set(GPISM_NETCDF "enabled")
+    set(GPISM_HAVE_NETCDF 1)
   endif()
 endif()
 
@@ -64,8 +68,16 @@ configure_file(
   @ONLY
 )
 
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/include/gpism/config.h.in
+  ${CMAKE_CURRENT_BINARY_DIR}/generated/gpism/config.h
+  @ONLY
+)
+
 add_executable(gpism
   src/main.cpp
+  src/context.cpp
+  src/grid2d.cpp
 )
 
 target_include_directories(gpism

@@ -1,6 +1,7 @@
 #include <cstring>
 #include <iostream>
 
+#include "gpism/context.h"
 #include "gpism/version.h"
 
 namespace {
@@ -33,6 +34,7 @@ void print_version() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  gpism::Context context(&argc, &argv);
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
       print_help();

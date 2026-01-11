@@ -46,16 +46,17 @@
 
 ### M1 Tasks
 
-* [ ] Implement `Context`
+* [~] Implement `Context`
 
-  * [ ] MPI init / finalize
-  * [ ] rank, size, neighbor ranks
+  * [x] MPI init / finalize
+  * [x] rank, size
+  * [ ] neighbor ranks
   * [ ] device selection policy (rank→GPU mapping)
-* [ ] Implement `Grid2D`
+* [~] Implement `Grid2D`
 
-  * [ ] global sizes `Mx, My`, spacings `dx, dy`
-  * [ ] local patch extents (owned region) per rank
-  * [ ] ghost width `gw` parameter
+  * [x] global sizes `Mx, My`, spacings `dx, dy`
+  * [x] local patch extents (owned region) per rank
+  * [x] ghost width `gw` parameter
 * [ ] Implement device-friendly `Field2D<T>`
 
   * [ ] allocation includes halos
@@ -476,6 +477,7 @@
   * Added a minimal gpism CMake build and `gpism --version` stub.
   * Added CMake cache options for backend/precision with optional MPI/NetCDF detection.
   * Added clang-format target and optional clang-tidy integration in gpism CMake.
+  * Added gpism `Context` (MPI-aware) and `Grid2D` decomposition stubs.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
