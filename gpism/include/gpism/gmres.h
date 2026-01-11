@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 #include "gpism/field_stag2d.h"
 
 namespace gpism {
@@ -35,6 +37,7 @@ struct GMRESResult {
   int iterations = 0;
   double residual = 0.0;
   bool converged = false;
+  std::vector<double> residuals;
 };
 
 GMRESResult gmres_solve(const LinearOperator& op,

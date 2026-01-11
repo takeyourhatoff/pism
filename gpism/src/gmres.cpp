@@ -65,6 +65,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
   double beta = norm2(z);
   result.residual = beta;
+  result.residuals.push_back(result.residual);
   if (beta <= options.tol) {
     result.converged = true;
     return result;
@@ -134,6 +135,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
                    g[static_cast<std::size_t>(j + 1)]);
 
       result.residual = std::abs(g[static_cast<std::size_t>(j + 1)]);
+      result.residuals.push_back(result.residual);
       ++total_iter;
       ++inner_iters;
 
@@ -168,6 +170,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     M->apply(r, z);
     beta = norm2(z);
     result.residual = beta;
+    result.residuals.push_back(result.residual);
     if (result.residual <= options.tol) {
       break;
     }

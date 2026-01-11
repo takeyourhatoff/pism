@@ -5,6 +5,7 @@
 #include <iostream>
 
 #include "gpism/linear_algebra.h"
+#include "gpism/ssa_operator.h"
 
 namespace {
 
@@ -69,6 +70,25 @@ struct ScaleOperator : public gpism::LinearOperator {
   }
 
   double scale_;
+};
+
+struct SSAOperatorWrapper : public gpism::LinearOperator {
+  SSAOperatorWrapper(const gpism::SSAOperator& op, const gpism::Grid2D& grid,
+                     const gpism::FieldStag2D<double>& nuH,
+                     const gpism::FieldStag2D<double>& beta,
+                     const gpism::SSABoundaryCondition* bc)
+      : op_(op), grid_(grid), nuH_(nuH), beta_(beta), bc_(bc) {}
+
+  void apply(const gpism::FieldStag2D<double>& x,
+             gpism::FieldStag2D<double>& y) const override {
+    op_.apply(grid_, nuH_, beta_, x, y, bc_);
+  }
+
+  const gpism::SSAOperator& op_;
+  const gpism::Grid2D& grid_;
+  const gpism::FieldStag2D<double>& nuH_;
+  const gpism::FieldStag2D<double>& beta_;
+  const gpism::SSABoundaryCondition* bc_;
 };
 
 bool check_solution(const gpism::FieldStag2D<double>& x,
@@ -150,6 +170,56 @@ int main() {
     }
   }
   if (!check_solution(x, expected, "scaled")) {
+    return 1;
+  }
+
+  if (res.residuals.size() < 2 ||
+      res.residuals.back() > res.residuals.front()) {
+    std::cerr << "GMRES residual history did not decrease\n";
+    return 1;
+  }
+
+  gpism::Grid2D grid(mx, my, 2.0, 3.0, gw, 0, 1);
+  gpism::SSAOperator ssa(910.0, 9.81, 100.0);
+
+  gpism::Field2D<double> tauc(mx, my, gw);
+  gpism::Field2D<double> thk(mx, my, gw);
+  gpism::Field2D<double> dhdx(mx, my, gw);
+  gpism::Field2D<double> dhdy(mx, my, gw);
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      tauc(i, j) = 100.0;
+      thk(i, j) = 2.0 + 0.1 * i;
+      dhdx(i, j) = 0.05 + 0.01 * j;
+      dhdy(i, j) = -0.02 + 0.005 * i;
+    }
+  }
+
+  gpism::FieldStag2D<double> beta(mx, my, gw);
+  gpism::FieldStag2D<double> nuH(mx, my, gw);
+  gpism::FieldStag2D<double> rhs(mx, my, gw);
+  gpism::FieldStag2D<double> x_ssa(mx, my, gw);
+
+  sync_host_to_device(tauc);
+  sync_host_to_device(thk);
+  sync_host_to_device(dhdx);
+  sync_host_to_device(dhdy);
+
+  gpism::set(0.0, nuH);
+  ssa.compute_basal_drag(grid, tauc, beta);
+  ssa.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
+
+  SSAOperatorWrapper ssa_op(ssa, grid, nuH, beta, nullptr);
+  gpism::set(0.0, x_ssa);
+  res = gpism::gmres_solve(ssa_op, rhs, x_ssa, opts);
+  if (!res.converged) {
+    std::cerr << "GMRES SSA smoke solve did not converge\n";
+    return 1;
+  }
+
+  sync_device_to_host(x_ssa);
+  sync_device_to_host(rhs);
+  if (!check_solution(x_ssa, rhs, "ssa")) {
     return 1;
   }
 

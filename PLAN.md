@@ -230,11 +230,11 @@
 * [x] Implement preconditioner interface
 
   * [x] Identity preconditioner first
-* [~] Add solver test harness
+* [x] Add solver test harness
 
   * [x] solve a known linear system from a frozen coefficient operator
-  * [ ] measure iterations, residual curves
-  * [ ] SSA operator smoke solve (few GMRES iterations, residual drops)
+  * [x] measure iterations, residual curves
+  * [x] SSA operator smoke solve (few GMRES iterations, residual drops)
 
 ### M5 Definition of Done
 
@@ -534,6 +534,7 @@
   * Added CUDA SSA operator smoke test with CPU/GPU parity checks.
   * Added device-capable linear algebra ops (axpy/scal/dot/norms) with a smoke test.
   * Added restart GMRES with identity preconditioner and a basic solver smoke test.
+  * Extended GMRES harness with residual tracking and SSA operator smoke solve.
 * 🎯 Next:
 
-  * Extend solver harness: SSA operator solve + residual tracking.
+  * Assess GMRES residual norms on non-trivial SSA coefficients.
