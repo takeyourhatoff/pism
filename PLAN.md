@@ -57,21 +57,21 @@
   * [x] global sizes `Mx, My`, spacings `dx, dy`
   * [x] local patch extents (owned region) per rank
   * [x] ghost width `gw` parameter
-* [ ] Implement device-friendly `Field2D<T>`
+* [x] Implement device-friendly `Field2D<T>`
 
   * [ ] allocation includes halos
   * [ ] indexing helpers for `(i,j)` with ghost offsets
   * [ ] device pointer access + host staging buffer (pinned if available)
-* [ ] Implement device-friendly `FieldStag2D<T>` (staggered, 2 components)
+* [x] Implement device-friendly `FieldStag2D<T>` (staggered, 2 components)
 
   * [ ] layout for `u-face` and `v-face` components
   * [ ] halo storage + component-aware access
-* [ ] Implement halo exchange
+* [~] Implement halo exchange
 
-  * [ ] pack/unpack kernels (device→send buffer; recv buffer→device)
-  * [ ] MPI Isend/Irecv + overlap
+  * [x] pack/unpack kernels (host buffers)
+  * [x] MPI Isend/Irecv
   * [ ] correctness test for 1-rank and multi-rank cases
-* [ ] Add a “field smoke test”
+* [~] Add a “field smoke test”
 
   * [ ] fill field with a known pattern on each rank
   * [ ] exchange halos
@@ -478,6 +478,7 @@
   * Added CMake cache options for backend/precision with optional MPI/NetCDF detection.
   * Added clang-format target and optional clang-tidy integration in gpism CMake.
   * Added gpism `Context` (MPI-aware) and `Grid2D` decomposition stubs.
+  * Added `Field2D`/`FieldStag2D` scaffolding and a halo exchange implementation with a smoke test executable.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).

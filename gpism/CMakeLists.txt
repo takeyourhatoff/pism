@@ -17,6 +17,7 @@ set(GPISM_PRECISION "double" CACHE STRING "Precision: double or mixed")
 option(GPISM_ENABLE_MPI "Enable MPI support" ON)
 option(GPISM_ENABLE_NETCDF "Enable NetCDF support" ON)
 option(GPISM_ENABLE_CLANG_TIDY "Enable clang-tidy analysis" OFF)
+option(GPISM_BUILD_TESTS "Build gpism tests" ON)
 
 find_package(Git QUIET)
 if(GIT_FOUND)
@@ -118,4 +119,18 @@ if(CLANG_FORMAT_EXE)
     COMMAND ${CLANG_FORMAT_EXE} -i ${GPISM_FORMAT_FILES}
     COMMENT "Formatting gpism sources with clang-format"
   )
+endif()
+
+if(GPISM_BUILD_TESTS)
+  enable_testing()
+  add_executable(gpism-field-smoke tests/field_smoke.cpp)
+  target_include_directories(gpism-field-smoke
+    PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/include
+      ${CMAKE_CURRENT_BINARY_DIR}/generated
+  )
+  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND)
+    target_link_libraries(gpism-field-smoke PRIVATE MPI::MPI_CXX)
+  endif()
+  add_test(NAME gpism-field-smoke COMMAND gpism-field-smoke)
 endif()
