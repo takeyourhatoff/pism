@@ -26,7 +26,7 @@
   * [x] NetCDF stack choice (netcdf-c + HDF5; optional PnetCDF later)
 * [~] Set up build system (CMake recommended)
 
-  * [x] CPU-only build works
+  * [-] CPU-only build works (cmake not available in current dev environment)
   * [ ] GPU build works (one backend first)
   * [x] `gpism --version` prints build info (backend, precision, MPI, NetCDF)
 * [ ] Add formatting + linting + basic static analysis
@@ -474,6 +474,7 @@
 
   * Scaffolded `gpism/` directories and starter docs (`PROJECT_PLAN.md`, `CONTRIBUTING.md`, `docs/decisions.md`).
   * Added a minimal gpism CMake build and `gpism --version` stub.
+  * Added CMake cache options for backend/precision with optional MPI/NetCDF detection.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
