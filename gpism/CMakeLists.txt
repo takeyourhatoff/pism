@@ -221,6 +221,16 @@ if(GPISM_BUILD_TESTS)
     endif()
   endif()
 
+  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE AND GPISM_ENABLE_CUDA)
+    add_executable(gpism-ssa-operator-mpi-smoke tests/ssa_operator_mpi_smoke.cpp)
+    target_link_libraries(gpism-ssa-operator-mpi-smoke PRIVATE gpism-core)
+    add_test(
+      NAME gpism-ssa-operator-mpi-smoke
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-ssa-operator-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+  endif()
+
   add_executable(gpism-ssa-operator-smoke tests/ssa_operator_smoke.cpp)
   target_link_libraries(gpism-ssa-operator-smoke PRIVATE gpism-core)
   add_test(NAME gpism-ssa-operator-smoke COMMAND gpism-ssa-operator-smoke)

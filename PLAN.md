@@ -205,11 +205,12 @@
   * [ ] manufactured solution test (optional but recommended)
   * [x] CUDA smoke test exercises device path (when GPISM_ENABLE_CUDA=ON)
   * [x] CPU/GPU parity check on a tiny grid (tolerances)
+  * [x] CUDA+MPI operator smoke (A.apply + b + residual finite)
 
 ### M4 Definition of Done
 
-* [ ] `A.apply()` and `b` run on GPU, multi-rank, without NaNs
-* [ ] Residual norms behave sensibly for trivial setups
+* [x] `A.apply()` and `b` run on GPU, multi-rank, without NaNs
+* [x] Residual norms behave sensibly for trivial setups
 
 ---
 
@@ -552,6 +553,7 @@
   * Verified CPU build (NetCDF disabled) and ran `ctest` for core smoke tests.
   * Verified CUDA build (NetCDF disabled) and ran `ctest` including CUDA smoke tests.
   * Verified parallel NetCDF stack (HDF5-par + netcdf-c-par) and MPI `gpism-io-smoke-mpi` test.
+  * Verified CUDA+MPI SSA operator smoke with finite residual norms.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.
