@@ -6,6 +6,7 @@
 #endif
 
 #include <cstring>
+#include <fstream>
 #include <vector>
 
 #include "gpism/config.h"
@@ -18,6 +19,10 @@
 
 namespace gpism {
 namespace {
+
+bool write_output_impl(const std::string& path, int rank, int size, bool mpi_enabled,
+                       const Grid2D& grid, const IOFields2D& fields,
+                       double time_value);
 
 bool get_dim_len(int ncid, const char* name, std::size_t* len, int* dimid_out) {
   int dimid = -1;
@@ -174,6 +179,15 @@ void put_vel_bc_mask_attrs(int ncid, int varid) {
   const char* comment =
       "1 enforces prescribed velocity (u_bc/v_bc) at faces; 0 leaves unconstrained";
   nc_put_att_text(ncid, varid, "comment", std::strlen(comment), comment);
+}
+
+bool file_exists(const std::string& path) {
+  std::ifstream input(path);
+  return input.good();
+}
+
+bool get_time_len(int ncid, std::size_t* len, int* dimid_out) {
+  return get_dim_len(ncid, "time", len, dimid_out);
 }
 
 bool write_var_2d(int ncid, int varid, const Field2D<double>& field, int nx, int ny,
@@ -502,6 +516,402 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
 
   nc_close(ncid);
   return ok;
+}
+
+bool write_output_append_serial(const std::string& path, const Grid2D& grid,
+                                const IOFields2D& fields, double time_value) {
+  int ncid = -1;
+  if (nc_open(path.c_str(), NC_WRITE, &ncid) != NC_NOERR) {
+    return false;
+  }
+
+  std::size_t nt = 0;
+  int dim_time = -1;
+  if (!get_time_len(ncid, &nt, &dim_time)) {
+    nc_close(ncid);
+    return false;
+  }
+  const std::size_t t_index = nt;
+
+  int var_time = -1;
+  int var_thk = -1;
+  int var_topg = -1;
+  int var_tauc = -1;
+  int var_uvel = -1;
+  int var_vvel = -1;
+  int var_usurf = -1;
+  int var_u_bc = -1;
+  int var_v_bc = -1;
+  int var_vel_bc_mask = -1;
+  if (nc_inq_varid(ncid, "time", &var_time) != NC_NOERR ||
+      nc_inq_varid(ncid, "thk", &var_thk) != NC_NOERR ||
+      nc_inq_varid(ncid, "topg", &var_topg) != NC_NOERR ||
+      nc_inq_varid(ncid, "tauc", &var_tauc) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+  if (fields.has_velocity) {
+    if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
+        nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_usurf) {
+    if (nc_inq_varid(ncid, "usurf", &var_usurf) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_vel_bc) {
+    if (nc_inq_varid(ncid, "u_bc", &var_u_bc) != NC_NOERR ||
+        nc_inq_varid(ncid, "v_bc", &var_v_bc) != NC_NOERR ||
+        nc_inq_varid(ncid, "vel_bc_mask", &var_vel_bc_mask) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+
+  std::size_t start_time[1] = {t_index};
+  std::size_t count_time[1] = {1};
+  nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  bool ok = true;
+  ok = write_var_2d(ncid, var_thk, fields.thk, mx, my, t_index) && ok;
+  ok = write_var_2d(ncid, var_topg, fields.topg, mx, my, t_index) && ok;
+  ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, t_index) && ok;
+  if (fields.has_velocity) {
+    ok = write_var_2d(ncid, var_uvel, fields.uvel, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_vvel, fields.vvel, mx, my, t_index) && ok;
+  }
+  if (fields.has_usurf) {
+    ok = write_var_2d(ncid, var_usurf, fields.usurf, mx, my, t_index) && ok;
+  }
+  if (fields.has_vel_bc) {
+    ok = write_var_2d(ncid, var_u_bc, fields.u_bc, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_v_bc, fields.v_bc, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, t_index) &&
+         ok;
+  }
+
+  nc_close(ncid);
+  return ok;
+}
+
+#if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
+                                  int rank, const Grid2D& grid,
+                                  const IOFields2D& fields,
+                                  double time_value) {
+  int ncid = -1;
+  if (nc_open_par(path.c_str(), NC_WRITE | NC_MPIIO, comm, MPI_INFO_NULL, &ncid) !=
+      NC_NOERR) {
+    return false;
+  }
+
+  std::size_t nt = 0;
+  int dim_time = -1;
+  if (!get_time_len(ncid, &nt, &dim_time)) {
+    nc_close(ncid);
+    return false;
+  }
+  const std::size_t t_index = nt;
+
+  int var_time = -1;
+  int var_thk = -1;
+  int var_topg = -1;
+  int var_tauc = -1;
+  int var_uvel = -1;
+  int var_vvel = -1;
+  int var_usurf = -1;
+  int var_u_bc = -1;
+  int var_v_bc = -1;
+  int var_vel_bc_mask = -1;
+  if (nc_inq_varid(ncid, "time", &var_time) != NC_NOERR ||
+      nc_inq_varid(ncid, "thk", &var_thk) != NC_NOERR ||
+      nc_inq_varid(ncid, "topg", &var_topg) != NC_NOERR ||
+      nc_inq_varid(ncid, "tauc", &var_tauc) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+  if (fields.has_velocity) {
+    if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
+        nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_usurf) {
+    if (nc_inq_varid(ncid, "usurf", &var_usurf) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_vel_bc) {
+    if (nc_inq_varid(ncid, "u_bc", &var_u_bc) != NC_NOERR ||
+        nc_inq_varid(ncid, "v_bc", &var_v_bc) != NC_NOERR ||
+        nc_inq_varid(ncid, "vel_bc_mask", &var_vel_bc_mask) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+
+  if (nc_var_par_access(ncid, var_time, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_thk, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_topg, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_tauc, NC_INDEPENDENT) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+  if (fields.has_velocity) {
+    if (nc_var_par_access(ncid, var_uvel, NC_INDEPENDENT) != NC_NOERR ||
+        nc_var_par_access(ncid, var_vvel, NC_INDEPENDENT) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_usurf) {
+    if (nc_var_par_access(ncid, var_usurf, NC_INDEPENDENT) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_vel_bc) {
+    if (nc_var_par_access(ncid, var_u_bc, NC_INDEPENDENT) != NC_NOERR ||
+        nc_var_par_access(ncid, var_v_bc, NC_INDEPENDENT) != NC_NOERR ||
+        nc_var_par_access(ncid, var_vel_bc_mask, NC_INDEPENDENT) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+
+  if (rank == 0) {
+    std::size_t start_time[1] = {t_index};
+    std::size_t count_time[1] = {1};
+    nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+  }
+
+  std::size_t start[3] = {t_index, static_cast<std::size_t>(grid.ys()),
+                          static_cast<std::size_t>(grid.xs())};
+  std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                          static_cast<std::size_t>(grid.local_mx())};
+  std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                             grid.local_my());
+  auto write_local = [&](int varid, const Field2D<double>& field) {
+    int idx = 0;
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+      }
+    }
+    return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+           NC_NOERR;
+  };
+  std::vector<int> mask_buffer(static_cast<std::size_t>(grid.local_mx()) *
+                               grid.local_my());
+  auto write_local_mask = [&](int varid, const Field2D<int>& field) {
+    int idx = 0;
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        mask_buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+      }
+    }
+    return nc_put_vara_int(ncid, varid, start, count, mask_buffer.data()) ==
+           NC_NOERR;
+  };
+
+  bool ok = true;
+  ok = write_local(var_thk, fields.thk) && ok;
+  ok = write_local(var_topg, fields.topg) && ok;
+  ok = write_local(var_tauc, fields.tauc) && ok;
+  if (fields.has_velocity) {
+    ok = write_local(var_uvel, fields.uvel) && ok;
+    ok = write_local(var_vvel, fields.vvel) && ok;
+  }
+  if (fields.has_usurf) {
+    ok = write_local(var_usurf, fields.usurf) && ok;
+  }
+  if (fields.has_vel_bc) {
+    ok = write_local(var_u_bc, fields.u_bc) && ok;
+    ok = write_local(var_v_bc, fields.v_bc) && ok;
+    ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
+  }
+
+  nc_close(ncid);
+  return ok;
+}
+#endif
+
+bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
+                                    const Grid2D& grid,
+                                    const IOFields2D& fields,
+                                    double time_value) {
+#if GPISM_HAVE_MPI
+  if (rank == 0) {
+    int ncid = -1;
+    if (nc_open(path.c_str(), NC_WRITE, &ncid) != NC_NOERR) {
+      return false;
+    }
+    std::size_t nt = 0;
+    int dim_time = -1;
+    if (!get_time_len(ncid, &nt, &dim_time)) {
+      nc_close(ncid);
+      return false;
+    }
+    int var_time = -1;
+    if (nc_inq_varid(ncid, "time", &var_time) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+    std::size_t start_time[1] = {nt};
+    std::size_t count_time[1] = {1};
+    nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+    nc_close(ncid);
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  std::size_t nt = 0;
+  if (rank == 0) {
+    int ncid = -1;
+    if (nc_open(path.c_str(), NC_NOWRITE, &ncid) == NC_NOERR) {
+      int dim_time = -1;
+      get_time_len(ncid, &nt, &dim_time);
+      nc_close(ncid);
+    }
+  }
+  MPI_Bcast(&nt, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+  if (nt == 0) {
+    return false;
+  }
+  const std::size_t t_index = nt - 1;
+
+  for (int r = 0; r < size; ++r) {
+    if (r == rank) {
+      int ncid = -1;
+      if (nc_open(path.c_str(), NC_WRITE, &ncid) != NC_NOERR) {
+        return false;
+      }
+      int var_thk = -1;
+      int var_topg = -1;
+      int var_tauc = -1;
+      int var_uvel = -1;
+      int var_vvel = -1;
+      int var_usurf = -1;
+      int var_u_bc = -1;
+      int var_v_bc = -1;
+      int var_vel_bc_mask = -1;
+      if (nc_inq_varid(ncid, "thk", &var_thk) != NC_NOERR ||
+          nc_inq_varid(ncid, "topg", &var_topg) != NC_NOERR ||
+          nc_inq_varid(ncid, "tauc", &var_tauc) != NC_NOERR) {
+        nc_close(ncid);
+        return false;
+      }
+      if (fields.has_velocity) {
+        if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
+            nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+          nc_close(ncid);
+          return false;
+        }
+      }
+      if (fields.has_usurf) {
+        if (nc_inq_varid(ncid, "usurf", &var_usurf) != NC_NOERR) {
+          nc_close(ncid);
+          return false;
+        }
+      }
+      if (fields.has_vel_bc) {
+        if (nc_inq_varid(ncid, "u_bc", &var_u_bc) != NC_NOERR ||
+            nc_inq_varid(ncid, "v_bc", &var_v_bc) != NC_NOERR ||
+            nc_inq_varid(ncid, "vel_bc_mask", &var_vel_bc_mask) != NC_NOERR) {
+          nc_close(ncid);
+          return false;
+        }
+      }
+
+      std::size_t start[3] = {t_index, static_cast<std::size_t>(grid.ys()),
+                              static_cast<std::size_t>(grid.xs())};
+      std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                              static_cast<std::size_t>(grid.local_mx())};
+      std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                                 grid.local_my());
+      auto write_local = [&](int varid, const Field2D<double>& field) {
+        int idx = 0;
+        for (int j = 0; j < grid.local_my(); ++j) {
+          for (int i = 0; i < grid.local_mx(); ++i) {
+            buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+          }
+        }
+        return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+               NC_NOERR;
+      };
+      std::vector<int> mask_buffer(static_cast<std::size_t>(grid.local_mx()) *
+                                   grid.local_my());
+      auto write_local_mask = [&](int varid, const Field2D<int>& field) {
+        int idx = 0;
+        for (int j = 0; j < grid.local_my(); ++j) {
+          for (int i = 0; i < grid.local_mx(); ++i) {
+            mask_buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+          }
+        }
+        return nc_put_vara_int(ncid, varid, start, count, mask_buffer.data()) ==
+               NC_NOERR;
+      };
+
+      bool ok = true;
+      ok = write_local(var_thk, fields.thk) && ok;
+      ok = write_local(var_topg, fields.topg) && ok;
+      ok = write_local(var_tauc, fields.tauc) && ok;
+      if (fields.has_velocity) {
+        ok = write_local(var_uvel, fields.uvel) && ok;
+        ok = write_local(var_vvel, fields.vvel) && ok;
+      }
+      if (fields.has_usurf) {
+        ok = write_local(var_usurf, fields.usurf) && ok;
+      }
+      if (fields.has_vel_bc) {
+        ok = write_local(var_u_bc, fields.u_bc) && ok;
+        ok = write_local(var_v_bc, fields.v_bc) && ok;
+        ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
+      }
+      nc_close(ncid);
+      if (!ok) {
+        return false;
+      }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
+  return true;
+#else
+  (void)path;
+  (void)rank;
+  (void)size;
+  (void)grid;
+  (void)fields;
+  (void)time_value;
+  return false;
+#endif
+}
+
+bool write_output_append_impl(const std::string& path, int rank, int size,
+                              bool mpi_enabled, const Grid2D& grid,
+                              const IOFields2D& fields, double time_value) {
+  if (!file_exists(path)) {
+    return write_output_impl(path, rank, size, mpi_enabled, grid, fields,
+                             time_value);
+  }
+#if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+  if (mpi_enabled && size > 1) {
+    return write_output_append_parallel(path, MPI_COMM_WORLD, rank, grid, fields,
+                                        time_value);
+  }
+#endif
+  if (mpi_enabled && size > 1) {
+    return write_output_append_serial_mpi(path, rank, size, grid, fields,
+                                          time_value);
+  }
+  return write_output_append_serial(path, grid, fields, time_value);
 }
 
 bool write_output_impl(const std::string& path, int rank, int size, bool mpi_enabled,
@@ -900,6 +1310,21 @@ bool NetcdfIO::write_output(const std::string& path, const Context& context,
                              double time_value) {
   return write_output_impl(path, context.rank(), context.size(), context.mpi_enabled(),
                            grid, fields, time_value);
+}
+
+bool NetcdfIO::write_output_append(const std::string& path, const Grid2D& grid,
+                                   const IOFields2D& fields,
+                                   double time_value) {
+  return write_output_append_impl(path, 0, 1, false, grid, fields, time_value);
+}
+
+bool NetcdfIO::write_output_append(const std::string& path,
+                                   const Context& context, const Grid2D& grid,
+                                   const IOFields2D& fields,
+                                   double time_value) {
+  return write_output_append_impl(path, context.rank(), context.size(),
+                                  context.mpi_enabled(), grid, fields,
+                                  time_value);
 }
 
 }  // namespace gpism

@@ -7,7 +7,12 @@
 #include "gpism/viscosity.h"
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
+
+#if GPISM_HAVE_NETCDF
+#include <netcdf.h>
+#endif
 
 int main() {
 #if !GPISM_HAVE_NETCDF
@@ -51,6 +56,8 @@ int main() {
   options.use_bc = false;
 
   gpism::NetcdfIO io;
+  const std::string path = "gpism_timestep_io_smoke.nc";
+  std::remove(path.c_str());
   gpism::TimeManager clock(0.0, 0.1, 1.0, 0.5);
   gpism::ThicknessUpdateOptions thickness_opts;
 
@@ -74,9 +81,7 @@ int main() {
     fields.has_velocity = true;
 
     if (clock.should_output()) {
-      const std::string path =
-          "gpism_timestep_io_smoke_t" + std::to_string(outputs) + ".nc";
-      if (!io.write_output(path, grid, fields, clock.time())) {
+      if (!io.write_output_append(path, grid, fields, clock.time())) {
         std::cerr << "failed to write output\n";
         return 1;
       }
@@ -89,6 +94,27 @@ int main() {
 
   if (outputs < 2) {
     std::cerr << "expected multiple outputs, got " << outputs << "\n";
+    return 1;
+  }
+
+  int ncid = -1;
+  if (nc_open(path.c_str(), NC_NOWRITE, &ncid) != NC_NOERR) {
+    std::cerr << "failed to open output file\n";
+    return 1;
+  }
+  int dim_time = -1;
+  std::size_t nt = 0;
+  if (nc_inq_dimid(ncid, "time", &dim_time) != NC_NOERR ||
+      nc_inq_dimlen(ncid, dim_time, &nt) != NC_NOERR) {
+    nc_close(ncid);
+    std::cerr << "failed to read time dimension\n";
+    return 1;
+  }
+  nc_close(ncid);
+
+  if (static_cast<int>(nt) != outputs) {
+    std::cerr << "time dimension mismatch: expected " << outputs << " got "
+              << nt << "\n";
     return 1;
   }
 

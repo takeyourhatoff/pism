@@ -330,7 +330,7 @@
 
 ### M8 Tasks
 
-* [ ] Implement time manager
+* [x] Implement time manager
 
   * [x] `t0`, `dt`, `t_end`, output intervals
 * [x] Implement simple forcing module (v0)
@@ -348,6 +348,7 @@
 * [x] Output at intervals
 
   * [x] thk, usurf, velocities, basic diagnostics
+  * [x] append multiple time records to a single NetCDF output file
 * [x] Add “end-to-end” test case
 
   * [x] 10–50 steps, writes outputs, no blow-up
@@ -355,7 +356,7 @@
 
 ### M8 Definition of Done
 
-* [ ] `gpism` can run a short simulation end-to-end and write multiple time records
+* [x] `gpism` can run a short simulation end-to-end and write multiple time records
 * [x] thickness remains non-negative and physically plausible
 
 ---
@@ -572,9 +573,10 @@
   * Wired a minimal timestep loop into `gpism` with interval outputs (file-per-interval).
   * Added thickness transport smoke test and SSA-only timestep loop smoke test.
   * Added NetCDF timestep IO smoke test (conditional on NetCDF builds).
+  * Added append-to-time NetCDF outputs (single file, multiple records) and verified `gpism-timestep-io-smoke`.
 * 🧱 Blocked:
 
   * -
 * 🎯 Next:
 
-  * Decide whether to append multiple time records to a single output file (M8 DoD).
+  * Decide M9 thermodynamics scope (isothermal vs enthalpy), or start M10 profiling hooks.

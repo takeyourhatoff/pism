@@ -1,4 +1,3 @@
-#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -126,18 +125,6 @@ void log_rank0(const gpism::Context& context, const std::string& message) {
   }
 }
 
-std::string output_with_index(const std::string& base, int index) {
-  if (index == 0) {
-    return base;
-  }
-  const std::size_t dot = base.find_last_of('.');
-  const std::string stem = (dot == std::string::npos) ? base : base.substr(0, dot);
-  const std::string ext = (dot == std::string::npos) ? "" : base.substr(dot);
-  char suffix[32];
-  std::snprintf(suffix, sizeof(suffix), "_t%04d", index);
-  return stem + suffix + ext;
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -237,8 +224,6 @@ int main(int argc, char** argv) {
     const bool run_ssa = config.get_bool("ssa.enabled");
 
     gpism::HaloExchange2D exchange;
-    int output_index = 0;
-
     while (!clock.done()) {
       if (clock.should_output()) {
         gpism::GeometryDiagnostics::compute_usurf_cpu(grid, fields.thk,
@@ -247,14 +232,14 @@ int main(int argc, char** argv) {
         fields.has_usurf = true;
         fields.has_velocity = true;
 
-        const std::string out_path = output_with_index(options.output, output_index);
-        if (!io.write_output(out_path, context, grid, fields, clock.time())) {
-          std::cerr << "Error: failed to write output file " << out_path << '\n';
+        if (!io.write_output_append(options.output, context, grid, fields,
+                                    clock.time())) {
+          std::cerr << "Error: failed to write output file " << options.output
+                    << '\n';
           return 2;
         }
-        log_rank0(context, "Wrote output to " + out_path);
+        log_rank0(context, "Wrote output to " + options.output);
         clock.mark_output();
-        ++output_index;
       }
 
       if (run_ssa) {

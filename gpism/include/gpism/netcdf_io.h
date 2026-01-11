@@ -33,6 +33,11 @@ public:
                     double time_value = 0.0);
   bool write_output(const std::string& path, const Context& context, const Grid2D& grid,
                     const IOFields2D& fields, double time_value = 0.0);
+  bool write_output_append(const std::string& path, const Grid2D& grid,
+                           const IOFields2D& fields, double time_value);
+  bool write_output_append(const std::string& path, const Context& context,
+                           const Grid2D& grid, const IOFields2D& fields,
+                           double time_value);
 };
 
 }  // namespace gpism
