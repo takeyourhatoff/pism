@@ -306,7 +306,7 @@
 
   * [x] under-relaxation of U or nuH
   * [x] viscosity floor/ceiling
-* [~] Regression tests: consistent results across GPU/CPU (tolerance-based)
+* [-] Regression tests: consistent results across GPU/CPU (tolerance-based) — blocked on host-only SSA solve path
 
 ### M7 Definition of Done
 
@@ -548,6 +548,9 @@
   * Added SSA Picard solver scaffold with convergence checks and a smoke test.
   * Added Picard stabilization options (relaxation + nuH bounds).
   * Added non-trivial SSA Picard smoke test (non-zero slopes).
+* 🧱 Blocked:
+
+  * CPU/GPU Picard parity requires a host-only SSA solve path.
 * 🎯 Next:
 
   * Decide on CPU/GPU parity approach for Picard regression.
