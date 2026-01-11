@@ -178,6 +178,11 @@
 
   * [x] one kernel per component or fused kernel (start simple)
   * [x] uses halos correctly
+* [x] Implement GPU kernels for SSA operator components
+
+  * [x] basal drag (beta)
+  * [x] RHS assembly
+  * [x] matrix-free apply
 * [x] Implement Dirichlet BCs
 
   * [x] support `vel_bc_mask`, `vel_bc_values` (or gpism equivalents)
