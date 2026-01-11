@@ -186,6 +186,85 @@ __global__ void orthogonalize_stag_kernel(int mx, int my, int gw, int stride_u,
   w_v[iv] = wv;
 }
 
+__global__ void normalize_stag_kernel(int mx, int my, int gw, int stride_u,
+                                      int stride_v, const double* w_u,
+                                      const double* w_v, double* out_u,
+                                      double* out_v, const double* norm_in) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  const double norm = sqrt(fmax(norm_in[0], 0.0));
+  if (norm == 0.0) {
+    out_u[iu] = 0.0;
+    out_v[iv] = 0.0;
+    return;
+  }
+  const double inv = 1.0 / norm;
+  out_u[iu] = w_u[iu] * inv;
+  out_v[iv] = w_v[iv] * inv;
+}
+
+__global__ void gmres_update_kernel(int restart, int j, double* H, double* cs,
+                                    double* sn, double* g,
+                                    const double* hij) {
+  if (blockIdx.x != 0 || threadIdx.x != 0) {
+    return;
+  }
+  const int stride = restart + 1;
+  for (int i = 0; i <= j; ++i) {
+    H[i + stride * j] = hij[i];
+  }
+  double h_next = sqrt(fmax(hij[j + 1], 0.0));
+  H[j + 1 + stride * j] = h_next;
+
+  for (int i = 0; i < j; ++i) {
+    double h0 = H[i + stride * j];
+    double h1 = H[i + 1 + stride * j];
+    const double c = cs[i];
+    const double s = sn[i];
+    const double temp = c * h0 + s * h1;
+    h1 = -s * h0 + c * h1;
+    h0 = temp;
+    H[i + stride * j] = h0;
+    H[i + 1 + stride * j] = h1;
+  }
+
+  double h00 = H[j + stride * j];
+  double h10 = H[j + 1 + stride * j];
+  double c = 1.0;
+  double s = 0.0;
+  if (h10 != 0.0) {
+    if (fabs(h10) > fabs(h00)) {
+      const double tau = -h00 / h10;
+      s = 1.0 / sqrt(1.0 + tau * tau);
+      c = s * tau;
+    } else {
+      const double tau = -h10 / h00;
+      c = 1.0 / sqrt(1.0 + tau * tau);
+      s = c * tau;
+    }
+  }
+  cs[j] = c;
+  sn[j] = s;
+  const double temp = c * h00 + s * h10;
+  h10 = -s * h00 + c * h10;
+  h00 = temp;
+  H[j + stride * j] = h00;
+  H[j + 1 + stride * j] = h10;
+
+  double g0 = g[j];
+  double g1 = g[j + 1];
+  const double gtemp = c * g0 + s * g1;
+  g1 = -s * g0 + c * g1;
+  g0 = gtemp;
+  g[j] = g0;
+  g[j + 1] = g1;
+}
+
 }  // namespace
 
 void axpy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
@@ -250,22 +329,59 @@ double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   return result;
 }
 
-void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
-                             double* w_u, double* w_v, const double** V_u,
-                             const double** V_v, int count, double* hij) {
-  CudaEventTimer timer("la_orthogonalize_stag");
+void dot_stag_batch_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                         const double* w_u, const double* w_v,
+                         const double** V_u, const double** V_v, int count,
+                         double* hij) {
+  CudaEventTimer timer("la_dot_stag_batch");
   if (count <= 0) {
     return;
   }
-  cudaMemset(hij, 0, static_cast<std::size_t>(count + 1) * sizeof(double));
+  cudaMemset(hij, 0, static_cast<std::size_t>(count) * sizeof(double));
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   dot_stag_batch_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u,
                                          w_v, V_u, V_v, count, hij);
+}
+
+void dot_stag_self_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                        const double* w_u, const double* w_v, double* out) {
+  CudaEventTimer timer("la_dot_stag_self");
+  cudaMemset(out, 0, sizeof(double));
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u, w_v,
+                                   w_u, w_v, out);
+}
+
+void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                             double* w_u, double* w_v, const double** V_u,
+                             const double** V_v, int count,
+                             const double* hij) {
+  CudaEventTimer timer("la_orthogonalize_stag");
+  if (count <= 0) {
+    return;
+  }
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   orthogonalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v,
                                              V_u, V_v, hij, count, w_u, w_v);
-  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u, w_v,
-                                   w_u, w_v, hij + count);
+}
+
+void normalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                         const double* w_u, const double* w_v, double* out_u,
+                         double* out_v, const double* norm_in) {
+  CudaEventTimer timer("la_normalize_stag");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  normalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u,
+                                         w_v, out_u, out_v, norm_in);
+}
+
+void gmres_update_cuda(int restart, int j, double* H, double* cs, double* sn,
+                       double* g, const double* hij) {
+  CudaEventTimer timer("gmres_update");
+  gmres_update_kernel<<<1, 1>>>(restart, j, H, cs, sn, g, hij);
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
