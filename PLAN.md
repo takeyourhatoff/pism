@@ -51,7 +51,7 @@
   * [x] MPI init / finalize
   * [x] rank, size
   * [ ] neighbor ranks
-  * [ ] device selection policy (rank→GPU mapping)
+  * [x] device selection policy (rank→GPU mapping)
 * [~] Implement `Grid2D`
 
   * [x] global sizes `Mx, My`, spacings `dx, dy`
@@ -479,6 +479,7 @@
   * Added clang-format target and optional clang-tidy integration in gpism CMake.
   * Added gpism `Context` (MPI-aware) and `Grid2D` decomposition stubs.
   * Added `Field2D`/`FieldStag2D` scaffolding and a halo exchange implementation with a smoke test executable.
+  * Added env-driven device selection policy in `gpism::Context`.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
