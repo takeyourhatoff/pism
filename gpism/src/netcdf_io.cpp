@@ -1,11 +1,16 @@
 #include "gpism/netcdf_io.h"
 
 #include <netcdf.h>
+#if defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+#include <netcdf_par.h>
+#endif
 
+#include <cstring>
 #include <vector>
 
 #include "gpism/config.h"
 #include "gpism/geometry.h"
+#include "gpism/version.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -91,6 +96,14 @@ bool read_var_2d_slice(int ncid, const char* name, int dim_time, std::size_t t_i
   return true;
 }
 
+bool put_global_attr_text(int ncid, const char* name, const std::string& value) {
+  if (value.empty()) {
+    return true;
+  }
+  return nc_put_att_text(ncid, NC_GLOBAL, name, value.size(), value.c_str()) ==
+         NC_NOERR;
+}
+
 bool write_var_2d(int ncid, int varid, const Field2D<double>& field, int nx, int ny,
                   std::size_t t_index) {
   std::vector<double> buffer(static_cast<std::size_t>(nx) * ny);
@@ -104,6 +117,124 @@ bool write_var_2d(int ncid, int varid, const Field2D<double>& field, int nx, int
   std::size_t count[3] = {1, static_cast<std::size_t>(ny), static_cast<std::size_t>(nx)};
   return nc_put_vara_double(ncid, varid, start, count, buffer.data()) == NC_NOERR;
 }
+
+#if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
+                           const Grid2D& grid, const IOFields2D& fields,
+                           double time_value) {
+  int ncid = -1;
+  if (nc_create_par(path.c_str(), NC_NETCDF4 | NC_MPIIO, comm, MPI_INFO_NULL,
+                    &ncid) != NC_NOERR) {
+    return false;
+  }
+
+  const int mx = grid.global_mx();
+  const int my = grid.global_my();
+  int dim_x = -1;
+  int dim_y = -1;
+  int dim_time = -1;
+  if (nc_def_dim(ncid, "time", NC_UNLIMITED, &dim_time) != NC_NOERR ||
+      nc_def_dim(ncid, "x", mx, &dim_x) != NC_NOERR ||
+      nc_def_dim(ncid, "y", my, &dim_y) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  int dims_tyx[3] = {dim_time, dim_y, dim_x};
+  int var_time = -1;
+  int var_x = -1;
+  int var_y = -1;
+  int var_thk = -1;
+  int var_topg = -1;
+  int var_tauc = -1;
+  if (nc_def_var(ncid, "time", NC_DOUBLE, 1, &dim_time, &var_time) != NC_NOERR ||
+      nc_def_var(ncid, "x", NC_DOUBLE, 1, &dim_x, &var_x) != NC_NOERR ||
+      nc_def_var(ncid, "y", NC_DOUBLE, 1, &dim_y, &var_y) != NC_NOERR ||
+      nc_def_var(ncid, "thk", NC_DOUBLE, 3, dims_tyx, &var_thk) != NC_NOERR ||
+      nc_def_var(ncid, "topg", NC_DOUBLE, 3, dims_tyx, &var_topg) != NC_NOERR ||
+      nc_def_var(ncid, "tauc", NC_DOUBLE, 3, dims_tyx, &var_tauc) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  const char* units_m = "m";
+  const char* units_pa = "Pa";
+  const char* units_years = "years";
+  nc_put_att_text(ncid, var_thk, "units", 1, units_m);
+  nc_put_att_text(ncid, var_topg, "units", 1, units_m);
+  nc_put_att_text(ncid, var_tauc, "units", 2, units_pa);
+  nc_put_att_text(ncid, var_time, "units", 5, units_years);
+  nc_put_att_text(ncid, var_x, "units", 1, units_m);
+  nc_put_att_text(ncid, var_y, "units", 1, units_m);
+  const std::string history = "gpism write_output";
+  nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());
+  put_global_attr_text(ncid, "gpism_version", GPISM_VERSION);
+  put_global_attr_text(ncid, "gpism_build_type", GPISM_BUILD_TYPE);
+  if (std::strcmp(GPISM_GIT_SHA, "unknown") != 0) {
+    put_global_attr_text(ncid, "gpism_git_sha", GPISM_GIT_SHA);
+  }
+
+  if (nc_enddef(ncid) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  if (nc_var_par_access(ncid, var_time, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_x, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_y, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_thk, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_topg, NC_INDEPENDENT) != NC_NOERR ||
+      nc_var_par_access(ncid, var_tauc, NC_INDEPENDENT) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  if (rank == 0) {
+    std::size_t start_time[1] = {0};
+    std::size_t count_time[1] = {1};
+    nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+
+    std::vector<double> xvals(static_cast<std::size_t>(mx));
+    std::vector<double> yvals(static_cast<std::size_t>(my));
+    for (int i = 0; i < mx; ++i) {
+      xvals[static_cast<std::size_t>(i)] = i * grid.dx();
+    }
+    for (int j = 0; j < my; ++j) {
+      yvals[static_cast<std::size_t>(j)] = j * grid.dy();
+    }
+    std::size_t start_x[1] = {0};
+    std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
+    std::size_t start_y[1] = {0};
+    std::size_t count_y[1] = {static_cast<std::size_t>(my)};
+    nc_put_vara_double(ncid, var_x, start_x, count_x, xvals.data());
+    nc_put_vara_double(ncid, var_y, start_y, count_y, yvals.data());
+  }
+
+  std::size_t start[3] = {0, static_cast<std::size_t>(grid.ys()),
+                          static_cast<std::size_t>(grid.xs())};
+  std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                          static_cast<std::size_t>(grid.local_mx())};
+  std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                             grid.local_my());
+  auto write_local = [&](int varid, const Field2D<double>& field) {
+    int idx = 0;
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+      }
+    }
+    return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+           NC_NOERR;
+  };
+
+  bool ok = true;
+  ok = write_local(var_thk, fields.thk) && ok;
+  ok = write_local(var_topg, fields.topg) && ok;
+  ok = write_local(var_tauc, fields.tauc) && ok;
+  nc_close(ncid);
+  return ok;
+}
+#endif
 
 bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid,
                        IOFields2D& fields, int time_index_request) {
@@ -170,6 +301,12 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
 bool write_output_impl(const std::string& path, int rank, int size, bool mpi_enabled,
                        const Grid2D& grid, const IOFields2D& fields,
                        double time_value) {
+#if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+  if (mpi_enabled && size > 1) {
+    return write_output_parallel(path, MPI_COMM_WORLD, rank, grid, fields,
+                                 time_value);
+  }
+#endif
   if (mpi_enabled && size > 1) {
     if (rank == 0) {
       int ncid = -1;
@@ -217,6 +354,11 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       nc_put_att_text(ncid, var_y, "units", 1, units_m);
       const std::string history = "gpism write_output";
       nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());
+      put_global_attr_text(ncid, "gpism_version", GPISM_VERSION);
+      put_global_attr_text(ncid, "gpism_build_type", GPISM_BUILD_TYPE);
+      if (std::strcmp(GPISM_GIT_SHA, "unknown") != 0) {
+        put_global_attr_text(ncid, "gpism_git_sha", GPISM_GIT_SHA);
+      }
 
       if (nc_enddef(ncid) != NC_NOERR) {
         nc_close(ncid);
@@ -344,6 +486,11 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   nc_put_att_text(ncid, var_y, "units", 1, units_m);
   const std::string history = "gpism write_output";
   nc_put_att_text(ncid, NC_GLOBAL, "history", history.size(), history.c_str());
+  put_global_attr_text(ncid, "gpism_version", GPISM_VERSION);
+  put_global_attr_text(ncid, "gpism_build_type", GPISM_BUILD_TYPE);
+  if (std::strcmp(GPISM_GIT_SHA, "unknown") != 0) {
+    put_global_attr_text(ncid, "gpism_git_sha", GPISM_GIT_SHA);
+  }
 
   if (nc_enddef(ncid) != NC_NOERR) {
     nc_close(ncid);

@@ -101,10 +101,10 @@
   * [x] apply `-config` replacement
   * [x] apply `-config_override` (partial overrides)
   * [x] provide `get<T>(key)` accessors with type checks
-* [~] Implement logging + run metadata
+* [x] Implement logging + run metadata
 
   * [x] per-rank logging with rank 0 summary
-  * [ ] write build + git hash into output metadata when available
+  * [x] write build + git hash into output metadata when available
 * [x] Implement “dry run” mode
 
   * [x] `gpism -dry_run` prints resolved config and exits
@@ -134,7 +134,7 @@
   * [x] write core fields
   * [x] write metadata (units/history)
   * [x] enforce dimension order convention consistently (time,y,x)
-  * [ ] enable NetCDF4/parallel output when library support is available
+  * [x] enable NetCDF4/parallel output when library support is available
 * [x] Implement restart semantics (minimum viable)
 
   * [x] read “state at time t” (last record or `io.time_index`)
@@ -501,7 +501,10 @@
   * Verified NetCDF IO smoke tests with MPI.
   * Added geometry diagnostics (usurf + surface slopes) with CUDA-aware path.
   * Implemented isothermal SSA viscosity update (strain-rate invariants + nuH).
+  * Built MPI-enabled HDF5 + NetCDF-C with parallel NetCDF4 support.
+  * Enabled NetCDF4 parallel output path in `NetcdfIO`.
+  * Added gpism build/version/git metadata to NetCDF outputs.
 * 🎯 Next:
 
-  * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).
-  * Start M4 SSA discretization spec in `docs/ssa_discretization.md`.
+  * Finish M2 logging metadata (write build + git hash into output files).
+  * Implement M4 basal resistance, RHS assembly, and matrix-free apply kernels.
