@@ -497,5 +497,5 @@
   * Added NetCDF round-trip CTest (io_smoke).
 * 🎯 Next:
 
-  * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.
-  * Decide whether to proceed to M2 CLI/config scaffolding after M1 DoD.
+  * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).
+  * Start M4 SSA discretization spec in `docs/ssa_discretization.md`.
