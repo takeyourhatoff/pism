@@ -182,10 +182,10 @@
 
   * [x] support `vel_bc_mask`, `vel_bc_values` (or gpism equivalents)
   * [x] enforce in `A.apply` and in residual computation
-* [~] Operator verification tests (non-physics)
+* [x] Operator verification tests (non-physics)
 
   * [x] “zero solution” sanity test with zero slopes + no forcing
-  * [ ] symmetry-ish checks on simple constant coefficient cases (as applicable)
+  * [x] symmetry-ish checks on simple constant coefficient cases (as applicable)
   * [ ] manufactured solution test (optional but recommended)
 
 ### M4 Definition of Done
