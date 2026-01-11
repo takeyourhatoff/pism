@@ -161,10 +161,10 @@
   * [x] variable locations (cell-centered vs staggered faces)
   * [x] coefficient interpolation rules
   * [x] boundary condition treatment (v0: Dirichlet mask/value)
-* [ ] Implement geometry diagnostics kernels
+* [x] Implement geometry diagnostics kernels
 
-  * [ ] compute `usurf = topg + thk` (or flotation-aware later)
-  * [ ] surface slopes `∂h/∂x, ∂h/∂y`
+  * [x] compute `usurf = topg + thk` (or flotation-aware later)
+  * [x] surface slopes `∂h/∂x, ∂h/∂y`
 * [ ] Implement viscosity update kernel (v0: isothermal)
 
   * [ ] strain rate invariants on staggered grid
@@ -498,6 +498,7 @@
   * Wrote SSA discretization spec for M4.
   * Completed remaining M3 subtasks (dx/dy, metadata, time dimension, multi-rank IO).
   * Verified NetCDF IO smoke tests with MPI.
+  * Added geometry diagnostics (usurf + surface slopes) with CUDA-aware path.
 * 🎯 Next:
 
   * Finish remaining M3 subtasks (dx/dy metadata, time dim, restart at time t, multi-rank output).

@@ -4,9 +4,12 @@
 #include <vector>
 
 #include "gpism/context.h"
-#include "gpism/netcdf_io.h"
 #include "gpism/runtime_config.h"
 #include "gpism/version.h"
+
+#if GPISM_HAVE_NETCDF
+#include "gpism/netcdf_io.h"
+#endif
 
 namespace {
 
@@ -159,6 +162,7 @@ int main(int argc, char** argv) {
   }
 
   if (!options.input.empty() && !options.output.empty()) {
+#if GPISM_HAVE_NETCDF
     gpism::Grid2D grid(0, 0, 1.0, 1.0, 1, context.rank(), context.size());
     gpism::IOFields2D fields;
     gpism::NetcdfIO io;
@@ -180,6 +184,10 @@ int main(int argc, char** argv) {
     }
     log_rank0(context, "Wrote output to " + options.output);
     return 0;
+#else
+    std::cerr << "Error: NetCDF support not enabled in this build.\n";
+    return 2;
+#endif
   }
 
   log_rank0(context, "gpism scaffold: no simulation configured yet.");

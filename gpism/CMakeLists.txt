@@ -104,11 +104,16 @@ set(GPISM_CORE_SOURCES
   src/context.cpp
   src/grid2d.cpp
   src/runtime_config.cpp
-  src/netcdf_io.cpp
+  src/geometry.cpp
 )
+
+if(GPISM_ENABLE_NETCDF)
+  list(APPEND GPISM_CORE_SOURCES src/netcdf_io.cpp)
+endif()
 
 if(GPISM_ENABLE_CUDA)
   list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
+  list(APPEND GPISM_CORE_SOURCES src/geometry_cuda.cu)
 endif()
 
 add_library(gpism-core ${GPISM_CORE_SOURCES})

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "gpism/config.h"
+#include "gpism/geometry.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>

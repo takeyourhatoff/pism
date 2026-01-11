@@ -78,6 +78,24 @@ public:
 #endif
   }
 
+  void copy_host_to_device() {
+#if GPISM_HAVE_CUDA
+    if (device_data_ && host_staging_) {
+      cudaMemcpy(device_data_, host_staging_,
+                 elements() * sizeof(T), cudaMemcpyHostToDevice);
+    }
+#endif
+  }
+
+  void copy_device_to_host() {
+#if GPISM_HAVE_CUDA
+    if (device_data_ && host_staging_) {
+      cudaMemcpy(host_staging_, device_data_,
+                 elements() * sizeof(T), cudaMemcpyDeviceToHost);
+    }
+#endif
+  }
+
   std::size_t elements() const { return data_.size(); }
 
   T& operator()(int i, int j) {
@@ -87,6 +105,8 @@ public:
   const T& operator()(int i, int j) const {
     return data_[index(i, j)];
   }
+
+  bool has_device_data() const { return device_data_ != nullptr; }
 
   void fill(const T& value) {
     std::fill(data_.begin(), data_.end(), value);
