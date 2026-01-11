@@ -46,13 +46,13 @@
 
 ### M1 Tasks
 
-* [~] Implement `Context`
+* [x] Implement `Context`
 
   * [x] MPI init / finalize
   * [x] rank, size
   * [x] neighbor ranks
   * [x] device selection policy (rank→GPU mapping)
-* [~] Implement `Grid2D`
+* [x] Implement `Grid2D`
 
   * [x] global sizes `Mx, My`, spacings `dx, dy`
   * [x] local patch extents (owned region) per rank
