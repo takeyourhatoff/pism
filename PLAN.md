@@ -259,10 +259,10 @@
   * [x] u-face restriction
   * [x] v-face restriction
   * [x] prolongation back to fine
-* [~] Implement smoother
+* [x] Implement smoother
 
   * [x] Jacobi smoother first (easy)
-  * [ ] Chebyshev-Jacobi smoother next (recommended for GPU)
+  * [x] Chebyshev-Jacobi smoother next (recommended for GPU)
 * [ ] Implement residual computation per level
 * [ ] Implement V-cycle
 
@@ -540,6 +540,7 @@
   * Added multigrid level builder with a sizing smoke test.
   * Added staggered restriction/prolongation with transfer smoke test.
   * Added host-side Jacobi smoother with a smoke test.
+  * Added Chebyshev-Jacobi smoother with a diagonal smoke test.
 * 🎯 Next:
 
-  * Add Chebyshev-Jacobi smoother and residual computation per level.
+  * Implement residual computation per level and V-cycle scaffold.

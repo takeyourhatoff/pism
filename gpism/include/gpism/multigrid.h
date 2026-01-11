@@ -41,5 +41,11 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                    const FieldStag2D<double>& beta, const FieldStag2D<double>& b,
                    FieldStag2D<double>& x, int iterations, double omega,
                    const SSABoundaryCondition* bc = nullptr);
+void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                             const FieldStag2D<double>& beta,
+                             const FieldStag2D<double>& b, FieldStag2D<double>& x,
+                             int iterations, double lambda_min,
+                             double lambda_max,
+                             const SSABoundaryCondition* bc = nullptr);
 
 }  // namespace gpism

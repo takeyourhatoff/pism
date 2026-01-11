@@ -245,4 +245,98 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
   }
 }
 
+void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                             const FieldStag2D<double>& beta,
+                             const FieldStag2D<double>& b,
+                             FieldStag2D<double>& x, int iterations,
+                             double lambda_min, double lambda_max,
+                             const SSABoundaryCondition* bc) {
+  if (iterations <= 0) {
+    return;
+  }
+
+  FieldStag2D<double> diag(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> r(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> z(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> p(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> Ap(grid.local_mx(), grid.local_my(), grid.ghost_width());
+
+  compute_jacobi_diag(grid, nuH, beta, diag, bc);
+  ssa_apply_host(grid, nuH, beta, x, Ax, bc);
+
+  for (int j = 0; j < grid.local_my(); ++j) {
+    for (int i = 0; i < grid.local_mx(); ++i) {
+      for (int comp = 0; comp < 2; ++comp) {
+        if (is_dirichlet(bc, i, j, comp)) {
+          r(i, j, comp) = 0.0;
+          z(i, j, comp) = 0.0;
+          continue;
+        }
+        r(i, j, comp) = b(i, j, comp) - Ax(i, j, comp);
+        const double d = diag(i, j, comp);
+        z(i, j, comp) = (d != 0.0) ? (r(i, j, comp) / d) : 0.0;
+      }
+    }
+  }
+
+  const double d = 0.5 * (lambda_max + lambda_min);
+  const double c = 0.5 * (lambda_max - lambda_min);
+  double alpha = (d != 0.0) ? (1.0 / d) : 0.0;
+  double beta_coeff = 0.0;
+
+  for (int iter = 0; iter < iterations; ++iter) {
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        for (int comp = 0; comp < 2; ++comp) {
+          if (is_dirichlet(bc, i, j, comp)) {
+            p(i, j, comp) = 0.0;
+          } else if (iter == 0) {
+            p(i, j, comp) = z(i, j, comp);
+          } else {
+            p(i, j, comp) = z(i, j, comp) + beta_coeff * p(i, j, comp);
+          }
+        }
+      }
+    }
+
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        for (int comp = 0; comp < 2; ++comp) {
+          if (is_dirichlet(bc, i, j, comp)) {
+            if (bc && bc->values) {
+              x(i, j, comp) = (*bc->values)(i, j, comp);
+            }
+          } else {
+            x(i, j, comp) += alpha * p(i, j, comp);
+          }
+        }
+      }
+    }
+
+    ssa_apply_host(grid, nuH, beta, p, Ap, bc);
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        for (int comp = 0; comp < 2; ++comp) {
+          if (is_dirichlet(bc, i, j, comp)) {
+            r(i, j, comp) = 0.0;
+            z(i, j, comp) = 0.0;
+            continue;
+          }
+          r(i, j, comp) -= alpha * Ap(i, j, comp);
+          const double dloc = diag(i, j, comp);
+          z(i, j, comp) = (dloc != 0.0) ? (r(i, j, comp) / dloc) : 0.0;
+        }
+      }
+    }
+
+    const double coeff = (c * alpha * 0.5);
+    beta_coeff = coeff * coeff;
+    const double denom = d - (c * c * 0.25) * alpha;
+    if (denom != 0.0) {
+      alpha = 1.0 / denom;
+    }
+  }
+}
+
 }  // namespace gpism
