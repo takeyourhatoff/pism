@@ -14,9 +14,17 @@ void copy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
 void set_cuda(int mx, int my, int gw, int stride, double* x, double value);
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                 const double* a, const double* b);
+double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                     const double* a_u, const double* a_v,
+                     const double* b_u, const double* b_v);
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a);
+double norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                       const double* a_u, const double* a_v);
 double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                        const double* a, const double* b);
+double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* a_u, const double* a_v,
+                            const double* b_u, const double* b_v);
 }  // namespace gpism
 #endif
 
@@ -170,17 +178,12 @@ double dot(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
       b.component(0).has_device_data() && b.component(1).has_device_data()) {
-    const double sum0 = dot_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
-                                 a.component(0).stride(),
-                                 b.component(0).stride(),
-                                 a.component(0).device_data(),
-                                 b.component(0).device_data());
-    const double sum1 = dot_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
-                                 a.component(1).stride(),
-                                 b.component(1).stride(),
-                                 a.component(1).device_data(),
-                                 b.component(1).device_data());
-    return sum0 + sum1;
+    return dot_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
+                         a.component(0).stride(), a.component(1).stride(),
+                         a.component(0).device_data(),
+                         a.component(1).device_data(),
+                         b.component(0).device_data(),
+                         b.component(1).device_data());
   }
 #endif
   return dot_field_host(a.component(0), b.component(0)) +
@@ -194,13 +197,10 @@ double norm2(const FieldStag2D<double>& a) {
 double norm1(const FieldStag2D<double>& a) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data()) {
-    const double sum0 = norm1_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
-                                   a.component(0).stride(),
-                                   a.component(0).device_data());
-    const double sum1 = norm1_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
-                                   a.component(1).stride(),
-                                   a.component(1).device_data());
-    return sum0 + sum1;
+    return norm1_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
+                           a.component(0).stride(), a.component(1).stride(),
+                           a.component(0).device_data(),
+                           a.component(1).device_data());
   }
 #endif
   return norm1_field_host(a.component(0)) + norm1_field_host(a.component(1));
@@ -210,19 +210,13 @@ double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
       b.component(0).has_device_data() && b.component(1).has_device_data()) {
-    const double sum0 = diff_norm1_cuda(a.local_mx(), a.local_my(),
-                                        a.ghost_width(),
-                                        a.component(0).stride(),
-                                        b.component(0).stride(),
-                                        a.component(0).device_data(),
-                                        b.component(0).device_data());
-    const double sum1 = diff_norm1_cuda(a.local_mx(), a.local_my(),
-                                        a.ghost_width(),
-                                        a.component(1).stride(),
-                                        b.component(1).stride(),
-                                        a.component(1).device_data(),
-                                        b.component(1).device_data());
-    return sum0 + sum1;
+    return diff_norm1_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
+                                a.component(0).stride(),
+                                a.component(1).stride(),
+                                a.component(0).device_data(),
+                                a.component(1).device_data(),
+                                b.component(0).device_data(),
+                                b.component(1).device_data());
   }
 #endif
   return diff_norm1_field_host(a.component(0), b.component(0)) +

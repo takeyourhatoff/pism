@@ -207,23 +207,17 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   SSASolverResult result{};
   const Context* context = options.context;
 
-  Field2D<double> usurf(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  Field2D<double> dhdx(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  Field2D<double> dhdy(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  FieldStag2D<double> beta(grid_.local_mx(), grid_.local_my(),
-                           grid_.ghost_width());
-  FieldStag2D<double> rhs(grid_.local_mx(), grid_.local_my(),
-                          grid_.ghost_width());
-  FieldStag2D<double> nuH(grid_.local_mx(), grid_.local_my(),
-                          grid_.ghost_width());
-  FieldStag2D<double> nuH_prev(grid_.local_mx(), grid_.local_my(),
-                               grid_.ghost_width());
-  FieldStag2D<double> vel_prev(grid_.local_mx(), grid_.local_my(),
-                               grid_.ghost_width());
-
-  FieldStag2D<int> bc_mask(grid_.local_mx(), grid_.local_my(), grid_.ghost_width());
-  FieldStag2D<double> bc_values(grid_.local_mx(), grid_.local_my(),
-                                grid_.ghost_width());
+  workspace_.ensure(grid_);
+  auto& usurf = workspace_.usurf;
+  auto& dhdx = workspace_.dhdx;
+  auto& dhdy = workspace_.dhdy;
+  auto& beta = workspace_.beta;
+  auto& rhs = workspace_.rhs;
+  auto& nuH = workspace_.nuH;
+  auto& nuH_prev = workspace_.nuH_prev;
+  auto& vel_prev = workspace_.vel_prev;
+  auto& bc_mask = workspace_.bc_mask;
+  auto& bc_values = workspace_.bc_values;
   SSABoundaryCondition bc;
   if (options.use_bc) {
     build_bc_stag(grid_, u_bc, v_bc, vel_bc_mask, bc_mask, bc_values);

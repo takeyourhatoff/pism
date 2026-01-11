@@ -299,6 +299,12 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-thermo-scale-smoke PRIVATE gpism-core)
   add_test(NAME gpism-thermo-scale-smoke COMMAND gpism-thermo-scale-smoke)
 
+  if(GPISM_ENABLE_CUDA)
+    add_executable(gpism-timestep-gpu-smoke tests/timestep_gpu_smoke.cpp)
+    target_link_libraries(gpism-timestep-gpu-smoke PRIVATE gpism-core)
+    add_test(NAME gpism-timestep-gpu-smoke COMMAND gpism-timestep-gpu-smoke)
+  endif()
+
   add_executable(gpism-viscosity-temperature-smoke tests/viscosity_temperature_smoke.cpp)
   target_link_libraries(gpism-viscosity-temperature-smoke PRIVATE gpism-core)
   add_test(NAME gpism-viscosity-temperature-smoke COMMAND gpism-viscosity-temperature-smoke)

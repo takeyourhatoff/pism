@@ -9,6 +9,19 @@ __device__ inline int idx(int i, int j, int k, int gw, int stride, int nz) {
   return ((j + gw) * stride + (i + gw)) * nz + k;
 }
 
+struct DiffusionWorkspace {
+  std::size_t capacity = 0;
+  double* a = nullptr;
+  double* b = nullptr;
+  double* c = nullptr;
+  double* d = nullptr;
+};
+
+DiffusionWorkspace& diffusion_workspace() {
+  static DiffusionWorkspace workspace;
+  return workspace;
+}
+
 __global__ void assemble_kernel(int mx, int my, int gw, int nz, int stride,
                                 const double* enthalpy, double* a, double* b,
                                 double* c, double* d, double r,
@@ -77,27 +90,31 @@ void vertical_diffusion_step_cuda(int mx, int my, int gw, int nz, int stride,
   const std::size_t total = static_cast<std::size_t>(stride) *
                             static_cast<std::size_t>(my + 2 * gw) *
                             static_cast<std::size_t>(nz);
-  double* a = nullptr;
-  double* b = nullptr;
-  double* c = nullptr;
-  double* d = nullptr;
-  cudaMalloc(reinterpret_cast<void**>(&a), total * sizeof(double));
-  cudaMalloc(reinterpret_cast<void**>(&b), total * sizeof(double));
-  cudaMalloc(reinterpret_cast<void**>(&c), total * sizeof(double));
-  cudaMalloc(reinterpret_cast<void**>(&d), total * sizeof(double));
+  DiffusionWorkspace& workspace = diffusion_workspace();
+  if (total > workspace.capacity) {
+    if (workspace.a) {
+      cudaFree(workspace.a);
+      cudaFree(workspace.b);
+      cudaFree(workspace.c);
+      cudaFree(workspace.d);
+    }
+    cudaMalloc(reinterpret_cast<void**>(&workspace.a), total * sizeof(double));
+    cudaMalloc(reinterpret_cast<void**>(&workspace.b), total * sizeof(double));
+    cudaMalloc(reinterpret_cast<void**>(&workspace.c), total * sizeof(double));
+    cudaMalloc(reinterpret_cast<void**>(&workspace.d), total * sizeof(double));
+    workspace.capacity = total;
+  }
 
   const double r = kappa * dt / (dz * dz);
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  assemble_kernel<<<grid, block>>>(mx, my, gw, nz, stride, enthalpy_in, a, b, c,
-                                   d, r, surface_value, basal_value, dirichlet);
-  solve_kernel<<<grid, block>>>(mx, my, gw, nz, stride, a, b, c, d,
+  assemble_kernel<<<grid, block>>>(mx, my, gw, nz, stride, enthalpy_in,
+                                   workspace.a, workspace.b, workspace.c,
+                                   workspace.d, r, surface_value, basal_value,
+                                   dirichlet);
+  solve_kernel<<<grid, block>>>(mx, my, gw, nz, stride, workspace.a,
+                                workspace.b, workspace.c, workspace.d,
                                 enthalpy_out);
-
-  cudaFree(a);
-  cudaFree(b);
-  cudaFree(c);
-  cudaFree(d);
 }
 
 }  // namespace gpism

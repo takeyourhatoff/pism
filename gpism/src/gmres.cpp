@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 #include "gpism/config.h"
@@ -15,8 +16,84 @@
 namespace gpism {
 namespace {
 
-FieldStag2D<double> make_like(const FieldStag2D<double>& ref) {
-  return FieldStag2D<double>(ref.local_mx(), ref.local_my(), ref.ghost_width());
+struct GMRESWorkspace {
+  int mx = 0;
+  int my = 0;
+  int gw = 0;
+  int restart_cap = 0;
+  bool initialized = false;
+  FieldStag2D<double> Ax;
+  FieldStag2D<double> r;
+  FieldStag2D<double> z;
+  FieldStag2D<double> w;
+  std::vector<std::unique_ptr<FieldStag2D<double>>> V;
+  std::vector<double> H;
+  std::vector<double> cs;
+  std::vector<double> sn;
+  std::vector<double> g;
+  std::vector<double> y;
+
+  void ensure(const FieldStag2D<double>& ref, int restart) {
+    const int mx_new = ref.local_mx();
+    const int my_new = ref.local_my();
+    const int gw_new = ref.ghost_width();
+    const bool dims_changed =
+        (!initialized || mx != mx_new || my != my_new || gw != gw_new);
+    mx = mx_new;
+    my = my_new;
+    gw = gw_new;
+    if (!initialized) {
+      Ax.resize(mx, my, gw);
+      r.resize(mx, my, gw);
+      z.resize(mx, my, gw);
+      w.resize(mx, my, gw);
+    } else if (dims_changed) {
+      Ax.resize(mx, my, gw);
+      r.resize(mx, my, gw);
+      z.resize(mx, my, gw);
+      w.resize(mx, my, gw);
+    }
+
+    const int needed = restart + 1;
+    if (static_cast<int>(V.size()) < needed) {
+      V.reserve(static_cast<std::size_t>(needed));
+      while (static_cast<int>(V.size()) < needed) {
+        V.emplace_back(std::make_unique<FieldStag2D<double>>(mx, my, gw));
+      }
+    }
+    if (dims_changed) {
+      for (auto& vec : V) {
+        if (vec) {
+          vec->resize(mx, my, gw);
+        }
+      }
+    }
+
+    restart_cap = std::max(restart_cap, restart);
+    const std::size_t hsize =
+        static_cast<std::size_t>(restart + 1) * static_cast<std::size_t>(restart);
+    if (H.size() < hsize) {
+      H.resize(hsize);
+    }
+    if (cs.size() < static_cast<std::size_t>(restart)) {
+      cs.resize(static_cast<std::size_t>(restart));
+    }
+    if (sn.size() < static_cast<std::size_t>(restart)) {
+      sn.resize(static_cast<std::size_t>(restart));
+    }
+    if (g.size() < static_cast<std::size_t>(restart + 1)) {
+      g.resize(static_cast<std::size_t>(restart + 1));
+    }
+    if (y.size() < static_cast<std::size_t>(restart)) {
+      y.resize(static_cast<std::size_t>(restart));
+    }
+    initialized = true;
+  }
+};
+
+GMRESWorkspace& gmres_workspace() {
+  static GMRESWorkspace workspace;
+  return workspace;
 }
 
 void apply_givens(double c, double s, double& v0, double& v1) {
@@ -71,10 +148,12 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   IdentityPreconditioner identity;
   const Preconditioner* M = precond ? precond : &identity;
 
-  FieldStag2D<double> Ax = make_like(x);
-  FieldStag2D<double> r = make_like(x);
-  FieldStag2D<double> z = make_like(x);
-  FieldStag2D<double> w = make_like(x);
+  GMRESWorkspace& workspace = gmres_workspace();
+  workspace.ensure(x, restart);
+  FieldStag2D<double>& Ax = workspace.Ax;
+  FieldStag2D<double>& r = workspace.r;
+  FieldStag2D<double>& z = workspace.z;
+  FieldStag2D<double>& w = workspace.w;
 
   op.apply(x, Ax);
   copy(b, r);
@@ -89,41 +168,44 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     return result;
   }
 
-  std::vector<FieldStag2D<double>> V;
-  V.reserve(static_cast<std::size_t>(restart + 1));
-  for (int i = 0; i < restart + 1; ++i) {
-    V.emplace_back(x.local_mx(), x.local_my(), x.ghost_width());
-  }
+  auto& V = workspace.V;
 
   int total_iter = 0;
   while (total_iter < max_iter) {
-    std::vector<double> H(static_cast<std::size_t>(restart + 1) * restart, 0.0);
-    std::vector<double> cs(static_cast<std::size_t>(restart), 0.0);
-    std::vector<double> sn(static_cast<std::size_t>(restart), 0.0);
-    std::vector<double> g(static_cast<std::size_t>(restart + 1), 0.0);
+    auto& H = workspace.H;
+    auto& cs = workspace.cs;
+    auto& sn = workspace.sn;
+    auto& g = workspace.g;
+    const std::size_t hsize =
+        static_cast<std::size_t>(restart + 1) * static_cast<std::size_t>(restart);
+    std::fill(H.begin(), H.begin() + hsize, 0.0);
+    std::fill(cs.begin(), cs.begin() + static_cast<std::size_t>(restart), 0.0);
+    std::fill(sn.begin(), sn.begin() + static_cast<std::size_t>(restart), 0.0);
+    std::fill(g.begin(), g.begin() + static_cast<std::size_t>(restart + 1), 0.0);
 
     g[0] = beta;
-    copy(z, V[0]);
-    scal(1.0 / beta, V[0]);
+    copy(z, *V[0]);
+    scal(1.0 / beta, *V[0]);
 
     int inner_iters = 0;
     for (int j = 0; j < restart && total_iter < max_iter; ++j) {
-      op.apply(V[j], Ax);
+      op.apply(*V[static_cast<std::size_t>(j)], Ax);
       M->apply(Ax, w);
 
       for (int i = 0; i <= j; ++i) {
-        const double hij = global_sum(options.context, dot(w, V[i]));
+        const double hij = global_sum(options.context, dot(
+            w, *V[static_cast<std::size_t>(i)]));
         H[static_cast<std::size_t>(i) +
           static_cast<std::size_t>(restart + 1) * j] = hij;
-        axpy(-hij, V[i], w);
+        axpy(-hij, *V[static_cast<std::size_t>(i)], w);
       }
 
       const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
       H[static_cast<std::size_t>(j + 1) +
         static_cast<std::size_t>(restart + 1) * j] = h_next;
       if (h_next != 0.0) {
-        copy(w, V[j + 1]);
-        scal(1.0 / h_next, V[j + 1]);
+        copy(w, *V[static_cast<std::size_t>(j + 1)]);
+        scal(1.0 / h_next, *V[static_cast<std::size_t>(j + 1)]);
       }
 
       for (int i = 0; i < j; ++i) {
@@ -163,7 +245,11 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     }
 
     const int k = inner_iters;
-    std::vector<double> y(static_cast<std::size_t>(k), 0.0);
+    auto& y = workspace.y;
+    if (y.size() < static_cast<std::size_t>(k)) {
+      y.resize(static_cast<std::size_t>(k));
+    }
+    std::fill(y.begin(), y.begin() + static_cast<std::size_t>(k), 0.0);
     for (int i = k - 1; i >= 0; --i) {
       double sum = g[static_cast<std::size_t>(i)];
       for (int j = i + 1; j < k; ++j) {
@@ -179,7 +265,8 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     }
 
     for (int i = 0; i < k; ++i) {
-      axpy(y[static_cast<std::size_t>(i)], V[i], x);
+      axpy(y[static_cast<std::size_t>(i)],
+           *V[static_cast<std::size_t>(i)], x);
     }
 
     op.apply(x, Ax);

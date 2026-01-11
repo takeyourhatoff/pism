@@ -59,6 +59,59 @@ private:
   const Grid2D& grid_;
   SSAOperator ssa_;
   ViscosityModel viscosity_;
+  struct Workspace {
+    int mx = 0;
+    int my = 0;
+    int gw = 0;
+    bool initialized = false;
+    Field2D<double> usurf;
+    Field2D<double> dhdx;
+    Field2D<double> dhdy;
+    FieldStag2D<double> beta;
+    FieldStag2D<double> rhs;
+    FieldStag2D<double> nuH;
+    FieldStag2D<double> nuH_prev;
+    FieldStag2D<double> vel_prev;
+    FieldStag2D<int> bc_mask;
+    FieldStag2D<double> bc_values;
+
+    void ensure(const Grid2D& grid) {
+      const int mx_new = grid.local_mx();
+      const int my_new = grid.local_my();
+      const int gw_new = grid.ghost_width();
+      const bool dims_changed =
+          (!initialized || mx != mx_new || my != my_new || gw != gw_new);
+      mx = mx_new;
+      my = my_new;
+      gw = gw_new;
+      if (!initialized) {
+        usurf.resize(mx, my, gw);
+        dhdx.resize(mx, my, gw);
+        dhdy.resize(mx, my, gw);
+        beta.resize(mx, my, gw);
+        rhs.resize(mx, my, gw);
+        nuH.resize(mx, my, gw);
+        nuH_prev.resize(mx, my, gw);
+        vel_prev.resize(mx, my, gw);
+        bc_mask.resize(mx, my, gw);
+        bc_values.resize(mx, my, gw);
+      } else if (dims_changed) {
+        usurf.resize(mx, my, gw);
+        dhdx.resize(mx, my, gw);
+        dhdy.resize(mx, my, gw);
+        beta.resize(mx, my, gw);
+        rhs.resize(mx, my, gw);
+        nuH.resize(mx, my, gw);
+        nuH_prev.resize(mx, my, gw);
+        vel_prev.resize(mx, my, gw);
+        bc_mask.resize(mx, my, gw);
+        bc_values.resize(mx, my, gw);
+      }
+      initialized = true;
+    }
+  };
+
+  Workspace workspace_;
 };
 
 }  // namespace gpism

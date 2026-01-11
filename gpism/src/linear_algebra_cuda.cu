@@ -13,6 +13,14 @@ __device__ inline int idx(int i, int j, int gw, int stride) {
   return (j + gw) * stride + (i + gw);
 }
 
+double* scalar_device_buffer() {
+  static double* buffer = nullptr;
+  if (!buffer) {
+    cudaMalloc(reinterpret_cast<void**>(&buffer), sizeof(double));
+  }
+  return buffer;
+}
+
 __global__ void axpy_kernel(int mx, int my, int gw, int stride_x, int stride_y,
                             const double* x, double* y, double alpha) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -71,6 +79,20 @@ __global__ void dot_kernel(int mx, int my, int gw, int stride_a, int stride_b,
   atomicAdd(out, a[ia] * b[ib]);
 }
 
+__global__ void dot_stag_kernel(int mx, int my, int gw, int stride_u, int stride_v,
+                                const double* a_u, const double* a_v,
+                                const double* b_u, const double* b_v,
+                                double* out) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  atomicAdd(out, a_u[iu] * b_u[iu] + a_v[iv] * b_v[iv]);
+}
+
 __global__ void norm1_kernel(int mx, int my, int gw, int stride, const double* a,
                              double* out) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -80,6 +102,19 @@ __global__ void norm1_kernel(int mx, int my, int gw, int stride, const double* a
   }
   const int ia = idx(i, j, gw, stride);
   atomicAdd(out, fabs(a[ia]));
+}
+
+__global__ void norm1_stag_kernel(int mx, int my, int gw, int stride_u, int stride_v,
+                                  const double* a_u, const double* a_v,
+                                  double* out) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  atomicAdd(out, fabs(a_u[iu]) + fabs(a_v[iv]));
 }
 
 __global__ void diff_norm1_kernel(int mx, int my, int gw, int stride_a,
@@ -93,6 +128,20 @@ __global__ void diff_norm1_kernel(int mx, int my, int gw, int stride_a,
   const int ia = idx(i, j, gw, stride_a);
   const int ib = idx(i, j, gw, stride_b);
   atomicAdd(out, fabs(a[ia] - b[ib]));
+}
+
+__global__ void diff_norm1_stag_kernel(int mx, int my, int gw, int stride_u,
+                                       int stride_v, const double* a_u,
+                                       const double* a_v, const double* b_u,
+                                       const double* b_v, double* out) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  atomicAdd(out, fabs(a_u[iu] - b_u[iu]) + fabs(a_v[iv] - b_v[iv]));
 }
 
 }  // namespace
@@ -130,8 +179,7 @@ void set_cuda(int mx, int my, int gw, int stride, double* x, double value) {
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                 const double* a, const double* b) {
   CudaEventTimer timer("la_dot");
-  double* d_out = nullptr;
-  cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
+  double* d_out = scalar_device_buffer();
   cudaMemset(d_out, 0, sizeof(double));
 
   dim3 block(16, 16);
@@ -140,14 +188,29 @@ double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
 
   double result = 0.0;
   cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  cudaFree(d_out);
+  return result;
+}
+
+double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                     const double* a_u, const double* a_v,
+                     const double* b_u, const double* b_v) {
+  CudaEventTimer timer("la_dot_stag");
+  double* d_out = scalar_device_buffer();
+  cudaMemset(d_out, 0, sizeof(double));
+
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
+                                   b_u, b_v, d_out);
+
+  double result = 0.0;
+  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   return result;
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
   CudaEventTimer timer("la_norm1");
-  double* d_out = nullptr;
-  cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
+  double* d_out = scalar_device_buffer();
   cudaMemset(d_out, 0, sizeof(double));
 
   dim3 block(16, 16);
@@ -156,15 +219,29 @@ double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {
 
   double result = 0.0;
   cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  cudaFree(d_out);
+  return result;
+}
+
+double norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                       const double* a_u, const double* a_v) {
+  CudaEventTimer timer("la_norm1_stag");
+  double* d_out = scalar_device_buffer();
+  cudaMemset(d_out, 0, sizeof(double));
+
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  norm1_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
+                                     d_out);
+
+  double result = 0.0;
+  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   return result;
 }
 
 double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                        const double* a, const double* b) {
   CudaEventTimer timer("la_diff_norm1");
-  double* d_out = nullptr;
-  cudaMalloc(reinterpret_cast<void**>(&d_out), sizeof(double));
+  double* d_out = scalar_device_buffer();
   cudaMemset(d_out, 0, sizeof(double));
 
   dim3 block(16, 16);
@@ -174,7 +251,23 @@ double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
 
   double result = 0.0;
   cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  cudaFree(d_out);
+  return result;
+}
+
+double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* a_u, const double* a_v,
+                            const double* b_u, const double* b_v) {
+  CudaEventTimer timer("la_diff_norm1_stag");
+  double* d_out = scalar_device_buffer();
+  cudaMemset(d_out, 0, sizeof(double));
+
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  diff_norm1_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u,
+                                          a_v, b_u, b_v, d_out);
+
+  double result = 0.0;
+  cudaMemcpy(&result, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   return result;
 }
 
