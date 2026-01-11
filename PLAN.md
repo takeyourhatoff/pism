@@ -122,29 +122,31 @@
 
 ### M3 Tasks
 
-* [x] Implement NetCDF reader
+* [~] Implement NetCDF reader
 
-  * [ ] read grid metadata (Mx/My/dx/dy, coordinate variables)
-  * [ ] read core fields: `thk`, `topg`, `tauc` (at minimum)
+  * [x] read grid metadata (Mx/My from dimensions)
+  * [x] read core fields: `thk`, `topg`, `tauc` (at minimum)
+  * [ ] read dx/dy or coordinate variables
   * [ ] handle missing optional fields with defaults
-* [x] Implement NetCDF writer
+* [~] Implement NetCDF writer
 
-  * [ ] define dimensions (include `time`)
-  * [ ] write core fields + metadata
+  * [x] define dimensions (x/y only; no `time` yet)
+  * [x] write core fields
+  * [ ] write metadata (units/history/etc.)
   * [ ] enforce dimension order convention consistently (document it)
-* [x] Implement restart semantics (minimum viable)
+* [~] Implement restart semantics (minimum viable)
 
   * [ ] read “state at time t”
   * [ ] write restart file at end of run
-* [x] Add I/O tests
+* [~] Add I/O tests
 
-  * [ ] write then read round-trip test for each field type
+  * [x] write then read round-trip test for each field type
   * [ ] multi-rank output correctness (each rank writes its slab)
 
 ### M3 Definition of Done
 
 * [x] `gpism -i input.nc -o out.nc` produces a readable NetCDF with expected variables
-* [x] round-trip tests pass
+* [x] round-trip tests pass (single-rank)
 
 ---
 
