@@ -257,13 +257,15 @@ void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   if (count <= 0) {
     return;
   }
-  cudaMemset(hij, 0, static_cast<std::size_t>(count) * sizeof(double));
+  cudaMemset(hij, 0, static_cast<std::size_t>(count + 1) * sizeof(double));
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   dot_stag_batch_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u,
                                          w_v, V_u, V_v, count, hij);
   orthogonalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v,
                                              V_u, V_v, hij, count, w_u, w_v);
+  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u, w_v,
+                                   w_u, w_v, hij + count);
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {

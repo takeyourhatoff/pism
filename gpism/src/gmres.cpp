@@ -107,8 +107,8 @@ struct GMRESWorkspace {
     if (y.size() < static_cast<std::size_t>(restart)) {
       y.resize(static_cast<std::size_t>(restart));
     }
-    if (hij_host.size() < static_cast<std::size_t>(restart)) {
-      hij_host.resize(static_cast<std::size_t>(restart));
+    if (hij_host.size() < static_cast<std::size_t>(restart + 1)) {
+      hij_host.resize(static_cast<std::size_t>(restart + 1));
     }
     initialized = true;
 
@@ -240,44 +240,58 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     scal(1.0 / beta, *V[0]);
 
     int inner_iters = 0;
+#if GPISM_HAVE_CUDA
+    bool gpu_ortho = w.component(0).has_device_data() &&
+                     w.component(1).has_device_data();
+    if (gpu_ortho) {
+      const int count_all = restart + 1;
+      for (int i = 0; i < count_all; ++i) {
+        const auto& Vi = *V[static_cast<std::size_t>(i)];
+        workspace.V_u_host[static_cast<std::size_t>(i)] =
+            Vi.component(0).device_data();
+        workspace.V_v_host[static_cast<std::size_t>(i)] =
+            Vi.component(1).device_data();
+      }
+      cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
+                 static_cast<std::size_t>(count_all) * sizeof(double*),
+                 cudaMemcpyHostToDevice);
+      cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
+                 static_cast<std::size_t>(count_all) * sizeof(double*),
+                 cudaMemcpyHostToDevice);
+    }
+#endif
     for (int j = 0; j < restart && total_iter < max_iter; ++j) {
       op.apply(*V[static_cast<std::size_t>(j)], Ax);
       M->apply(Ax, w);
 
 #if GPISM_HAVE_CUDA
-      bool gpu_ortho = w.component(0).has_device_data() &&
-                       w.component(1).has_device_data();
       if (gpu_ortho) {
         const int count = j + 1;
-        for (int i = 0; i < count; ++i) {
-          const auto& Vi = *V[static_cast<std::size_t>(i)];
-          workspace.V_u_host[static_cast<std::size_t>(i)] =
-              Vi.component(0).device_data();
-          workspace.V_v_host[static_cast<std::size_t>(i)] =
-              Vi.component(1).device_data();
-        }
-        cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
-                   static_cast<std::size_t>(count) * sizeof(double*),
-                   cudaMemcpyHostToDevice);
-        cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
-                   static_cast<std::size_t>(count) * sizeof(double*),
-                   cudaMemcpyHostToDevice);
         orthogonalize_stag_cuda(
             w.local_mx(), w.local_my(), w.ghost_width(),
             w.component(0).stride(), w.component(1).stride(),
             w.component(0).device_data(), w.component(1).device_data(),
             workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
         cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
-                   static_cast<std::size_t>(count) * sizeof(double),
+                   static_cast<std::size_t>(count + 1) * sizeof(double),
                    cudaMemcpyDeviceToHost);
         if (options.context && options.context->mpi_enabled()) {
-          MPI_Allreduce(MPI_IN_PLACE, workspace.hij_host.data(), count,
+          MPI_Allreduce(MPI_IN_PLACE, workspace.hij_host.data(), count + 1,
                         MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         }
         for (int i = 0; i < count; ++i) {
           H[static_cast<std::size_t>(i) +
             static_cast<std::size_t>(restart + 1) * j] =
               workspace.hij_host[static_cast<std::size_t>(i)];
+        }
+        const double h_next_raw =
+            workspace.hij_host[static_cast<std::size_t>(count)];
+        const double h_next = std::sqrt(std::max(h_next_raw, 0.0));
+        H[static_cast<std::size_t>(j + 1) +
+          static_cast<std::size_t>(restart + 1) * j] = h_next;
+        if (h_next != 0.0) {
+          copy(w, *V[static_cast<std::size_t>(j + 1)]);
+          scal(1.0 / h_next, *V[static_cast<std::size_t>(j + 1)]);
         }
       } else
 #endif
@@ -289,14 +303,14 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
             static_cast<std::size_t>(restart + 1) * j] = hij;
           axpy(-hij, *V[static_cast<std::size_t>(i)], w);
         }
-      }
 
-      const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
-      H[static_cast<std::size_t>(j + 1) +
-        static_cast<std::size_t>(restart + 1) * j] = h_next;
-      if (h_next != 0.0) {
-        copy(w, *V[static_cast<std::size_t>(j + 1)]);
-        scal(1.0 / h_next, *V[static_cast<std::size_t>(j + 1)]);
+        const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
+        H[static_cast<std::size_t>(j + 1) +
+          static_cast<std::size_t>(restart + 1) * j] = h_next;
+        if (h_next != 0.0) {
+          copy(w, *V[static_cast<std::size_t>(j + 1)]);
+          scal(1.0 / h_next, *V[static_cast<std::size_t>(j + 1)]);
+        }
       }
 
       for (int i = 0; i < j; ++i) {
