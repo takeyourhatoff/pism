@@ -238,11 +238,13 @@
   * [x] measure iterations, residual curves
   * [x] SSA operator smoke solve (few GMRES iterations, residual drops)
 * [x] Add non-trivial SSA GMRES regression (nuH>0, known solution)
+* [x] Validate GMRES convergence on simple SSA cases under MPI decomposition
+* [x] Add MPI decomposition stability test for GMRES iterations (1 vs 2 ranks)
 
 ### M5 Definition of Done
 
-* [ ] SSA linear solve converges for simple cases (flat bed, uniform thk, mild slopes)
-* [ ] Iteration counts are stable under MPI decomposition changes (roughly)
+* [x] SSA linear solve converges for simple cases (flat bed, uniform thk, mild slopes)
+* [x] Iteration counts are stable under MPI decomposition changes (roughly)
 
 ---
 
@@ -554,6 +556,7 @@
   * Verified CUDA build (NetCDF disabled) and ran `ctest` including CUDA smoke tests.
   * Verified parallel NetCDF stack (HDF5-par + netcdf-c-par) and MPI `gpism-io-smoke-mpi` test.
   * Verified CUDA+MPI SSA operator smoke with finite residual norms.
+  * Verified GMRES MPI smoke (1 vs 2 ranks) with stable iteration counts.
 * 🧱 Blocked:
 
   * CPU/GPU Picard parity requires a host-only SSA solve path.

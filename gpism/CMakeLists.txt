@@ -208,6 +208,21 @@ if(GPISM_BUILD_TESTS)
     )
   endif()
 
+  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+    add_executable(gpism-gmres-mpi-smoke tests/gmres_mpi_smoke.cpp)
+    target_link_libraries(gpism-gmres-mpi-smoke PRIVATE gpism-core)
+    add_test(
+      NAME gpism-gmres-mpi-smoke-1
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+    add_test(
+      NAME gpism-gmres-mpi-smoke-2
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+  endif()
+
   if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
     add_executable(gpism-io-smoke tests/io_smoke.cpp)
     target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
