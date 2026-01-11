@@ -122,17 +122,17 @@
 
 ### M3 Tasks
 
-* [ ] Implement NetCDF reader
+* [x] Implement NetCDF reader
 
   * [ ] read grid metadata (Mx/My/dx/dy, coordinate variables)
   * [ ] read core fields: `thk`, `topg`, `tauc` (at minimum)
   * [ ] handle missing optional fields with defaults
-* [ ] Implement NetCDF writer
+* [x] Implement NetCDF writer
 
   * [ ] define dimensions (include `time`)
   * [ ] write core fields + metadata
   * [ ] enforce dimension order convention consistently (document it)
-* [ ] Implement restart semantics (minimum viable)
+* [x] Implement restart semantics (minimum viable)
 
   * [ ] read “state at time t”
   * [ ] write restart file at end of run
@@ -143,7 +143,7 @@
 
 ### M3 Definition of Done
 
-* [ ] `gpism -i input.nc -o out.nc` produces a readable NetCDF with expected variables
+* [x] `gpism -i input.nc -o out.nc` produces a readable NetCDF with expected variables
 * [ ] round-trip tests pass
 
 ---
@@ -490,6 +490,8 @@
   * Selected SSA solver Strategy A (native matrix-free multigrid + Krylov).
   * Added optional CUDA-aware MPI halo exchange path (device buffers).
   * Implemented CLI/config/dry-run scaffold for M2.
+  * Added minimal NetCDF restart read/write path for `thk`, `topg`, `tauc`.
+  * Verified `gpism -i input.nc -o out.nc` writes expected NetCDF variables.
 * 🎯 Next:
 
   * Finish M1 halo exchange goal: device buffers (CUDA-aware MPI) or document limitation.

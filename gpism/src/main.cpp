@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "gpism/context.h"
+#include "gpism/netcdf_io.h"
 #include "gpism/runtime_config.h"
 #include "gpism/version.h"
 
@@ -154,6 +155,22 @@ int main(int argc, char** argv) {
   if (options.dry_run) {
     log_rank0(context, "gpism dry run configuration:");
     log_rank0(context, config.summary());
+    return 0;
+  }
+
+  if (!options.input.empty() && !options.output.empty()) {
+    gpism::Grid2D grid(0, 0, 1.0, 1.0, 1, context.rank(), context.size());
+    gpism::IOFields2D fields;
+    gpism::NetcdfIO io;
+    if (!io.read_restart(options.input, grid, fields)) {
+      std::cerr << "Error: failed to read input file " << options.input << '\n';
+      return 2;
+    }
+    if (!io.write_output(options.output, grid, fields)) {
+      std::cerr << "Error: failed to write output file " << options.output << '\n';
+      return 2;
+    }
+    log_rank0(context, "Wrote output to " + options.output);
     return 0;
   }
 
