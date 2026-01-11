@@ -66,11 +66,11 @@
 
   * [ ] layout for `u-face` and `v-face` components
   * [ ] halo storage + component-aware access
-* [~] Implement halo exchange
+* [x] Implement halo exchange
 
   * [x] pack/unpack kernels (host buffers)
   * [x] MPI Isend/Irecv
-  * [ ] correctness test for 1-rank and multi-rank cases
+  * [x] correctness test for 1-rank and multi-rank cases
 * [x] Add a “field smoke test”
 
   * [ ] fill field with a known pattern on each rank
@@ -483,6 +483,7 @@
   * Installed cmake and built gpism locally (including `gpism --version`).
   * Ran gpism field smoke test (single-rank) via CTest.
   * Completed CUDA-enabled gpism build on Linux GPU host.
+  * Ran gpism field smoke tests in MPI mode (2 ranks) and single-rank.
 * 🎯 Next:
 
   * Start M0 build system setup (CMake skeleton and `gpism --version` stub).
