@@ -144,6 +144,7 @@
   * [x] add BC metadata (long_name, flag values/meanings for `vel_bc_mask`)
   * [x] enforce dimension order convention consistently (time,y,x)
   * [x] enable NetCDF4/parallel output when library support is available
+  * [ ] verify parallel IO stack on this machine (MPI + HDF5 parallel + netcdf-c parallel)
 * [x] Implement restart semantics (minimum viable)
 
   * [x] read “state at time t” (last record or `io.time_index`)
