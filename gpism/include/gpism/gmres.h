@@ -34,6 +34,7 @@ struct GMRESOptions {
   double tol = 1e-8;
   bool verbose = false;
   bool precond_diagnostic = false;
+  bool device_full = false;
   const Context* context = nullptr;
 };
 

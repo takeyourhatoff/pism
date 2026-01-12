@@ -61,6 +61,7 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
   values_["ssa.gmres_tol"] = "1e-8";
+  values_["ssa.gmres.device_full"] = "0";
   values_["ssa.mg.enabled"] = "1";
   values_["ssa.mg.pre_iters"] = "2";
   values_["ssa.mg.post_iters"] = "2";
