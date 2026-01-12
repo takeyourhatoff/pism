@@ -12,6 +12,10 @@ std::atomic<std::size_t> g_h2d_calls{0};
 std::atomic<std::size_t> g_d2h_calls{0};
 std::atomic<std::size_t> g_h2d_bytes{0};
 std::atomic<std::size_t> g_d2h_bytes{0};
+std::atomic<std::size_t> g_h2d_misc_calls{0};
+std::atomic<std::size_t> g_d2h_misc_calls{0};
+std::atomic<std::size_t> g_h2d_misc_bytes{0};
+std::atomic<std::size_t> g_d2h_misc_bytes{0};
 
 bool env_enabled(const char* var) {
   const char* value = std::getenv(var);
@@ -45,6 +49,10 @@ void SyncStats::reset() {
   g_d2h_calls.store(0);
   g_h2d_bytes.store(0);
   g_d2h_bytes.store(0);
+  g_h2d_misc_calls.store(0);
+  g_d2h_misc_calls.store(0);
+  g_h2d_misc_bytes.store(0);
+  g_d2h_misc_bytes.store(0);
 }
 
 void SyncStats::record_h2d(std::size_t bytes) {
@@ -63,9 +71,29 @@ void SyncStats::record_d2h(std::size_t bytes) {
   g_d2h_bytes.fetch_add(bytes);
 }
 
+void SyncStats::record_h2d_misc(std::size_t bytes) {
+  if (!enabled() || bytes == 0) {
+    return;
+  }
+  g_h2d_misc_calls.fetch_add(1);
+  g_h2d_misc_bytes.fetch_add(bytes);
+}
+
+void SyncStats::record_d2h_misc(std::size_t bytes) {
+  if (!enabled() || bytes == 0) {
+    return;
+  }
+  g_d2h_misc_calls.fetch_add(1);
+  g_d2h_misc_bytes.fetch_add(bytes);
+}
+
 std::size_t SyncStats::h2d_calls() { return g_h2d_calls.load(); }
 std::size_t SyncStats::d2h_calls() { return g_d2h_calls.load(); }
 std::size_t SyncStats::h2d_bytes() { return g_h2d_bytes.load(); }
 std::size_t SyncStats::d2h_bytes() { return g_d2h_bytes.load(); }
+std::size_t SyncStats::h2d_misc_calls() { return g_h2d_misc_calls.load(); }
+std::size_t SyncStats::d2h_misc_calls() { return g_d2h_misc_calls.load(); }
+std::size_t SyncStats::h2d_misc_bytes() { return g_h2d_misc_bytes.load(); }
+std::size_t SyncStats::d2h_misc_bytes() { return g_d2h_misc_bytes.load(); }
 
 }  // namespace gpism

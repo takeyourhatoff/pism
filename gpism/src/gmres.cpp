@@ -11,6 +11,7 @@
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
 #include "gpism/linear_algebra.h"
+#include "gpism/sync_stats.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -320,9 +321,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
       workspace.V_v_host[static_cast<std::size_t>(i)] =
           Vi.component(1).device_data();
     }
+    SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
+                               sizeof(double*));
     cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
                static_cast<std::size_t>(count) * sizeof(double*),
                cudaMemcpyHostToDevice);
+    SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
+                               sizeof(double*));
     cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
                static_cast<std::size_t>(count) * sizeof(double*),
                cudaMemcpyHostToDevice);
@@ -355,6 +360,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
                  static_cast<std::size_t>(restart) * sizeof(double));
       cudaMemset(workspace.g_dev, 0,
                  static_cast<std::size_t>(restart + 1) * sizeof(double));
+      SyncStats::record_h2d_misc(sizeof(double));
       cudaMemcpy(workspace.g_dev, &beta, sizeof(double),
                  cudaMemcpyHostToDevice);
     }
@@ -408,9 +414,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
           workspace.V_v_host[static_cast<std::size_t>(i)] =
               Vi.component(1).device_data();
         }
+        SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
+                                   sizeof(double*));
         cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
                    static_cast<std::size_t>(count) * sizeof(double*),
                    cudaMemcpyHostToDevice);
+        SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
+                                   sizeof(double*));
         cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
                    static_cast<std::size_t>(count) * sizeof(double*),
                    cudaMemcpyHostToDevice);
@@ -419,6 +429,8 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
             w.component(0).stride(), w.component(1).stride(),
             w.component(0).device_data(), w.component(1).device_data(),
             workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
+        SyncStats::record_d2h_misc(static_cast<std::size_t>(count) *
+                                   sizeof(double));
         cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
                    static_cast<std::size_t>(count) * sizeof(double),
                    cudaMemcpyDeviceToHost);
@@ -509,6 +521,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
                       MPI_SUM, MPI_COMM_WORLD);
 #endif
       }
+      SyncStats::record_d2h_misc(sizeof(double));
       cudaMemcpyAsync(workspace.residual_host, workspace.h_next_dev,
                       sizeof(double), cudaMemcpyDeviceToHost);
       cudaStreamSynchronize(0);

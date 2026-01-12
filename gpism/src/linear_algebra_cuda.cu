@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "gpism/profile.h"
+#include "gpism/sync_stats.h"
 
 #include <cuda_runtime.h>
 
@@ -32,6 +33,7 @@ double* scalar_host_buffer() {
 
 double read_scalar(double* d_out) {
   double* h_out = scalar_host_buffer();
+  SyncStats::record_d2h_misc(sizeof(double));
   cudaMemcpyAsync(h_out, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   cudaStreamSynchronize(0);
   return *h_out;

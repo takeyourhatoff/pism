@@ -460,8 +460,8 @@
 
       * [x] restore device scalar buffers in GMRES workspace (H/cs/sn/g + h_next + inv_h_next)
       * [x] add device-only dot/scal helpers (no implicit D2H) in linear_algebra
-      * [x] add device Hessenberg/Givens update kernel (one thread) + residual update
-    * [ ] extend GPU sync audit to flag any H2D/D2H inside single-rank timestep loop
+    * [x] add device Hessenberg/Givens update kernel (one thread) + residual update
+    * [x] extend GPU sync audit to flag any H2D/D2H inside single-rank timestep loop
     * [x] Device-side convergence tracking
 
       * [x] keep residual/stop criteria on device
@@ -476,8 +476,8 @@
       * [ ] fallback: staged host Allreduce only at restart boundary
     * [ ] Validation + benchmarks
 
-      * [ ] add GMRES smoke variant that forces device GMRES path
-      * [ ] verify residual history monotone-ish and parity with host path
+      * [x] add GMRES smoke variant that forces device GMRES path
+      * [x] verify residual history monotone-ish and parity with host path
       * [ ] reprofile std-greenland (tuned + default configs)
       * [ ] keep only if kernel/CPU wall time improves (define threshold)
 * [ ] Mixed precision option (optional but high value)
@@ -688,6 +688,8 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Extended sync audit to report non-field H2D/D2H during GPU hot loops (strict mode optional).
+  * Added device-full GMRES smoke coverage (identity + scaled) with residual parity checks; full CUDA test suite passes (36/36).
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
