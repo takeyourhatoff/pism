@@ -1,3 +1,4 @@
+#include "gpism/field_sync.h"
 #include "gpism/ssa_solver.h"
 
 #include <cmath>
@@ -38,6 +39,11 @@ int main() {
     }
   }
 
+  gpism::sync_host_to_device(thk);
+  gpism::sync_host_to_device(topg);
+  gpism::sync_host_to_device(tauc);
+  gpism::sync_host_to_device(vel);
+
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
 
@@ -53,6 +59,8 @@ int main() {
 
   gpism::SSASolverResult result =
       solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel, options);
+
+  gpism::sync_device_to_host(vel);
 
   if (!result.converged) {
     std::cerr << "Picard solver did not converge for nontrivial case\n";
