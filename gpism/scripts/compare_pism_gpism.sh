@@ -9,6 +9,9 @@ GPISM_BIN="${GPISM_BIN:-${GPISM_ROOT}/build-cuda-mpi/gpism}"
 PISM_BIN="${PISM_BIN:-${PISM_ROOT}/build-pism/pism}"
 PISM_CONFIG="${PISM_CONFIG:-${PISM_ROOT}/build-pism/pism_config.nc}"
 YEARS="${YEARS:-4}"
+MIN_WALL="${MIN_WALL:-10}"
+SCALE_FACTOR="${SCALE_FACTOR:-4}"
+MAX_ITERS="${MAX_ITERS:-4}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
 
 default_input="${PISM_ROOT}/examples/std-greenland/pism_Greenland_5km_v1.1.nc"
@@ -63,29 +66,58 @@ print(dst)
 PY
 
 GPISM_CFG="${OUTDIR}/gpism_compare.cfg"
-cat > "${GPISM_CFG}" <<'EOF'
+
+write_gpism_cfg() {
+  local years="$1"
+  cat > "${GPISM_CFG}" <<EOF
 thermo.enabled=0
 thickness.evolve=0
 forcing.smb_constant=0
 ssa.tauc_default=2e5
+time.output_interval=${years}
 EOF
+}
 
-echo "Running gpism..."
+echo "Running gpism (target wall >= ${MIN_WALL}s)..."
 GPISM_LOG="${OUTDIR}/gpism_run.log"
-{ /usr/bin/time -f "gpism wall %e" "${GPISM_BIN}" \
-    -i "${INPUT}" -o "${OUTDIR}/gpism_compare.nc" -y "${YEARS}" \
-    -config_override "${GPISM_CFG}"; } 2>&1 | tee "${GPISM_LOG}"
+GPISM_WALL="${OUTDIR}/gpism_wall.txt"
+YEARS_ACTUAL="${YEARS}"
+for ((i=1; i<=MAX_ITERS; i++)); do
+  write_gpism_cfg "${YEARS_ACTUAL}"
+  { /usr/bin/time -f "%e" -o "${GPISM_WALL}" "${GPISM_BIN}" \
+      -i "${INPUT}" -o "${OUTDIR}/gpism_compare.nc" -y "${YEARS_ACTUAL}" \
+      -config_override "${GPISM_CFG}"; } 2>&1 | tee "${GPISM_LOG}"
+  wall=$(cat "${GPISM_WALL}")
+  echo "gpism wall ${wall}s (years=${YEARS_ACTUAL})"
+  if python3 - <<PY
+import sys
+wall=float("${wall}")
+min_wall=float("${MIN_WALL}")
+sys.exit(0 if wall >= min_wall else 1)
+PY
+  then
+    break
+  fi
+  YEARS_ACTUAL=$(python3 - <<PY
+years=float("${YEARS_ACTUAL}")
+factor=float("${SCALE_FACTOR}")
+print(f"{years*factor:g}")
+PY
+  )
+done
+
+echo "Using years=${YEARS_ACTUAL} for pism to match gpism runtime scale."
 
 echo "Running pism..."
 PISM_LOG="${OUTDIR}/pism_run.log"
 { /usr/bin/time -f "pism wall %e" "${PISM_BIN}" \
-    -bootstrap -i "${CAL_INPUT}" -o "${OUTDIR}/pism_compare.nc" -y "${YEARS}" \
+    -bootstrap -i "${CAL_INPUT}" -o "${OUTDIR}/pism_compare.nc" -y "${YEARS_ACTUAL}" \
     -config "${PISM_CONFIG}" -calendar 365_day \
     -surface given -stress_balance ssa -energy none -no_mass \
     -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
     -grid.recompute_longitude_and_latitude false \
     -extra_file "${OUTDIR}/pism_compare_extra.nc" \
-    -extra_vars usurf,uvel,vvel -extra_times yearly; } 2>&1 | tee "${PISM_LOG}"
+    -extra_vars usurf,uvel,vvel -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
 
 echo "Comparing outputs..."
 python3 - <<'PY'
