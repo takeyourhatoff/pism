@@ -35,27 +35,6 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            double inv_2dy, int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
                            int i_start, int i_end, int j_start, int j_end);
-void ssa_apply_residual_cuda(
-    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
-    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_out_u,
-    int stride_out_v, int stride_b_u, int stride_b_v, int stride_r_u,
-    int stride_r_v, const double* u, const double* v, const double* nu_u,
-    const double* nu_v, const double* beta_u, const double* beta_v,
-    const double* b_u, const double* b_v, double* out_u, double* out_v,
-    double* r_u, double* r_v, double inv_dx2, double inv_dy2, double inv_2dx,
-    double inv_2dy, int stride_mask_u, int stride_mask_v, const int* mask_u,
-    const int* mask_v, int has_bc);
-void ssa_apply_residual_region_cuda(
-    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
-    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_out_u,
-    int stride_out_v, int stride_b_u, int stride_b_v, int stride_r_u,
-    int stride_r_v, const double* u, const double* v, const double* nu_u,
-    const double* nu_v, const double* beta_u, const double* beta_v,
-    const double* b_u, const double* b_v, double* out_u, double* out_v,
-    double* r_u, double* r_v, double inv_dx2, double inv_dy2, double inv_2dx,
-    double inv_2dy, int stride_mask_u, int stride_mask_v, const int* mask_u,
-    const int* mask_v, int has_bc, int i_start, int i_end, int j_start,
-    int j_end);
 }  // namespace gpism
 #endif
 

@@ -24,6 +24,7 @@ io.async_output=1
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.
+Result: **reverted** (no clear win).
 
 ### Kernel mix (Nsight Systems `cuda_gpu_kern_sum`)
 

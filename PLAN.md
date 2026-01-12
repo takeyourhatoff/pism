@@ -14,6 +14,8 @@
 * Do not start work unless there is an explicit task for it in this plan.
 * If new work is needed, add a task (or sub-task) first, then execute it.
 * When a task is finished, immediately update its checkbox and the progress log.
+* For performance optimizations: benchmark before/after and keep the change only
+  if it improves metrics; otherwise revert and record the result.
 
 ## Milestone M0 — Repo + build + dev workflow (scaffold)
 
@@ -444,8 +446,9 @@
   * [x] boundary compute after halos arrive
 * [ ] Memory bandwidth optimization
 
-  * [x] fuse kernels where it matters (operator apply + coefficient loads)
-  * [x] minimize temporaries
+  * [ ] fuse kernels where it matters (operator apply + coefficient loads)
+  * [ ] minimize temporaries
+  * [x] revert fused apply+residual in MG if no perf win (benchmark first)
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -646,7 +649,7 @@
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
-  * Fused SSA apply + residual in multigrid `compute_residual` (CUDA kernel) to reduce extra residual kernel traffic; benchmarked with Nsight Systems (no clear win yet).
+  * Tried fusing SSA apply + residual in multigrid `compute_residual`, benchmarked, and reverted due to no clear win.
   * Ran std-greenland perf baselines (pre/post fuse) and recorded kernel mix + wall time deltas in `docs/performance.md`.
   * Added single-GPU scaling runs (1 vs 2 MPI ranks on one GPU) and a weak-scaling proxy (1 rank half-size vs 2 ranks full-size); documented limitations and timings.
   * Verified `gpism-timestep-io-smoke` passes with async output enabled by default.
