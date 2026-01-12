@@ -49,6 +49,8 @@ private:
   int cheby_estimate_iters_;
   double cheby_estimate_min_factor_;
   double cheby_estimate_max_factor_;
+  mutable std::vector<ChebyBounds> cheby_bounds_cache_;
+  mutable bool cheby_bounds_cached_ = false;
   const SSABoundaryCondition* bc_;
   const Context* context_;
 };

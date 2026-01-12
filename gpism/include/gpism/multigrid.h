@@ -37,6 +37,11 @@ struct MGLevel {
         corr(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()) {}
 };
 
+struct ChebyBounds {
+  double min = 0.0;
+  double max = 0.0;
+};
+
 class MultigridHierarchy {
 public:
   explicit MultigridHierarchy(const Grid2D& fine_grid, int min_size = 4);
@@ -71,6 +76,10 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                              int iterations, double lambda_min,
                              double lambda_max,
                              const SSABoundaryCondition* bc = nullptr);
+std::vector<ChebyBounds> estimate_cheby_bounds(
+    MultigridHierarchy& mg, double lambda_min, double lambda_max,
+    bool estimate, int estimate_iters, double min_factor, double max_factor,
+    const SSABoundaryCondition* bc = nullptr, const Context* context = nullptr);
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              int coarse_iters, double omega,
              MGSmoother smoother = MGSmoother::Jacobi,
@@ -79,6 +88,7 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              double cheby_estimate_min_factor = 0.1,
              double cheby_estimate_max_factor = 1.1,
              const SSABoundaryCondition* bc = nullptr,
-             const Context* context = nullptr);
+             const Context* context = nullptr,
+             const std::vector<ChebyBounds>* cheby_bounds = nullptr);
 
 }  // namespace gpism

@@ -312,11 +312,6 @@ double estimate_lambda_max(const Grid2D& grid, const FieldStag2D<double>& nuH,
   return lambda;
 }
 
-struct ChebyBounds {
-  double min = 0.0;
-  double max = 0.0;
-};
-
 ChebyBounds cheby_bounds_for_level(MGLevel& level, double lambda_min,
                                    double lambda_max, bool estimate,
                                    int estimate_iters, double min_factor,
@@ -339,6 +334,22 @@ ChebyBounds cheby_bounds_for_level(MGLevel& level, double lambda_min,
     return {lambda_min, lambda_max};
   }
   return {min_val, max_val};
+}
+
+std::vector<ChebyBounds> estimate_cheby_bounds_impl(
+    MultigridHierarchy& mg, double lambda_min, double lambda_max,
+    bool estimate, int estimate_iters, double min_factor, double max_factor,
+    const SSABoundaryCondition* bc, const Context* context) {
+  const int levels = mg.num_levels();
+  std::vector<ChebyBounds> bounds;
+  bounds.reserve(levels);
+  for (int level = 0; level < levels; ++level) {
+    bounds.push_back(
+        cheby_bounds_for_level(mg.level(level), lambda_min, lambda_max,
+                               estimate, estimate_iters, min_factor, max_factor,
+                               bc, context));
+  }
+  return bounds;
 }
 void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
                          const FieldStag2D<double>& beta,
@@ -376,6 +387,15 @@ void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
 }
 
 }  // namespace
+
+std::vector<ChebyBounds> estimate_cheby_bounds(
+    MultigridHierarchy& mg, double lambda_min, double lambda_max,
+    bool estimate, int estimate_iters, double min_factor, double max_factor,
+    const SSABoundaryCondition* bc, const Context* context) {
+  return estimate_cheby_bounds_impl(mg, lambda_min, lambda_max, estimate,
+                                    estimate_iters, min_factor, max_factor, bc,
+                                    context);
+}
 
 MultigridHierarchy::MultigridHierarchy(const Grid2D& fine_grid, int min_size) {
   const int gw = fine_grid.ghost_width();
@@ -1020,22 +1040,25 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              bool cheby_estimate, int cheby_estimate_iters,
              double cheby_estimate_min_factor,
              double cheby_estimate_max_factor,
-             const SSABoundaryCondition* bc, const Context* context) {
+             const SSABoundaryCondition* bc, const Context* context,
+             const std::vector<ChebyBounds>* cheby_bounds_in) {
   const int levels = mg.num_levels();
   if (levels == 0) {
     return;
   }
 
   std::vector<ChebyBounds> cheby_bounds;
+  const std::vector<ChebyBounds>* bounds_ptr = cheby_bounds_in;
   if (smoother == MGSmoother::Chebyshev) {
-    cheby_bounds.reserve(levels);
-    for (int level = 0; level < levels; ++level) {
-      cheby_bounds.push_back(
-          cheby_bounds_for_level(mg.level(level), cheby_lambda_min,
-                                 cheby_lambda_max, cheby_estimate,
-                                 cheby_estimate_iters,
-                                 cheby_estimate_min_factor,
-                                 cheby_estimate_max_factor, bc, context));
+    if (bounds_ptr && static_cast<int>(bounds_ptr->size()) == levels) {
+      // Use cached bounds.
+    } else {
+      cheby_bounds =
+          estimate_cheby_bounds(mg, cheby_lambda_min, cheby_lambda_max,
+                                cheby_estimate, cheby_estimate_iters,
+                                cheby_estimate_min_factor,
+                                cheby_estimate_max_factor, bc, context);
+      bounds_ptr = &cheby_bounds;
     }
   }
 
@@ -1044,7 +1067,7 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     MGLevel& coarse = mg.level(level + 1);
 
     if (smoother == MGSmoother::Chebyshev) {
-      const ChebyBounds bounds = cheby_bounds.at(level);
+      const ChebyBounds bounds = bounds_ptr->at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
                        pre_iters, bounds.min, bounds.max,
                        fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
@@ -1061,7 +1084,7 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
 
   MGLevel& coarsest = mg.level(levels - 1);
   if (smoother == MGSmoother::Chebyshev) {
-    const ChebyBounds bounds = cheby_bounds.at(levels - 1);
+    const ChebyBounds bounds = bounds_ptr->at(levels - 1);
     chebyshev_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
                      coarsest.u, coarse_iters, bounds.min, bounds.max,
                      coarsest.diag, coarsest.Ax, coarsest.r,
@@ -1078,7 +1101,7 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     prolong_stag(coarse.u, fine.corr);
     axpy(1.0, fine.corr, fine.u);
     if (smoother == MGSmoother::Chebyshev) {
-      const ChebyBounds bounds = cheby_bounds.at(level);
+      const ChebyBounds bounds = bounds_ptr->at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
                        post_iters, bounds.min, bounds.max,
                        fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
