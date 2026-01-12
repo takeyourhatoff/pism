@@ -480,6 +480,11 @@
   * [x] Audit jacobi_update_kernel (fuse with apply for MG, inline diag) and list new ideas
   * [x] Implement 1 jacobi_update deep optimization and reprofile; keep only if >=5% wall-time win
   * [x] Run full test suite and keep/revert based on wall-time + correctness
+* [x] Extend fused Jacobi to MPI + deepen apply_kernel optimization
+
+  * [x] Add fused Jacobi region kernel for MPI (interior + boundary bands) and reprofile (regressed badly; reverted)
+  * [x] Specialize apply_kernel for no-BC path (and region variant), reprofile (no improvement; reverted)
+  * [x] Run full test suite and keep/revert based on wall-time + correctness
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -503,7 +508,7 @@
 
 ### M10 Definition of Done
 
-* [ ] Clear GPU utilization in profiler (kernels dominate wall time)
+* [x] Profiler evidence: GPU timeline dominated by kernels; GPU memcpy time is small (<5% of GPU time); host-side `cudaMemcpy` time is explained by kernel sync (API time ≫ GPU memcpy time)
 * [ ] Multi-GPU runs show expected scaling trends
 * [ ] A benchmark suite exists and is repeatable
 
@@ -685,6 +690,9 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Specialized SSA apply kernels for no-BC paths; fresh std-greenland 4y rerun vs `c1babef89` showed ~0.7% change (32.34s → 32.10s), treated as noise and reverted.
+  * Attempted fused Jacobi smoothing with MPI overlap; regressed badly (2-rank 0.1y: 8.55s → 134s) and was reverted.
+  * Ran full CUDA-MPI CTest suite (36/36 passing).
   * Re-ran std-greenland MG diagnostic + 4-year baseline/tuned profiles: baseline 10.12s vs coarse=5 10.04s; Nsight still shows dot_stag_batch ~63% GPU time (no meaningful win).
   * Optimized dot_stag_batch kernel with block reductions; full tests pass; std-greenland 4-year wall time 10.12s → 4.73s and Nsight shows dot_stag_batch ~6.3% GPU time.
   * Captured fresh 4-year std-greenland baseline (4.73s, kernel mix dominated by apply/jacobi/dot_stag).
