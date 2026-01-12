@@ -55,6 +55,11 @@ No material change in transfer counts.
 Single-rank runs now stage output into a reusable host-side double buffer and
 write asynchronously. Multi-rank runs remain synchronous (NetCDF parallel).
 
+## Fused thickness update (flux + update)
+
+Goal: reduce temporaries by computing fluxes on the fly during the thickness
+update. Result: **reverted** (no measurable improvement; within noise).
+
 ## Scaling (single GPU proxy)
 
 **Strong scaling (same full dataset, single GPU):**

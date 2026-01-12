@@ -92,6 +92,7 @@ __global__ void update_thickness_kernel(int mx, int my, int gw,
   thk[id] = updated;
 }
 
+
 __global__ void update_mask_kernel(int mx, int my, int gw, int stride_thk,
                                    int stride_mask, const double* thk,
                                    int* mask) {

@@ -449,6 +449,7 @@
   * [ ] fuse kernels where it matters (operator apply + coefficient loads)
   * [ ] minimize temporaries
   * [x] revert fused apply+residual in MG if no perf win (benchmark first)
+  * [x] attempted fused thickness update (no win, reverted)
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -650,6 +651,7 @@
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
   * Tried fusing SSA apply + residual in multigrid `compute_residual`, benchmarked, and reverted due to no clear win.
+  * Tried a fused thickness update (compute fluxes + update in one pass), saw no improvement, and reverted.
   * Ran std-greenland perf baselines (pre/post fuse) and recorded kernel mix + wall time deltas in `docs/performance.md`.
   * Added single-GPU scaling runs (1 vs 2 MPI ranks on one GPU) and a weak-scaling proxy (1 rank half-size vs 2 ranks full-size); documented limitations and timings.
   * Verified `gpism-timestep-io-smoke` passes with async output enabled by default.
