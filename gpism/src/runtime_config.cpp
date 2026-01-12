@@ -64,8 +64,8 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.mg.enabled"] = "1";
   values_["ssa.mg.pre_iters"] = "2";
   values_["ssa.mg.post_iters"] = "2";
-  values_["ssa.mg.coarse_iters"] = "20";
-  values_["ssa.mg.omega"] = "0.8";
+  values_["ssa.mg.coarse_iters"] = "10";
+  values_["ssa.mg.omega"] = "1.0";
   values_["ssa.mg.min_size"] = "4";
   values_["ssa.tauc_default"] = "2e5";
   values_["ssa.tauc_floor"] = "0.0";

@@ -297,8 +297,9 @@
   * [x] extend diagnostic to print ||z|| and ||A z|| (and NaN/inf check) to localize blow-up
   * [x] compare diagnostic with/without BC values in MG preconditioner (N/A: BC fields missing in std-greenland)
   * [x] add optional tauc default/floor (config) and rerun MG diagnostic
-* [~] Tune MG parameters for SSA (pre/post/coarse iters, omega, min_size)
-* [~] Reprofile std-greenland with tuned MG params and compare kernel mix + iterations
+* [x] Tune MG parameters for SSA (pre/post/coarse iters, omega, min_size)
+* [x] Reprofile std-greenland with tuned MG params and compare kernel mix + iterations
+  * [x] run std-greenland MG parameter sweep (pre/post/coarse/omega) and pick best wall time
 * [x] Measure std-greenland wall time with/without tauc fallback to quantify MG impact
 
 ### M6 Definition of Done
@@ -638,6 +639,8 @@
   * Added `ssa.tauc_default`/`ssa.tauc_floor` config handling; std-greenland with tauc=100k yields beta≈1000, diag≈[1000,1045], and MG diagnostic improves (||r - A M^{-1} r||/||r||≈3.7e-4).
   * Timed std-greenland: baseline (tauc missing) wall=40.37s vs tauc=100k wall=1.38s (~29.3x speedup).
   * Set `ssa.tauc_default` to 2e5 Pa to match PISM constant default; added backlog item to implement PISM-style tauc derivation.
+  * Ran MG parameter sweep (pre/post/coarse/omega) on std-greenland; best wall ~0.96s with omega=1.0 and pre/post in [1..3], coarse in [5..20] (results in `/tmp/gpism_mg_sweep.csv`).
+  * Updated MG defaults to pre/post=2, coarse=10, omega=1.0 and reprofiled std-greenland: wall=1.05s, dot_stag_batch instances 4, apply/jacobi dominate.
 * 🧱 Blocked:
 
   * -
