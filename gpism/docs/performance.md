@@ -31,6 +31,37 @@ Scripts live in `gpism/scripts/benchmarks/`:
 See `gpism/scripts/benchmarks/README.md` for required inputs and environment
 variables.
 
+## Nsight Systems profile (std-greenland, single step)
+
+Command (single rank):
+
+```
+nsys profile --stats=true -t cuda,osrt,nvtx -o /tmp/gpism_stdgreenland_nsys \
+  gpism/build-cuda-mpi/gpism \
+  -i /home/ec2-user/pism/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+  -o /tmp/gpism_stdgreenland_out_nsys.nc \
+  -y 0.05 \
+  -config_override gpism/scripts/benchmarks/std_greenland_override.cfg
+```
+
+Wall time (same args, no profiler): **1.00 s** (`/usr/bin/time -p`).
+
+### CUDA summary highlights (`cuda_api_gpu_sum`)
+
+- CUDA API time dominated by `cudaHostAlloc`/`cudaFreeHost` (staging buffers).
+- GPU kernel time is small in this short run (total kernel time ~6.6 ms).
+
+Top kernels (`cuda_gpu_kern_sum`):
+
+- `apply_region_kernel`: 43.7%
+- `jacobi_update_kernel`: 14.7%
+- `dot_stag_kernel`: 12.5%
+- `dot_stag_batch_kernel`: 8.4%
+- `diff_norm1_stag_kernel`: 4.2%
+
+This run is **not yet kernel-dominated** at the wall-clock level; longer runs
+or reduced host allocations are required to satisfy the M10 DoD.
+
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.
