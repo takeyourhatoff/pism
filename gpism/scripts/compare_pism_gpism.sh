@@ -11,7 +11,7 @@ PISM_CONFIG="${PISM_CONFIG:-${PISM_ROOT}/build-pism/pism_config.nc}"
 YEARS="${YEARS:-4}"
 MIN_WALL="${MIN_WALL:-10}"
 SCALE_FACTOR="${SCALE_FACTOR:-4}"
-MAX_ITERS="${MAX_ITERS:-4}"
+MAX_ITERS="${MAX_ITERS:-5}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
 
 default_input="${PISM_ROOT}/examples/std-greenland/pism_Greenland_5km_v1.1.nc"
@@ -98,13 +98,27 @@ PY
   then
     break
   fi
-  YEARS_ACTUAL=$(python3 - <<PY
+  if (( i < MAX_ITERS )); then
+    YEARS_ACTUAL=$(python3 - <<PY
 years=float("${YEARS_ACTUAL}")
 factor=float("${SCALE_FACTOR}")
 print(f"{years*factor:g}")
 PY
-  )
+    )
+  fi
 done
+
+if python3 - <<PY
+import sys
+wall=float(open("${GPISM_WALL}").read().strip())
+min_wall=float("${MIN_WALL}")
+sys.exit(0 if wall >= min_wall else 1)
+PY
+then
+  :
+else
+  echo "WARNING: gpism wall ${wall}s did not reach target ${MIN_WALL}s; consider MAX_ITERS or SCALE_FACTOR." >&2
+fi
 
 echo "Using years=${YEARS_ACTUAL} for pism to match gpism runtime scale."
 
@@ -120,7 +134,7 @@ PISM_LOG="${OUTDIR}/pism_run.log"
     -extra_vars usurf,uvel,vvel -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
 
 echo "Comparing outputs..."
-python3 - <<'PY'
+python3 - <<PY
 import netCDF4 as nc
 import numpy as np
 
