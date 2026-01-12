@@ -114,17 +114,43 @@ __global__ void dot_stag_batch_kernel(int mx, int my, int gw, int stride_u,
                                       const double* w_v, const double** V_u,
                                       const double** V_v, int count,
                                       double* out) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (i >= mx || j >= my) {
-    return;
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  const bool active = (i < mx && j < my);
+  int iu = 0;
+  int iv = 0;
+  double wu = 0.0;
+  double wv = 0.0;
+  if (active) {
+    iu = idx(i, j, gw, stride_u);
+    iv = idx(i, j, gw, stride_v);
+    wu = w_u[iu];
+    wv = w_v[iv];
   }
-  const int iu = idx(i, j, gw, stride_u);
-  const int iv = idx(i, j, gw, stride_v);
-  const double wu = w_u[iu];
-  const double wv = w_v[iv];
+
+  extern __shared__ double sdata[];
+  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+  const int block_threads = blockDim.x * blockDim.y;
+
   for (int k = 0; k < count; ++k) {
-    atomicAdd(&out[k], wu * V_u[k][iu] + wv * V_v[k][iv]);
+    double val = 0.0;
+    if (active) {
+      val = wu * V_u[k][iu] + wv * V_v[k][iv];
+    }
+    sdata[tid] = val;
+    __syncthreads();
+
+    for (int s = block_threads / 2; s > 0; s >>= 1) {
+      if (tid < s) {
+        sdata[tid] += sdata[tid + s];
+      }
+      __syncthreads();
+    }
+
+    if (tid == 0) {
+      atomicAdd(&out[k], sdata[0]);
+    }
+    __syncthreads();
   }
 }
 
@@ -272,8 +298,11 @@ void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   cudaMemset(hij, 0, static_cast<std::size_t>(count) * sizeof(double));
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  dot_stag_batch_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, w_u,
-                                         w_v, V_u, V_v, count, hij);
+  const std::size_t shared_bytes =
+      static_cast<std::size_t>(block.x) * static_cast<std::size_t>(block.y) *
+      sizeof(double);
+  dot_stag_batch_kernel<<<grid, block, shared_bytes>>>(
+      mx, my, gw, stride_u, stride_v, w_u, w_v, V_u, V_v, count, hij);
   orthogonalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v,
                                              V_u, V_v, hij, count, w_u, w_v);
 }

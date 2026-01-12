@@ -451,6 +451,15 @@
   * [x] revert fused apply+residual in MG if no perf win (benchmark first)
   * [x] attempted fused thickness update (no win, reverted)
   * [x] audit high cudaMemcpy counts in long std-greenland run; eliminate unnecessary host transfers
+* [ ] Performance push (MG tuning → dot kernel optimization)
+
+  * [x] Capture fresh baselines (wall time + Nsight kernel mix) for std-greenland 4-year run
+  * [x] MG tuning to reduce GMRES iterations (run MG effectiveness diagnostic first)
+  * [x] Re-measure wall time + Nsight after MG tuning
+  * [x] Audit `dot_stag_batch_kernel` for optimization ideas (list 2–3 candidates)
+  * [x] Implement best dot-kernel optimization (block-level reduction or CUB) and validate tests
+  * [x] Re-measure wall time + Nsight after dot-kernel change
+  * [x] Decide keep/revert based on measurable wall-time improvement
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -656,6 +665,8 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Re-ran std-greenland MG diagnostic + 4-year baseline/tuned profiles: baseline 10.12s vs coarse=5 10.04s; Nsight still shows dot_stag_batch ~63% GPU time (no meaningful win).
+  * Optimized dot_stag_batch kernel with block reductions; full tests pass; std-greenland 4-year wall time 10.12s → 4.73s and Nsight shows dot_stag_batch ~6.3% GPU time.
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
