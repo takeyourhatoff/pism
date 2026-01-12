@@ -141,12 +141,6 @@ Notes:
   appear (`gmres_update_hessenberg_kernel`, `scal_device_kernel`). MemOp counts
   were slightly higher (D2H 111 → 121; H2D 46 → 61) in this short profile.
 
-Same run length using the **tuned 4‑year config** (max_picard=1, gmres_max_iter=60,
-dt=0.05, output interval=4.0):
-
-- **Baseline:** 10.13 s
-- **Device-inner:** 10.11 s (**no meaningful change**)
-
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.
