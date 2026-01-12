@@ -38,6 +38,10 @@ struct SSASolverOptions {
   MGSmoother mg_smoother = MGSmoother::Jacobi;
   double mg_cheby_lambda_min = 0.1;
   double mg_cheby_lambda_max = 2.0;
+  bool mg_cheby_estimate = false;
+  int mg_cheby_estimate_iters = 5;
+  double mg_cheby_estimate_min_factor = 0.1;
+  double mg_cheby_estimate_max_factor = 1.1;
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
 

@@ -466,6 +466,10 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                       options.mg_coarse_iters, options.mg_omega,
                       options.mg_smoother, options.mg_cheby_lambda_min,
                       options.mg_cheby_lambda_max,
+                      options.mg_cheby_estimate,
+                      options.mg_cheby_estimate_iters,
+                      options.mg_cheby_estimate_min_factor,
+                      options.mg_cheby_estimate_max_factor,
                       options.use_bc ? &bc : nullptr, context);
       precond_ptr = &(*precond);
       if (options.mg_diagnostic && iter == 0) {
@@ -493,6 +497,20 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                     << " levels=" << mg.num_levels()
                     << " device_path=" << (mg_cuda ? "cuda" : "host")
                     << '\n';
+          if (options.mg_smoother == MGSmoother::Chebyshev) {
+            std::cout << "MG smoother: chebyshev"
+                      << " lambda_min=" << options.mg_cheby_lambda_min
+                      << " lambda_max=" << options.mg_cheby_lambda_max
+                      << " estimate=" << (options.mg_cheby_estimate ? "on" : "off")
+                      << " estimate_iters=" << options.mg_cheby_estimate_iters
+                      << " estimate_min_factor="
+                      << options.mg_cheby_estimate_min_factor
+                      << " estimate_max_factor="
+                      << options.mg_cheby_estimate_max_factor
+                      << '\n';
+          } else {
+            std::cout << "MG smoother: jacobi\n";
+          }
           std::cout << "MG fine-level stats: nuH[min,max]=[" << nuH_min << ", "
                     << nuH_max << "] beta[min,max]=[" << beta_min << ", "
                     << beta_max << "] diag[min,max]=[" << diag_min << ", "

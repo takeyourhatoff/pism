@@ -260,6 +260,14 @@ int main(int argc, char** argv) {
         config.get_double("ssa.mg.chebyshev.lambda_min");
     ssa_options.mg_cheby_lambda_max =
         config.get_double("ssa.mg.chebyshev.lambda_max");
+    ssa_options.mg_cheby_estimate =
+        config.get_bool("ssa.mg.chebyshev.estimate");
+    ssa_options.mg_cheby_estimate_iters =
+        config.get_int("ssa.mg.chebyshev.estimate_iters");
+    ssa_options.mg_cheby_estimate_min_factor =
+        config.get_double("ssa.mg.chebyshev.estimate_min_factor");
+    ssa_options.mg_cheby_estimate_max_factor =
+        config.get_double("ssa.mg.chebyshev.estimate_max_factor");
     ssa_options.mg_diagnostic = config.get_bool("ssa.mg.diagnostic");
     ssa_options.gmres_precond_diagnostic =
         config.get_bool("ssa.gmres.precond_diagnostic");
