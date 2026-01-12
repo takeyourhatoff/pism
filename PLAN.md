@@ -451,6 +451,7 @@
   * [x] revert fused apply+residual in MG if no perf win (benchmark first)
   * [x] attempted fused thickness update (no win, reverted)
   * [x] audit high cudaMemcpy counts in long std-greenland run; eliminate unnecessary host transfers
+  * [x] attempted device-side GMRES Hessenberg update to cut syncs (regressed; reverted)
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -660,6 +661,7 @@
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
   * Skipped halo exchange on single-rank MPI runs, cutting std-greenland 4-year wall time from ~26.4s to ~10.1s and reducing memcopy volume to ~17MB.
+  * Tried a device-side GMRES Hessenberg update to reduce syncs; it increased iterations (no early exit) and slowed the 4-year run, so reverted.
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
   * Tried fusing SSA apply + residual in multigrid `compute_residual`, benchmarked, and reverted due to no clear win.
