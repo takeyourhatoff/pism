@@ -11,7 +11,6 @@
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
 #include "gpism/linear_algebra.h"
-#include "gpism/sync_stats.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -22,12 +21,6 @@ namespace gpism {
 void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                              double* w_u, double* w_v, const double** V_u,
                              const double** V_v, int count, double* hij);
-void gmres_update_hessenberg_cuda(int restart, int j, const double* hij,
-                                  const double* h_next_sq, double* H,
-                                  double* cs, double* sn, double* g,
-                                  double* inv_h_next);
-void gmres_backsolve_cuda(int restart, int k, const double* H, const double* g,
-                          double* y);
 }  // namespace gpism
 #endif
 
@@ -57,17 +50,8 @@ struct GMRESWorkspace {
   const double** V_u_dev = nullptr;
   const double** V_v_dev = nullptr;
   double* hij_dev = nullptr;
-  double* H_dev = nullptr;
-  double* cs_dev = nullptr;
-  double* sn_dev = nullptr;
-  double* g_dev = nullptr;
-  double* h_next_dev = nullptr;
-  double* inv_h_next_dev = nullptr;
-  double* y_dev = nullptr;
-  double* residual_host = nullptr;
   int hij_cap = 0;
   int ptr_cap = 0;
-  int gmres_dev_cap = 0;
 #endif
 
   void ensure(const FieldStag2D<double>& ref, int restart) {
@@ -155,36 +139,6 @@ struct GMRESWorkspace {
                    static_cast<std::size_t>(needed) * sizeof(double));
         hij_cap = needed;
       }
-      if (gmres_dev_cap < restart) {
-        if (H_dev) {
-          cudaFree(H_dev);
-          cudaFree(cs_dev);
-          cudaFree(sn_dev);
-          cudaFree(g_dev);
-          cudaFree(h_next_dev);
-          cudaFree(inv_h_next_dev);
-          cudaFree(y_dev);
-        }
-        const std::size_t hsize =
-            static_cast<std::size_t>(restart + 1) *
-            static_cast<std::size_t>(restart);
-        cudaMalloc(reinterpret_cast<void**>(&H_dev), hsize * sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&cs_dev),
-                   static_cast<std::size_t>(restart) * sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&sn_dev),
-                   static_cast<std::size_t>(restart) * sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&g_dev),
-                   static_cast<std::size_t>(restart + 1) * sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&h_next_dev), sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&inv_h_next_dev), sizeof(double));
-        cudaMalloc(reinterpret_cast<void**>(&y_dev),
-                   static_cast<std::size_t>(restart) * sizeof(double));
-        gmres_dev_cap = restart;
-      }
-      if (!residual_host) {
-        cudaHostAlloc(reinterpret_cast<void**>(&residual_host), sizeof(double),
-                      cudaHostAllocDefault);
-      }
     }
 #endif
   }
@@ -260,15 +214,6 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   FieldStag2D<double>& r = workspace.r;
   FieldStag2D<double>& z = workspace.z;
   FieldStag2D<double>& w = workspace.w;
-  const bool mpi_enabled = options.context && options.context->mpi_enabled();
-#if GPISM_HAVE_CUDA
-  const bool cuda_aware = mpi_enabled && options.context->cuda_aware_mpi();
-#else
-  const bool cuda_aware = false;
-#endif
-  const bool device_full =
-      options.device_full && (!mpi_enabled || cuda_aware) &&
-      w.component(0).has_device_data() && w.component(1).has_device_data();
 
   op.apply(x, Ax);
   copy(b, r);
@@ -311,29 +256,6 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
   auto& V = workspace.V;
 
-#if GPISM_HAVE_CUDA
-  if (device_full) {
-    const int count = restart + 1;
-    for (int i = 0; i < count; ++i) {
-      const auto& Vi = *V[static_cast<std::size_t>(i)];
-      workspace.V_u_host[static_cast<std::size_t>(i)] =
-          Vi.component(0).device_data();
-      workspace.V_v_host[static_cast<std::size_t>(i)] =
-          Vi.component(1).device_data();
-    }
-    SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
-                               sizeof(double*));
-    cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
-               static_cast<std::size_t>(count) * sizeof(double*),
-               cudaMemcpyHostToDevice);
-    SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
-                               sizeof(double*));
-    cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
-               static_cast<std::size_t>(count) * sizeof(double*),
-               cudaMemcpyHostToDevice);
-  }
-#endif
-
   int total_iter = 0;
   while (total_iter < max_iter) {
     auto& H = workspace.H;
@@ -351,58 +273,12 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     copy(z, *V[0]);
     scal(1.0 / beta, *V[0]);
 
-#if GPISM_HAVE_CUDA
-    if (device_full) {
-      cudaMemset(workspace.H_dev, 0, hsize * sizeof(double));
-      cudaMemset(workspace.cs_dev, 0,
-                 static_cast<std::size_t>(restart) * sizeof(double));
-      cudaMemset(workspace.sn_dev, 0,
-                 static_cast<std::size_t>(restart) * sizeof(double));
-      cudaMemset(workspace.g_dev, 0,
-                 static_cast<std::size_t>(restart + 1) * sizeof(double));
-      SyncStats::record_h2d_misc(sizeof(double));
-      cudaMemcpy(workspace.g_dev, &beta, sizeof(double),
-                 cudaMemcpyHostToDevice);
-    }
-#endif
-
     int inner_iters = 0;
     for (int j = 0; j < restart && total_iter < max_iter; ++j) {
       op.apply(*V[static_cast<std::size_t>(j)], Ax);
       M->apply(Ax, w);
 
 #if GPISM_HAVE_CUDA
-      if (device_full) {
-        const int count = j + 1;
-        orthogonalize_stag_cuda(
-            w.local_mx(), w.local_my(), w.ghost_width(),
-            w.component(0).stride(), w.component(1).stride(),
-            w.component(0).device_data(), w.component(1).device_data(),
-            workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
-        if (mpi_enabled && cuda_aware) {
-#if GPISM_HAVE_MPI
-          MPI_Allreduce(MPI_IN_PLACE, workspace.hij_dev, count, MPI_DOUBLE,
-                        MPI_SUM, MPI_COMM_WORLD);
-#endif
-        }
-        dot_device(w, w, workspace.h_next_dev);
-        if (mpi_enabled && cuda_aware) {
-#if GPISM_HAVE_MPI
-          MPI_Allreduce(MPI_IN_PLACE, workspace.h_next_dev, 1, MPI_DOUBLE,
-                        MPI_SUM, MPI_COMM_WORLD);
-#endif
-        }
-        gmres_update_hessenberg_cuda(
-            restart, j, workspace.hij_dev, workspace.h_next_dev,
-            workspace.H_dev, workspace.cs_dev, workspace.sn_dev,
-            workspace.g_dev, workspace.inv_h_next_dev);
-        copy(w, *V[static_cast<std::size_t>(j + 1)]);
-        scal_device(*V[static_cast<std::size_t>(j + 1)],
-                    workspace.inv_h_next_dev);
-        ++total_iter;
-        ++inner_iters;
-        continue;
-      }
       bool gpu_ortho = w.component(0).has_device_data() &&
                        w.component(1).has_device_data();
       if (gpu_ortho) {
@@ -414,13 +290,9 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
           workspace.V_v_host[static_cast<std::size_t>(i)] =
               Vi.component(1).device_data();
         }
-        SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
-                                   sizeof(double*));
         cudaMemcpy(workspace.V_u_dev, workspace.V_u_host.data(),
                    static_cast<std::size_t>(count) * sizeof(double*),
                    cudaMemcpyHostToDevice);
-        SyncStats::record_h2d_misc(static_cast<std::size_t>(count) *
-                                   sizeof(double*));
         cudaMemcpy(workspace.V_v_dev, workspace.V_v_host.data(),
                    static_cast<std::size_t>(count) * sizeof(double*),
                    cudaMemcpyHostToDevice);
@@ -429,8 +301,6 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
             w.component(0).stride(), w.component(1).stride(),
             w.component(0).device_data(), w.component(1).device_data(),
             workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
-        SyncStats::record_d2h_misc(static_cast<std::size_t>(count) *
-                                   sizeof(double));
         cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
                    static_cast<std::size_t>(count) * sizeof(double),
                    cudaMemcpyDeviceToHost);
@@ -500,40 +370,6 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     }
 
     const int k = inner_iters;
-#if GPISM_HAVE_CUDA
-    if (device_full) {
-      if (k > 0) {
-        gmres_backsolve_cuda(restart, k, workspace.H_dev, workspace.g_dev,
-                             workspace.y_dev);
-        for (int i = 0; i < k; ++i) {
-          axpy_device(workspace.y_dev + i, *V[static_cast<std::size_t>(i)], x);
-        }
-      }
-
-      op.apply(x, Ax);
-      copy(b, r);
-      axpy(-1.0, Ax, r);
-      M->apply(r, z);
-      dot_device(z, z, workspace.h_next_dev);
-      if (mpi_enabled && cuda_aware) {
-#if GPISM_HAVE_MPI
-        MPI_Allreduce(MPI_IN_PLACE, workspace.h_next_dev, 1, MPI_DOUBLE,
-                      MPI_SUM, MPI_COMM_WORLD);
-#endif
-      }
-      SyncStats::record_d2h_misc(sizeof(double));
-      cudaMemcpyAsync(workspace.residual_host, workspace.h_next_dev,
-                      sizeof(double), cudaMemcpyDeviceToHost);
-      cudaStreamSynchronize(0);
-      beta = std::sqrt(*workspace.residual_host);
-      result.residual = beta;
-      result.residuals.push_back(result.residual);
-      if (result.residual <= options.tol) {
-        break;
-      }
-      continue;
-    }
-#endif
     auto& y = workspace.y;
     if (y.size() < static_cast<std::size_t>(k)) {
       y.resize(static_cast<std::size_t>(k));

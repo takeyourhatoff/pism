@@ -246,8 +246,6 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
-    ssa_options.gmres_device_full =
-        config.get_bool("ssa.gmres.device_full");
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
     ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
     ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");

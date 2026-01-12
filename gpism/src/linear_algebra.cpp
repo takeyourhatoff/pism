@@ -17,9 +17,6 @@ double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
 double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                      const double* a_u, const double* a_v,
                      const double* b_u, const double* b_v);
-void dot_stag_device_cuda(int mx, int my, int gw, int stride_u, int stride_v,
-                          const double* a_u, const double* a_v,
-                          const double* b_u, const double* b_v, double* out);
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a);
 double norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                        const double* a_u, const double* a_v);
@@ -28,10 +25,6 @@ double diff_norm1_cuda(int mx, int my, int gw, int stride_a, int stride_b,
 double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                             const double* a_u, const double* a_v,
                             const double* b_u, const double* b_v);
-void scal_device_cuda(int mx, int my, int gw, int stride, double* x,
-                      const double* alpha_dev);
-void axpy_device_cuda(int mx, int my, int gw, int stride_x, int stride_y,
-                      const double* x, double* y, const double* alpha_dev);
 }  // namespace gpism
 #endif
 
@@ -228,71 +221,6 @@ double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
 #endif
   return diff_norm1_field_host(a.component(0), b.component(0)) +
          diff_norm1_field_host(a.component(1), b.component(1));
-}
-
-bool dot_device(const FieldStag2D<double>& a, const FieldStag2D<double>& b,
-                double* out_dev) {
-#if GPISM_HAVE_CUDA
-  if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
-      b.component(0).has_device_data() && b.component(1).has_device_data() &&
-      out_dev != nullptr) {
-    dot_stag_device_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
-                         a.component(0).stride(), a.component(1).stride(),
-                         a.component(0).device_data(),
-                         a.component(1).device_data(),
-                         b.component(0).device_data(),
-                         b.component(1).device_data(), out_dev);
-    return true;
-  }
-#else
-  (void)a;
-  (void)b;
-  (void)out_dev;
-#endif
-  return false;
-}
-
-bool scal_device(FieldStag2D<double>& x, const double* alpha_dev) {
-#if GPISM_HAVE_CUDA
-  if (x.component(0).has_device_data() && x.component(1).has_device_data() &&
-      alpha_dev != nullptr) {
-    scal_device_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-                     x.component(0).stride(), x.component(0).device_data(),
-                     alpha_dev);
-    scal_device_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-                     x.component(1).stride(), x.component(1).device_data(),
-                     alpha_dev);
-    return true;
-  }
-#else
-  (void)x;
-  (void)alpha_dev;
-#endif
-  return false;
-}
-
-bool axpy_device(const double* alpha_dev, const FieldStag2D<double>& x,
-                 FieldStag2D<double>& y) {
-#if GPISM_HAVE_CUDA
-  if (x.component(0).has_device_data() && x.component(1).has_device_data() &&
-      y.component(0).has_device_data() && y.component(1).has_device_data() &&
-      alpha_dev != nullptr) {
-    axpy_device_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-                     x.component(0).stride(), y.component(0).stride(),
-                     x.component(0).device_data(), y.component(0).device_data(),
-                     alpha_dev);
-    axpy_device_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-                     x.component(1).stride(), y.component(1).stride(),
-                     x.component(1).device_data(), y.component(1).device_data(),
-                     alpha_dev);
-    return true;
-  }
-#else
-  (void)alpha_dev;
-  (void)x;
-  (void)y;
-#endif
-  return false;
 }
 
 }  // namespace gpism

@@ -3,7 +3,6 @@
 #include <cmath>
 
 #include "gpism/profile.h"
-#include "gpism/sync_stats.h"
 
 #include <cuda_runtime.h>
 
@@ -33,7 +32,6 @@ double* scalar_host_buffer() {
 
 double read_scalar(double* d_out) {
   double* h_out = scalar_host_buffer();
-  SyncStats::record_d2h_misc(sizeof(double));
   cudaMemcpyAsync(h_out, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   cudaStreamSynchronize(0);
   return *h_out;
@@ -51,19 +49,6 @@ __global__ void axpy_kernel(int mx, int my, int gw, int stride_x, int stride_y,
   y[iy] += alpha * x[ix];
 }
 
-__global__ void axpy_device_kernel(int mx, int my, int gw, int stride_x,
-                                   int stride_y, const double* x, double* y,
-                                   const double* alpha) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (i >= mx || j >= my) {
-    return;
-  }
-  const int ix = idx(i, j, gw, stride_x);
-  const int iy = idx(i, j, gw, stride_y);
-  y[iy] += (*alpha) * x[ix];
-}
-
 __global__ void scal_kernel(int mx, int my, int gw, int stride, double* x,
                             double alpha) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -73,18 +58,6 @@ __global__ void scal_kernel(int mx, int my, int gw, int stride, double* x,
   }
   const int ix = idx(i, j, gw, stride);
   x[ix] *= alpha;
-}
-
-__global__ void scal_device_kernel(int mx, int my, int gw, int stride, double* x,
-                                   const double* alpha) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (i >= mx || j >= my) {
-    return;
-  }
-  const int ix = idx(i, j, gw, stride);
-  const double a = *alpha;
-  x[ix] *= a;
 }
 
 __global__ void copy_kernel(int mx, int my, int gw, int stride_x, int stride_y,
@@ -229,88 +202,6 @@ __global__ void orthogonalize_stag_kernel(int mx, int my, int gw, int stride_u,
   w_v[iv] = wv;
 }
 
-__device__ inline void apply_givens_dev(double c, double s, double& v0,
-                                        double& v1) {
-  const double temp = c * v0 + s * v1;
-  v1 = -s * v0 + c * v1;
-  v0 = temp;
-}
-
-__device__ inline void compute_givens_dev(double a, double b, double& c,
-                                          double& s) {
-  if (b == 0.0) {
-    c = 1.0;
-    s = 0.0;
-    return;
-  }
-  if (fabs(b) > fabs(a)) {
-    const double tau = -a / b;
-    s = 1.0 / sqrt(1.0 + tau * tau);
-    c = s * tau;
-  } else {
-    const double tau = -b / a;
-    c = 1.0 / sqrt(1.0 + tau * tau);
-    s = c * tau;
-  }
-}
-
-__global__ void gmres_update_hessenberg_kernel(
-    int restart, int j, const double* hij, const double* h_next_sq, double* H,
-    double* cs, double* sn, double* g, double* inv_h_next) {
-  if (blockIdx.x != 0 || threadIdx.x != 0) {
-    return;
-  }
-  const int stride = restart + 1;
-  for (int i = 0; i <= j; ++i) {
-    H[i + stride * j] = hij[i];
-  }
-  const double h_next = sqrt(h_next_sq[0]);
-  H[j + 1 + stride * j] = h_next;
-  inv_h_next[0] = (h_next != 0.0) ? (1.0 / h_next) : 0.0;
-
-  for (int i = 0; i < j; ++i) {
-    double& h0 = H[i + stride * j];
-    double& h1 = H[i + 1 + stride * j];
-    apply_givens_dev(cs[i], sn[i], h0, h1);
-  }
-
-  double h00 = H[j + stride * j];
-  double h10 = H[j + 1 + stride * j];
-  double c = 1.0;
-  double s = 0.0;
-  compute_givens_dev(h00, h10, c, s);
-  cs[j] = c;
-  sn[j] = s;
-  apply_givens_dev(c, s, h00, h10);
-  H[j + stride * j] = h00;
-  H[j + 1 + stride * j] = h10;
-
-  double g0 = g[j];
-  double g1 = g[j + 1];
-  apply_givens_dev(c, s, g0, g1);
-  g[j] = g0;
-  g[j + 1] = g1;
-}
-
-__global__ void gmres_backsolve_kernel(int restart, int k, const double* H,
-                                       const double* g, double* y) {
-  if (blockIdx.x != 0 || threadIdx.x != 0) {
-    return;
-  }
-  const int stride = restart + 1;
-  for (int i = 0; i < k; ++i) {
-    y[i] = 0.0;
-  }
-  for (int i = k - 1; i >= 0; --i) {
-    double sum = g[i];
-    for (int j = i + 1; j < k; ++j) {
-      sum -= H[i + stride * j] * y[j];
-    }
-    const double h_ii = H[i + stride * i];
-    y[i] = (h_ii == 0.0) ? 0.0 : (sum / h_ii);
-  }
-}
-
 }  // namespace
 
 void axpy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
@@ -321,28 +212,11 @@ void axpy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
   axpy_kernel<<<grid, block>>>(mx, my, gw, stride_x, stride_y, x, y, alpha);
 }
 
-void axpy_device_cuda(int mx, int my, int gw, int stride_x, int stride_y,
-                      const double* x, double* y, const double* alpha_dev) {
-  CudaEventTimer timer("la_axpy_dev");
-  dim3 block(16, 16);
-  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  axpy_device_kernel<<<grid, block>>>(mx, my, gw, stride_x, stride_y, x, y,
-                                      alpha_dev);
-}
-
 void scal_cuda(int mx, int my, int gw, int stride, double* x, double alpha) {
   CudaEventTimer timer("la_scal");
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   scal_kernel<<<grid, block>>>(mx, my, gw, stride, x, alpha);
-}
-
-void scal_device_cuda(int mx, int my, int gw, int stride, double* x,
-                      const double* alpha_dev) {
-  CudaEventTimer timer("la_scal_dev");
-  dim3 block(16, 16);
-  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  scal_device_kernel<<<grid, block>>>(mx, my, gw, stride, x, alpha_dev);
 }
 
 void copy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
@@ -388,18 +262,6 @@ double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
   return read_scalar(d_out);
 }
 
-void dot_stag_device_cuda(int mx, int my, int gw, int stride_u, int stride_v,
-                          const double* a_u, const double* a_v,
-                          const double* b_u, const double* b_v, double* out) {
-  CudaEventTimer timer("la_dot_stag_dev");
-  cudaMemset(out, 0, sizeof(double));
-
-  dim3 block(16, 16);
-  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
-                                   b_u, b_v, out);
-}
-
 void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                              double* w_u, double* w_v, const double** V_u,
                              const double** V_v, int count, double* hij) {
@@ -414,20 +276,6 @@ void orthogonalize_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                          w_v, V_u, V_v, count, hij);
   orthogonalize_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v,
                                              V_u, V_v, hij, count, w_u, w_v);
-}
-
-void gmres_update_hessenberg_cuda(
-    int restart, int j, const double* hij, const double* h_next_sq, double* H,
-    double* cs, double* sn, double* g, double* inv_h_next) {
-  CudaEventTimer timer("gmres_hessenberg");
-  gmres_update_hessenberg_kernel<<<1, 1>>>(restart, j, hij, h_next_sq, H, cs, sn,
-                                           g, inv_h_next);
-}
-
-void gmres_backsolve_cuda(int restart, int k, const double* H,
-                          const double* g, double* y) {
-  CudaEventTimer timer("gmres_backsolve");
-  gmres_backsolve_kernel<<<1, 1>>>(restart, k, H, g, y);
 }
 
 double norm1_cuda(int mx, int my, int gw, int stride, const double* a) {

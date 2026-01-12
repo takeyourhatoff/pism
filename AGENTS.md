@@ -50,3 +50,9 @@ make manual_html
 - PRs should include a clear description, tests run, and relevant docs updates.
 - Update `CHANGES.rst` for user-facing changes or bug fixes.
 - Allow edits from maintainers on the PR branch (per `CONTRIBUTING.rst`).
+
+## Lessons Learned (Perf & Profiling)
+- Never rely on stale profiling results; reprofile before making performance claims.
+- Distinguish kernel time from wall time and OS wait time; report all three.
+- Record the exact profiling command and timestamp in `docs/performance.md`.
+- If results are unclear, say so and gather fresh data instead of speculating.

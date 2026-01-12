@@ -9,7 +9,6 @@
 #include "gpism/viscosity.h"
 
 #include <cmath>
-#include <cstdlib>
 #include <iostream>
 #include <utility>
 
@@ -121,17 +120,6 @@ int main() {
     std::cerr << "unexpected field syncs during hot loop (h2d=" << h2d_calls
               << ", d2h=" << d2h_calls << ")\n";
     return 1;
-  }
-  const std::size_t h2d_misc = gpism::SyncStats::h2d_misc_calls();
-  const std::size_t d2h_misc = gpism::SyncStats::d2h_misc_calls();
-  if (h2d_misc != 0 || d2h_misc != 0) {
-    std::cerr << "non-field device transfers during hot loop (h2d_misc="
-              << h2d_misc << ", d2h_misc=" << d2h_misc
-              << ", h2d_bytes=" << gpism::SyncStats::h2d_misc_bytes()
-              << ", d2h_bytes=" << gpism::SyncStats::d2h_misc_bytes() << ")\n";
-    if (std::getenv("GPISM_SYNC_AUDIT_STRICT")) {
-      return 1;
-    }
   }
   gpism::SyncStats::enable(false);
 

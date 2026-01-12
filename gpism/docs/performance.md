@@ -175,7 +175,4 @@ update. Result: **reverted** (no measurable improvement; within noise).
 - This host has **one GPU**, so multi-GPU scaling is not yet measured.
 - Two MPI ranks share a single GPU, which is expected to be slower; treat these
   numbers as **MPI overhead indicators**, not true multi-GPU scaling.
-- CUDA-aware MPI is auto-detected when MPI provides `MPIX_Query_cuda_support`.
-  Set `GPISM_CUDA_AWARE_MPI=1` to force enable, or `GPISM_CUDA_AWARE_MPI=0` to
-  force host staging. `GPISM_CUDA_AWARE_MPI=0` was required to avoid hangs in
-  this environment.
+- `GPISM_CUDA_AWARE_MPI=0` was required to avoid hangs in this environment.

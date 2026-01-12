@@ -433,8 +433,6 @@
   * [x] timestep DAG runs on device: geometry → SSA solve → transport → thermodynamics → diagnostics (no CPU gridpoint loops)
   * [x] halo exchange uses device buffers when CUDA-aware MPI is available; otherwise only pinned staging buffers
   * [x] add MPI sync audit to confirm cuda-aware exchange avoids host staging (and non-aware path stages)
-  * [x] fix CUDA-aware MPI default/detection so non-aware stacks use host staging (run full test suite before commit)
-  * [x] stabilize CUDA/MPI smoke tests for device data paths (sync host/device, relax overly strict tolerances)
   * [x] batch GMRES orthogonalization reductions on device (keep H/g + Givens on host)
   * [x] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
@@ -453,33 +451,6 @@
   * [x] revert fused apply+residual in MG if no perf win (benchmark first)
   * [x] attempted fused thickness update (no win, reverted)
   * [x] audit high cudaMemcpy counts in long std-greenland run; eliminate unnecessary host transfers
-  * [x] attempted device-side GMRES Hessenberg update to cut syncs (regressed; reverted)
-  * [ ] Full device-side GMRES (no per-iter D2H syncs)
-
-    * [x] Reintroduce device-inner scaffolding
-
-      * [x] restore device scalar buffers in GMRES workspace (H/cs/sn/g + h_next + inv_h_next)
-      * [x] add device-only dot/scal helpers (no implicit D2H) in linear_algebra
-    * [x] add device Hessenberg/Givens update kernel (one thread) + residual update
-    * [x] extend GPU sync audit to flag any H2D/D2H inside single-rank timestep loop
-    * [x] Device-side convergence tracking
-
-      * [x] keep residual/stop criteria on device
-      * [x] only copy residual to host at restart boundary or final exit
-    * [x] Device-side small solve
-
-      * [x] implement device backsolve for upper Hessenberg (or device QR)
-      * [x] keep y on device and update x via device axpy
-    * [ ] MPI-aware reductions for device scalars
-
-      * [x] add cuda-aware MPI path for device scalar Allreduce (if enabled)
-      * [ ] fallback: staged host Allreduce only at restart boundary
-    * [ ] Validation + benchmarks
-
-      * [x] add GMRES smoke variant that forces device GMRES path
-      * [x] verify residual history monotone-ish and parity with host path
-      * [x] reprofile std-greenland (tuned + default configs)
-      * [ ] keep only if kernel/CPU wall time improves (define threshold)
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -679,23 +650,16 @@
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
-  * Fixed CUDA-aware MPI detection to default off unless explicitly enabled (or MPIX reports support), avoiding unsafe device buffers on non-aware stacks.
-  * Stabilized CUDA/MPI smoke tests by syncing device/host in nontrivial SSA Picard case and relaxing GMRES MPI tolerances/iteration checks; full CUDA suite passes (36/36).
-  * Implemented device-side GMRES scaffolding (device Hessenberg/Givens, backsolve, device axpy/dot/scal) behind `ssa.gmres.device_full`; full CUDA suite passes (36/36).
   * Added legacy `x1`/`y1` NetCDF dimension support in restart reader and a legacy-dims IO smoke test.
   * Ran a minimal gpism std-greenland step and documented the gpism quick-check command in `examples/std-greenland/README.md`.
   * Wired multigrid as a device-capable SSA GMRES preconditioner (GPU restrict/prolong/jacobi/residual kernels) and reprofiles show MG adds GPU work but does not reduce GMRES dot/orth counts yet.
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
-  * Extended sync audit to report non-field H2D/D2H during GPU hot loops (strict mode optional).
-  * Added device-full GMRES smoke coverage (identity + scaled) with residual parity checks; full CUDA test suite passes (36/36).
-  * Reprofiled std-greenland 4-year run: 10.13 s baseline, 10.12 s with `ssa.gmres.device_full=1` (no material change).
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
   * Skipped halo exchange on single-rank MPI runs, cutting std-greenland 4-year wall time from ~26.4s to ~10.1s and reducing memcopy volume to ~17MB.
-  * Tried a device-side GMRES Hessenberg update to reduce syncs; it increased iterations (no early exit) and slowed the 4-year run, so reverted.
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
   * Tried fusing SSA apply + residual in multigrid `compute_residual`, benchmarked, and reverted due to no clear win.

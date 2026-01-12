@@ -1,10 +1,8 @@
 #include "gpism/gmres.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
-#include <vector>
 
 #include "gpism/linear_algebra.h"
 #include "gpism/ssa_operator.h"
@@ -163,7 +161,6 @@ int main() {
     std::cerr << "GMRES scaled identity solve did not converge\n";
     return 1;
   }
-  const auto host_scaled_residuals = res.residuals;
 
   sync_device_to_host(x);
   for (int j = 0; j < my; ++j) {
@@ -182,60 +179,6 @@ int main() {
     return 1;
   }
 
-#if GPISM_HAVE_CUDA
-  gpism::set_device_enabled(true);
-  opts.device_full = true;
-  gpism::set(0.0, x);
-  res = gpism::gmres_solve(I, b, x, opts);
-  if (!res.converged) {
-    std::cerr << "GMRES device-full identity solve did not converge\n";
-    return 1;
-  }
-  sync_device_to_host(x);
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      expected(i, j, 0) = b(i, j, 0);
-      expected(i, j, 1) = b(i, j, 1);
-    }
-  }
-  if (!check_solution(x, expected, "identity-device-full")) {
-    return 1;
-  }
-  if (res.residuals.size() < 2 ||
-      res.residuals.back() > res.residuals.front()) {
-    std::cerr << "GMRES device-full residual history did not decrease\n";
-    return 1;
-  }
-
-  gpism::set(0.0, x);
-  res = gpism::gmres_solve(A, b, x, opts);
-  if (!res.converged) {
-    std::cerr << "GMRES device-full scaled solve did not converge\n";
-    return 1;
-  }
-  sync_device_to_host(x);
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      expected(i, j, 0) = b(i, j, 0) / scale;
-      expected(i, j, 1) = b(i, j, 1) / scale;
-    }
-  }
-  if (!check_solution(x, expected, "scaled-device-full")) {
-    return 1;
-  }
-  if (!host_scaled_residuals.empty() && !res.residuals.empty()) {
-    const double host_final = host_scaled_residuals.back();
-    const double device_final = res.residuals.back();
-    if (!nearly_equal(host_final, device_final,
-                      1e-8 * std::max(1.0, host_final))) {
-      std::cerr << "GMRES device-full residual mismatch (host "
-                << host_final << " vs device " << device_final << ")\n";
-      return 1;
-    }
-  }
-#endif
-
-  opts.device_full = false;
   gpism::Grid2D grid(mx, my, 2.0, 3.0, gw, 0, 1);
   gpism::SSAOperator ssa(910.0, 9.81, 100.0);
 
