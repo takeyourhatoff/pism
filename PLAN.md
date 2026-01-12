@@ -449,6 +449,11 @@
   * [ ] 1 GPU strong scaling
   * [ ] multi-GPU weak scaling
   * [ ] write benchmark report in `docs/performance.md`
+* [x] Add Chebyshev smoother option for MG (device-capable)
+
+  * [x] add config switch for MG smoother selection
+  * [x] implement CUDA Chebyshev smoother (or reuse Jacobi kernel in Chebyshev loop)
+  * [x] tune Chebyshev params and reprofile std-greenland
 
 ### M10 Definition of Done
 
@@ -641,6 +646,7 @@
   * Set `ssa.tauc_default` to 2e5 Pa to match PISM constant default; added backlog item to implement PISM-style tauc derivation.
   * Ran MG parameter sweep (pre/post/coarse/omega) on std-greenland; best wall ~0.96s with omega=1.0 and pre/post in [1..3], coarse in [5..20] (results in `/tmp/gpism_mg_sweep.csv`).
   * Updated MG defaults to pre/post=2, coarse=10, omega=1.0 and reprofiled std-greenland: wall=1.05s, dot_stag_batch instances 4, apply/jacobi dominate.
+  * Added MG smoother config (`ssa.mg.smoother`) and CUDA Chebyshev smoother; Chebyshev sweep (`/tmp/gpism_cheby_sweep.csv`) shows best wall ~2.08s (still slower than Jacobi), so Jacobi remains default.
 * 🧱 Blocked:
 
   * -

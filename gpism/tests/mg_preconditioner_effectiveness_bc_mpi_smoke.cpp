@@ -177,7 +177,8 @@ Effectiveness measure_effectiveness(const gpism::Context& context,
     gpism::restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
   }
 
-  gpism::MultigridPreconditioner precond(mg, 2, 2, 10, 0.8, &bc, &context);
+  gpism::MultigridPreconditioner precond(
+      mg, 2, 2, 10, 0.8, gpism::MGSmoother::Jacobi, 0.1, 2.0, &bc, &context);
 
   gpism::FieldStag2D<double> x0(grid.local_mx(), grid.local_my(), gw);
   gpism::FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), gw);

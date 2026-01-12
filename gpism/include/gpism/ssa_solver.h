@@ -35,6 +35,9 @@ struct SSASolverOptions {
   int mg_coarse_iters = 10;
   double mg_omega = 0.8;
   int mg_min_size = 4;
+  MGSmoother mg_smoother = MGSmoother::Jacobi;
+  double mg_cheby_lambda_min = 0.1;
+  double mg_cheby_lambda_max = 2.0;
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
 

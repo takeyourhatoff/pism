@@ -10,11 +10,14 @@ namespace gpism {
 class Context;
 struct SSABoundaryCondition;
 
+enum class MGSmoother { Jacobi, Chebyshev };
+
 struct MGLevel {
   Grid2D grid;
   FieldStag2D<double> u;
   FieldStag2D<double> rhs;
   FieldStag2D<double> r;
+  FieldStag2D<double> z;
   FieldStag2D<double> nuH;
   FieldStag2D<double> beta;
   FieldStag2D<double> diag;
@@ -26,6 +29,7 @@ struct MGLevel {
         u(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         rhs(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         r(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        z(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         nuH(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         beta(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         diag(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
@@ -69,6 +73,8 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                              const SSABoundaryCondition* bc = nullptr);
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              int coarse_iters, double omega,
+             MGSmoother smoother = MGSmoother::Jacobi,
+             double cheby_lambda_min = 0.1, double cheby_lambda_max = 2.0,
              const SSABoundaryCondition* bc = nullptr,
              const Context* context = nullptr);
 

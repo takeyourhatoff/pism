@@ -67,6 +67,9 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.mg.coarse_iters"] = "10";
   values_["ssa.mg.omega"] = "1.0";
   values_["ssa.mg.min_size"] = "4";
+  values_["ssa.mg.smoother"] = "jacobi";
+  values_["ssa.mg.chebyshev.lambda_min"] = "0.1";
+  values_["ssa.mg.chebyshev.lambda_max"] = "2.0";
   values_["ssa.tauc_default"] = "2e5";
   values_["ssa.tauc_floor"] = "0.0";
   values_["ssa.mg.diagnostic"] = "0";

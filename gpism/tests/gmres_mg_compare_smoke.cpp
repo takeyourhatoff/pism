@@ -93,7 +93,8 @@ SolveStats run_case(int mx, int my) {
     gpism::restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
   }
 
-  gpism::MultigridPreconditioner precond(mg, 3, 3, 10, 0.8);
+  gpism::MultigridPreconditioner precond(
+      mg, 3, 3, 10, 0.8, gpism::MGSmoother::Jacobi, 0.1, 2.0);
   gpism::set(0.0, x);
   gpism::GMRESResult mg_res = gpism::gmres_solve(op, b, x, opts, &precond);
 

@@ -43,6 +43,30 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            const int* mask_u, const int* mask_v,
                            int stride_bc_u, int stride_bc_v, const double* bc_u,
                            const double* bc_v, int has_bc, int has_values);
+void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                             const double* r_u, const double* r_v,
+                             const double* diag_u, const double* diag_v,
+                             double* z_u, double* z_v, int stride_mask_u,
+                             int stride_mask_v, const int* mask_u,
+                             const int* mask_v, int has_bc);
+void mg_cheby_update_p_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* z_u, const double* z_v,
+                            double* p_u, double* p_v, double beta_coeff,
+                            int stride_mask_u, int stride_mask_v,
+                            const int* mask_u, const int* mask_v, int has_bc,
+                            int first_iter);
+void mg_cheby_update_x_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* p_u, const double* p_v, double* x_u,
+                            double* x_v, double alpha, int stride_mask_u,
+                            int stride_mask_v, const int* mask_u,
+                            const int* mask_v, int stride_bc_u,
+                            int stride_bc_v, const double* bc_u,
+                            const double* bc_v, int has_bc, int has_values);
+void mg_cheby_update_r_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            double* r_u, double* r_v, const double* Ap_u,
+                            const double* Ap_v, double alpha,
+                            int stride_mask_u, int stride_mask_v,
+                            const int* mask_u, const int* mask_v, int has_bc);
 
 void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     int stride_nu_u, int stride_nu_v, int stride_beta_u,
@@ -328,7 +352,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
 #endif
 #if GPISM_HAVE_CUDA
   const bool has_bc = bc && bc->mask;
-  const bool device_ready =
+  const bool device_ready = context &&
       nuH.component(0).has_device_data() &&
       nuH.component(1).has_device_data() &&
       beta.component(0).has_device_data() &&
@@ -394,6 +418,65 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
       }
     }
   }
+}
+
+void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                    const FieldStag2D<double>& beta,
+                    const FieldStag2D<double>& x, FieldStag2D<double>& Ax,
+                    const SSABoundaryCondition* bc,
+                    const Context* context) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
+    exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
+    exchange_for_device(const_cast<FieldStag2D<double>&>(x), grid, context);
+  }
+#else
+  (void)context;
+#endif
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask;
+  const bool device_ready =
+      nuH.component(0).has_device_data() &&
+      nuH.component(1).has_device_data() &&
+      beta.component(0).has_device_data() &&
+      beta.component(1).has_device_data() &&
+      x.component(0).has_device_data() &&
+      x.component(1).has_device_data() &&
+      Ax.component(0).has_device_data() &&
+      Ax.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data()));
+  if (device_ready) {
+    const double dx = grid.dx();
+    const double dy = grid.dy();
+    const double inv_dx2 = 1.0 / (dx * dx);
+    const double inv_dy2 = 1.0 / (dy * dy);
+    const double inv_2dx = 1.0 / (2.0 * dx);
+    const double inv_2dy = 1.0 / (2.0 * dy);
+    const int mask_stride_u =
+        has_bc ? bc->mask->component(0).stride() : 0;
+    const int mask_stride_v =
+        has_bc ? bc->mask->component(1).stride() : 0;
+    ssa_apply_cuda(
+        grid.local_mx(), grid.local_my(), x.ghost_width(),
+        x.component(0).stride(), x.component(1).stride(),
+        nuH.component(0).stride(), nuH.component(1).stride(),
+        beta.component(0).stride(), beta.component(1).stride(),
+        Ax.component(0).stride(), Ax.component(1).stride(),
+        x.component(0).device_data(), x.component(1).device_data(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        Ax.component(0).device_data(), Ax.component(1).device_data(),
+        inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    return;
+  }
+#endif
+  ssa_apply_host(grid, nuH, beta, x, Ax, bc);
 }
 
 void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -529,37 +612,157 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
   }
 }
 
-void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
-                             const FieldStag2D<double>& beta,
-                             const FieldStag2D<double>& b,
-                             FieldStag2D<double>& x, int iterations,
-                             double lambda_min, double lambda_max,
-                             const SSABoundaryCondition* bc) {
+void chebyshev_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                      const FieldStag2D<double>& beta,
+                      const FieldStag2D<double>& b, FieldStag2D<double>& x,
+                      int iterations, double lambda_min, double lambda_max,
+                      FieldStag2D<double>& diag, FieldStag2D<double>& Ax,
+                      FieldStag2D<double>& r, FieldStag2D<double>& z,
+                      FieldStag2D<double>& p,
+                      const SSABoundaryCondition* bc,
+                      const Context* context) {
   if (iterations <= 0) {
     return;
   }
 
-  FieldStag2D<double> diag(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> r(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> z(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> p(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> Ap(grid.local_mx(), grid.local_my(), grid.ghost_width());
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask;
+  const bool has_values =
+      has_bc && bc->values &&
+      bc->values->component(0).has_device_data() &&
+      bc->values->component(1).has_device_data();
+  const bool device_ready =
+      nuH.component(0).has_device_data() &&
+      nuH.component(1).has_device_data() &&
+      beta.component(0).has_device_data() &&
+      beta.component(1).has_device_data() &&
+      b.component(0).has_device_data() &&
+      b.component(1).has_device_data() &&
+      x.component(0).has_device_data() &&
+      x.component(1).has_device_data() &&
+      diag.component(0).has_device_data() &&
+      diag.component(1).has_device_data() &&
+      Ax.component(0).has_device_data() &&
+      Ax.component(1).has_device_data() &&
+      r.component(0).has_device_data() &&
+      r.component(1).has_device_data() &&
+      z.component(0).has_device_data() &&
+      z.component(1).has_device_data() &&
+      p.component(0).has_device_data() &&
+      p.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data()));
+  if (device_ready) {
+    const double dx = grid.dx();
+    const double dy = grid.dy();
+    const double inv_dx2 = 1.0 / (dx * dx);
+    const double inv_dy2 = 1.0 / (dy * dy);
+    const int mask_stride_u =
+        has_bc ? bc->mask->component(0).stride() : 0;
+    const int mask_stride_v =
+        has_bc ? bc->mask->component(1).stride() : 0;
+    const int bc_stride_u =
+        has_values ? bc->values->component(0).stride() : 0;
+    const int bc_stride_v =
+        has_values ? bc->values->component(1).stride() : 0;
+    mg_compute_diag_cuda(
+        grid.local_mx(), grid.local_my(), diag.ghost_width(),
+        diag.component(0).stride(), diag.component(1).stride(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        diag.component(0).device_data(), diag.component(1).device_data(),
+        inv_dx2, inv_dy2, mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+
+    compute_residual(grid, nuH, beta, b, x, r, Ax, bc, context);
+    mg_cheby_compute_z_cuda(
+        grid.local_mx(), grid.local_my(), r.ghost_width(),
+        r.component(0).stride(), r.component(1).stride(),
+        r.component(0).device_data(), r.component(1).device_data(),
+        diag.component(0).device_data(), diag.component(1).device_data(),
+        z.component(0).device_data(), z.component(1).device_data(),
+        mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+
+    const double d = 0.5 * (lambda_max + lambda_min);
+    const double c = 0.5 * (lambda_max - lambda_min);
+    double alpha = (d != 0.0) ? (1.0 / d) : 0.0;
+    double beta_coeff = 0.0;
+
+    for (int iter = 0; iter < iterations; ++iter) {
+      mg_cheby_update_p_cuda(
+          grid.local_mx(), grid.local_my(), p.ghost_width(),
+          p.component(0).stride(), p.component(1).stride(),
+          z.component(0).device_data(), z.component(1).device_data(),
+          p.component(0).device_data(), p.component(1).device_data(),
+          beta_coeff, mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0, iter == 0 ? 1 : 0);
+
+      mg_cheby_update_x_cuda(
+          grid.local_mx(), grid.local_my(), x.ghost_width(),
+          x.component(0).stride(), x.component(1).stride(),
+          p.component(0).device_data(), p.component(1).device_data(),
+          x.component(0).device_data(), x.component(1).device_data(), alpha,
+          mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          bc_stride_u, bc_stride_v,
+          has_values ? bc->values->component(0).device_data() : nullptr,
+          has_values ? bc->values->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0, has_values ? 1 : 0);
+
+      apply_operator(grid, nuH, beta, p, Ax, bc, context);
+      mg_cheby_update_r_cuda(
+          grid.local_mx(), grid.local_my(), r.ghost_width(),
+          r.component(0).stride(), r.component(1).stride(),
+          r.component(0).device_data(), r.component(1).device_data(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(), alpha,
+          mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+      mg_cheby_compute_z_cuda(
+          grid.local_mx(), grid.local_my(), r.ghost_width(),
+          r.component(0).stride(), r.component(1).stride(),
+          r.component(0).device_data(), r.component(1).device_data(),
+          diag.component(0).device_data(), diag.component(1).device_data(),
+          z.component(0).device_data(), z.component(1).device_data(),
+          mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+
+      const double coeff = (c * alpha * 0.5);
+      beta_coeff = coeff * coeff;
+      const double denom = d - (c * c * 0.25) * alpha;
+      if (denom != 0.0) {
+        alpha = 1.0 / denom;
+      }
+    }
+    return;
+  }
+#endif
 
   compute_jacobi_diag(grid, nuH, beta, diag, bc);
-  ssa_apply_host(grid, nuH, beta, x, Ax, bc);
+  compute_residual(grid, nuH, beta, b, x, r, Ax, bc, context);
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
       for (int comp = 0; comp < 2; ++comp) {
         if (is_dirichlet(bc, i, j, comp)) {
-          r(i, j, comp) = 0.0;
           z(i, j, comp) = 0.0;
-          continue;
+          r(i, j, comp) = 0.0;
+        } else {
+          const double dloc = diag(i, j, comp);
+          z(i, j, comp) = (dloc != 0.0) ? (r(i, j, comp) / dloc) : 0.0;
         }
-        r(i, j, comp) = b(i, j, comp) - Ax(i, j, comp);
-        const double d = diag(i, j, comp);
-        z(i, j, comp) = (d != 0.0) ? (r(i, j, comp) / d) : 0.0;
       }
     }
   }
@@ -598,7 +801,7 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
       }
     }
 
-    ssa_apply_host(grid, nuH, beta, p, Ap, bc);
+    ssa_apply_host(grid, nuH, beta, p, Ax, bc);
     for (int j = 0; j < grid.local_my(); ++j) {
       for (int i = 0; i < grid.local_mx(); ++i) {
         for (int comp = 0; comp < 2; ++comp) {
@@ -607,7 +810,7 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
             z(i, j, comp) = 0.0;
             continue;
           }
-          r(i, j, comp) -= alpha * Ap(i, j, comp);
+          r(i, j, comp) -= alpha * Ax(i, j, comp);
           const double dloc = diag(i, j, comp);
           z(i, j, comp) = (dloc != 0.0) ? (r(i, j, comp) / dloc) : 0.0;
         }
@@ -623,8 +826,25 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
   }
 }
 
+void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                             const FieldStag2D<double>& beta,
+                             const FieldStag2D<double>& b,
+                             FieldStag2D<double>& x, int iterations,
+                             double lambda_min, double lambda_max,
+                             const SSABoundaryCondition* bc) {
+  FieldStag2D<double> diag(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> r(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> z(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  FieldStag2D<double> p(grid.local_mx(), grid.local_my(), grid.ghost_width());
+
+  chebyshev_smooth(grid, nuH, beta, b, x, iterations, lambda_min, lambda_max,
+                   diag, Ax, r, z, p, bc, nullptr);
+}
+
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
-             int coarse_iters, double omega,
+             int coarse_iters, double omega, MGSmoother smoother,
+             double cheby_lambda_min, double cheby_lambda_max,
              const SSABoundaryCondition* bc, const Context* context) {
   const int levels = mg.num_levels();
   if (levels == 0) {
@@ -635,8 +855,15 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     MGLevel& fine = mg.level(level);
     MGLevel& coarse = mg.level(level + 1);
 
-    jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, pre_iters,
-                  omega, fine.diag, fine.Ax, bc, context);
+    if (smoother == MGSmoother::Chebyshev) {
+      chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
+                       pre_iters, cheby_lambda_min, cheby_lambda_max,
+                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
+                       context);
+    } else {
+      jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, pre_iters,
+                    omega, fine.diag, fine.Ax, bc, context);
+    }
     compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r,
                      fine.Ax, bc, context);
     restrict_stag(fine.r, coarse.rhs);
@@ -644,17 +871,31 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
   }
 
   MGLevel& coarsest = mg.level(levels - 1);
-  jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
-                coarsest.u, coarse_iters, omega, coarsest.diag, coarsest.Ax,
-                bc, context);
+  if (smoother == MGSmoother::Chebyshev) {
+    chebyshev_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
+                     coarsest.u, coarse_iters, cheby_lambda_min,
+                     cheby_lambda_max, coarsest.diag, coarsest.Ax, coarsest.r,
+                     coarsest.z, coarsest.corr, bc, context);
+  } else {
+    jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
+                  coarsest.u, coarse_iters, omega, coarsest.diag, coarsest.Ax,
+                  bc, context);
+  }
 
   for (int level = levels - 2; level >= 0; --level) {
     MGLevel& fine = mg.level(level);
     MGLevel& coarse = mg.level(level + 1);
     prolong_stag(coarse.u, fine.corr);
     axpy(1.0, fine.corr, fine.u);
-    jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, post_iters,
-                  omega, fine.diag, fine.Ax, bc, context);
+    if (smoother == MGSmoother::Chebyshev) {
+      chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
+                       post_iters, cheby_lambda_min, cheby_lambda_max,
+                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
+                       context);
+    } else {
+      jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, post_iters,
+                    omega, fine.diag, fine.Ax, bc, context);
+    }
   }
 }
 

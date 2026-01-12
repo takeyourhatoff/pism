@@ -131,6 +131,7 @@ bool mg_device_ready(const MultigridHierarchy& mg,
   for (int level = 0; level < mg.num_levels(); ++level) {
     const MGLevel& lvl = mg.level(level);
     if (!has_device(lvl.u) || !has_device(lvl.rhs) || !has_device(lvl.r) ||
+        !has_device(lvl.z) ||
         !has_device(lvl.nuH) || !has_device(lvl.beta) ||
         !has_device(lvl.diag) || !has_device(lvl.Ax) ||
         !has_device(lvl.corr)) {
@@ -463,6 +464,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       }
       precond.emplace(mg, options.mg_pre_iters, options.mg_post_iters,
                       options.mg_coarse_iters, options.mg_omega,
+                      options.mg_smoother, options.mg_cheby_lambda_min,
+                      options.mg_cheby_lambda_max,
                       options.use_bc ? &bc : nullptr, context);
       precond_ptr = &(*precond);
       if (options.mg_diagnostic && iter == 0) {

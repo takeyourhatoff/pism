@@ -248,6 +248,18 @@ int main(int argc, char** argv) {
     ssa_options.mg_coarse_iters = config.get_int("ssa.mg.coarse_iters");
     ssa_options.mg_omega = config.get_double("ssa.mg.omega");
     ssa_options.mg_min_size = config.get_int("ssa.mg.min_size");
+    const std::string mg_smoother = config.get_string("ssa.mg.smoother");
+    if (mg_smoother == "chebyshev") {
+      ssa_options.mg_smoother = gpism::MGSmoother::Chebyshev;
+    } else if (mg_smoother == "jacobi") {
+      ssa_options.mg_smoother = gpism::MGSmoother::Jacobi;
+    } else {
+      throw std::runtime_error("Invalid ssa.mg.smoother value: " + mg_smoother);
+    }
+    ssa_options.mg_cheby_lambda_min =
+        config.get_double("ssa.mg.chebyshev.lambda_min");
+    ssa_options.mg_cheby_lambda_max =
+        config.get_double("ssa.mg.chebyshev.lambda_max");
     ssa_options.mg_diagnostic = config.get_bool("ssa.mg.diagnostic");
     ssa_options.gmres_precond_diagnostic =
         config.get_bool("ssa.gmres.precond_diagnostic");

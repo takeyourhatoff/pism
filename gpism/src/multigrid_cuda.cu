@@ -207,6 +207,125 @@ __global__ void jacobi_update_kernel(
   }
 }
 
+__global__ void cheby_compute_z_kernel(int mx, int my, int gw, int stride_u,
+                                       int stride_v, const double* r_u,
+                                       const double* r_v, const double* diag_u,
+                                       const double* diag_v, double* z_u,
+                                       double* z_v, int stride_mask_u,
+                                       int stride_mask_v, const int* mask_u,
+                                       const int* mask_v, int has_bc) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int idx_u = idx(i, j, gw, stride_u);
+  const int idx_v = idx(i, j, gw, stride_v);
+  const int mask_idx_u = idx(i, j, gw, stride_mask_u);
+  const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  if (has_bc && mask_u[mask_idx_u] != 0) {
+    z_u[idx_u] = 0.0;
+  } else {
+    const double d = diag_u[idx_u];
+    z_u[idx_u] = (d != 0.0) ? (r_u[idx_u] / d) : 0.0;
+  }
+  if (has_bc && mask_v[mask_idx_v] != 0) {
+    z_v[idx_v] = 0.0;
+  } else {
+    const double d = diag_v[idx_v];
+    z_v[idx_v] = (d != 0.0) ? (r_v[idx_v] / d) : 0.0;
+  }
+}
+
+__global__ void cheby_update_p_kernel(
+    int mx, int my, int gw, int stride_u, int stride_v, const double* z_u,
+    const double* z_v, double* p_u, double* p_v, double beta_coeff,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int has_bc, int first_iter) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int idx_u = idx(i, j, gw, stride_u);
+  const int idx_v = idx(i, j, gw, stride_v);
+  const int mask_idx_u = idx(i, j, gw, stride_mask_u);
+  const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  if (has_bc && mask_u[mask_idx_u] != 0) {
+    p_u[idx_u] = 0.0;
+  } else if (first_iter) {
+    p_u[idx_u] = z_u[idx_u];
+  } else {
+    p_u[idx_u] = z_u[idx_u] + beta_coeff * p_u[idx_u];
+  }
+  if (has_bc && mask_v[mask_idx_v] != 0) {
+    p_v[idx_v] = 0.0;
+  } else if (first_iter) {
+    p_v[idx_v] = z_v[idx_v];
+  } else {
+    p_v[idx_v] = z_v[idx_v] + beta_coeff * p_v[idx_v];
+  }
+}
+
+__global__ void cheby_update_x_kernel(
+    int mx, int my, int gw, int stride_u, int stride_v, const double* p_u,
+    const double* p_v, double* x_u, double* x_v, double alpha,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
+    const double* bc_v, int has_bc, int has_values) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int idx_u = idx(i, j, gw, stride_u);
+  const int idx_v = idx(i, j, gw, stride_v);
+  const int mask_idx_u = idx(i, j, gw, stride_mask_u);
+  const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  const int bc_idx_u = idx(i, j, gw, stride_bc_u);
+  const int bc_idx_v = idx(i, j, gw, stride_bc_v);
+  if (has_bc && mask_u[mask_idx_u] != 0) {
+    if (has_values) {
+      x_u[idx_u] = bc_u[bc_idx_u];
+    }
+  } else {
+    x_u[idx_u] += alpha * p_u[idx_u];
+  }
+  if (has_bc && mask_v[mask_idx_v] != 0) {
+    if (has_values) {
+      x_v[idx_v] = bc_v[bc_idx_v];
+    }
+  } else {
+    x_v[idx_v] += alpha * p_v[idx_v];
+  }
+}
+
+__global__ void cheby_update_r_kernel(
+    int mx, int my, int gw, int stride_u, int stride_v, double* r_u,
+    double* r_v, const double* Ap_u, const double* Ap_v, double alpha,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int has_bc) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int idx_u = idx(i, j, gw, stride_u);
+  const int idx_v = idx(i, j, gw, stride_v);
+  const int mask_idx_u = idx(i, j, gw, stride_mask_u);
+  const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  if (has_bc && mask_u[mask_idx_u] != 0) {
+    r_u[idx_u] = 0.0;
+  } else {
+    r_u[idx_u] -= alpha * Ap_u[idx_u];
+  }
+  if (has_bc && mask_v[mask_idx_v] != 0) {
+    r_v[idx_v] = 0.0;
+  } else {
+    r_v[idx_v] -= alpha * Ap_v[idx_v];
+  }
+}
+
 }  // namespace
 
 void mg_restrict_stag_cuda(int fine_mx, int fine_my, int fine_gw,
@@ -282,6 +401,63 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
       mx, my, gw, stride_u, stride_v, b_u, b_v, Ax_u, Ax_v, diag_u, diag_v,
       x_u, x_v, omega, stride_mask_u, stride_mask_v, mask_u, mask_v,
       stride_bc_u, stride_bc_v, bc_u, bc_v, has_bc, has_values);
+}
+
+void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                             const double* r_u, const double* r_v,
+                             const double* diag_u, const double* diag_v,
+                             double* z_u, double* z_v, int stride_mask_u,
+                             int stride_mask_v, const int* mask_u,
+                             const int* mask_v, int has_bc) {
+  const dim3 block(16, 16);
+  const dim3 grid((mx + block.x - 1) / block.x,
+                  (my + block.y - 1) / block.y);
+  cheby_compute_z_kernel<<<grid, block>>>(
+      mx, my, gw, stride_u, stride_v, r_u, r_v, diag_u, diag_v, z_u, z_v,
+      stride_mask_u, stride_mask_v, mask_u, mask_v, has_bc);
+}
+
+void mg_cheby_update_p_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* z_u, const double* z_v,
+                            double* p_u, double* p_v, double beta_coeff,
+                            int stride_mask_u, int stride_mask_v,
+                            const int* mask_u, const int* mask_v, int has_bc,
+                            int first_iter) {
+  const dim3 block(16, 16);
+  const dim3 grid((mx + block.x - 1) / block.x,
+                  (my + block.y - 1) / block.y);
+  cheby_update_p_kernel<<<grid, block>>>(
+      mx, my, gw, stride_u, stride_v, z_u, z_v, p_u, p_v, beta_coeff,
+      stride_mask_u, stride_mask_v, mask_u, mask_v, has_bc, first_iter);
+}
+
+void mg_cheby_update_x_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            const double* p_u, const double* p_v, double* x_u,
+                            double* x_v, double alpha, int stride_mask_u,
+                            int stride_mask_v, const int* mask_u,
+                            const int* mask_v, int stride_bc_u,
+                            int stride_bc_v, const double* bc_u,
+                            const double* bc_v, int has_bc, int has_values) {
+  const dim3 block(16, 16);
+  const dim3 grid((mx + block.x - 1) / block.x,
+                  (my + block.y - 1) / block.y);
+  cheby_update_x_kernel<<<grid, block>>>(
+      mx, my, gw, stride_u, stride_v, p_u, p_v, x_u, x_v, alpha,
+      stride_mask_u, stride_mask_v, mask_u, mask_v, stride_bc_u, stride_bc_v,
+      bc_u, bc_v, has_bc, has_values);
+}
+
+void mg_cheby_update_r_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                            double* r_u, double* r_v, const double* Ap_u,
+                            const double* Ap_v, double alpha,
+                            int stride_mask_u, int stride_mask_v,
+                            const int* mask_u, const int* mask_v, int has_bc) {
+  const dim3 block(16, 16);
+  const dim3 grid((mx + block.x - 1) / block.x,
+                  (my + block.y - 1) / block.y);
+  cheby_update_r_kernel<<<grid, block>>>(
+      mx, my, gw, stride_u, stride_v, r_u, r_v, Ap_u, Ap_v, alpha,
+      stride_mask_u, stride_mask_v, mask_u, mask_v, has_bc);
 }
 
 }  // namespace gpism
