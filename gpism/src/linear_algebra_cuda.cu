@@ -99,14 +99,32 @@ __global__ void dot_stag_kernel(int mx, int my, int gw, int stride_u, int stride
                                 const double* a_u, const double* a_v,
                                 const double* b_u, const double* b_v,
                                 double* out) {
-  int i = blockIdx.x * blockDim.x + threadIdx.x;
-  int j = blockIdx.y * blockDim.y + threadIdx.y;
-  if (i >= mx || j >= my) {
-    return;
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  const bool active = (i < mx && j < my);
+  double val = 0.0;
+  if (active) {
+    const int iu = idx(i, j, gw, stride_u);
+    const int iv = idx(i, j, gw, stride_v);
+    val = a_u[iu] * b_u[iu] + a_v[iv] * b_v[iv];
   }
-  const int iu = idx(i, j, gw, stride_u);
-  const int iv = idx(i, j, gw, stride_v);
-  atomicAdd(out, a_u[iu] * b_u[iu] + a_v[iv] * b_v[iv]);
+
+  extern __shared__ double sdata[];
+  const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+  const int block_threads = blockDim.x * blockDim.y;
+  sdata[tid] = val;
+  __syncthreads();
+
+  for (int s = block_threads / 2; s > 0; s >>= 1) {
+    if (tid < s) {
+      sdata[tid] += sdata[tid + s];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0) {
+    atomicAdd(out, sdata[0]);
+  }
 }
 
 __global__ void dot_stag_batch_kernel(int mx, int my, int gw, int stride_u,
@@ -282,8 +300,11 @@ double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
-  dot_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, a_u, a_v,
-                                   b_u, b_v, d_out);
+  const std::size_t shared_bytes =
+      static_cast<std::size_t>(block.x) * static_cast<std::size_t>(block.y) *
+      sizeof(double);
+  dot_stag_kernel<<<grid, block, shared_bytes>>>(
+      mx, my, gw, stride_u, stride_v, a_u, a_v, b_u, b_v, d_out);
 
   return read_scalar(d_out);
 }

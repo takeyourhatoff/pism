@@ -1,5 +1,7 @@
 #include "gpism/config.h"
 
+#include "gpism/profile.h"
+
 #if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
 
@@ -394,6 +396,7 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            const int* mask_u, const int* mask_v,
                            int stride_bc_u, int stride_bc_v, const double* bc_u,
                            const double* bc_v, int has_bc, int has_values) {
+  CudaEventTimer timer("mg_jacobi_update");
   const dim3 block(16, 16);
   const dim3 grid((mx + block.x - 1) / block.x,
                   (my + block.y - 1) / block.y);

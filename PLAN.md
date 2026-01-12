@@ -460,6 +460,19 @@
   * [x] Implement best dot-kernel optimization (block-level reduction or CUB) and validate tests
   * [x] Re-measure wall time + Nsight after dot-kernel change
   * [x] Decide keep/revert based on measurable wall-time improvement
+* [x] Optimize top kernels (apply_kernel, jacobi_update_kernel, dot_stag_kernel)
+
+  * [x] Capture fresh baseline (4-year std-greenland wall time + Nsight kernel mix)
+  * [x] Add/confirm opt-in per-kernel timing hooks for faster iteration checks
+  * [x] apply_kernel optimization
+  * [x] Audit apply_kernel + call sites; list new ideas before coding
+  * [x] Implement best apply_kernel change, run full tests, reprofile; keep only if >=5% wall-time win
+  * [x] jacobi_update_kernel optimization
+  * [x] Audit jacobi_update path/diag usage; list new ideas before coding
+  * [x] Implement best jacobi_update change, run full tests, reprofile; keep only if >=5% wall-time win
+  * [x] dot_stag_kernel optimization
+  * [x] Audit dot_stag reduction/atomics; list new ideas before coding
+  * [x] Implement best dot_stag change, run full tests, reprofile; keep only if >=5% wall-time win
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -667,6 +680,9 @@
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
   * Re-ran std-greenland MG diagnostic + 4-year baseline/tuned profiles: baseline 10.12s vs coarse=5 10.04s; Nsight still shows dot_stag_batch ~63% GPU time (no meaningful win).
   * Optimized dot_stag_batch kernel with block reductions; full tests pass; std-greenland 4-year wall time 10.12s → 4.73s and Nsight shows dot_stag_batch ~6.3% GPU time.
+  * Captured fresh 4-year std-greenland baseline (4.73s, kernel mix dominated by apply/jacobi/dot_stag).
+  * Tried apply_kernel and jacobi_update_kernel micro-optimizations (no >=5% win; reverted).
+  * Optimized dot_stag_kernel with block-level reduction; 4-year wall time 4.73s → 4.06s and dot_stag_kernel share dropped to ~0.8% GPU time.
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
