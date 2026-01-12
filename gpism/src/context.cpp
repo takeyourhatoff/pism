@@ -78,10 +78,7 @@ int Context::device_count() const { return device_count_; }
 bool Context::cuda_aware_mpi() const {
 #if GPISM_HAVE_MPI && GPISM_HAVE_CUDA
   const char* env = std::getenv("GPISM_CUDA_AWARE_MPI");
-  if (!env) {
-    return false;
-  }
-  if (std::atoi(env) == 0) {
+  if (env && std::atoi(env) == 0) {
     return false;
   }
 #ifdef MPIX_CUDA_AWARE_SUPPORT

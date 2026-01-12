@@ -433,6 +433,7 @@
   * [x] timestep DAG runs on device: geometry → SSA solve → transport → thermodynamics → diagnostics (no CPU gridpoint loops)
   * [x] halo exchange uses device buffers when CUDA-aware MPI is available; otherwise only pinned staging buffers
   * [x] add MPI sync audit to confirm cuda-aware exchange avoids host staging (and non-aware path stages)
+  * [x] enable CUDA-aware MPI by default (allow opt-out via `GPISM_CUDA_AWARE_MPI=0`)
   * [x] batch GMRES orthogonalization reductions on device (keep H/g + Givens on host)
   * [x] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
@@ -452,6 +453,32 @@
   * [x] attempted fused thickness update (no win, reverted)
   * [x] audit high cudaMemcpy counts in long std-greenland run; eliminate unnecessary host transfers
   * [x] attempted device-side GMRES Hessenberg update to cut syncs (regressed; reverted)
+  * [ ] Full device-side GMRES (no per-iter D2H syncs)
+
+    * [ ] Reintroduce device-inner scaffolding
+
+      * [ ] restore device scalar buffers in GMRES workspace (H/cs/sn/g + h_next + inv_h_next)
+      * [ ] add device-only dot/scal helpers (no implicit D2H) in linear_algebra
+      * [ ] add device Hessenberg/Givens update kernel (one thread) + residual update
+    * [ ] extend GPU sync audit to flag any H2D/D2H inside single-rank timestep loop
+    * [ ] Device-side convergence tracking
+
+      * [ ] keep residual/stop criteria on device
+      * [ ] only copy residual to host at restart boundary or final exit
+    * [ ] Device-side small solve
+
+      * [ ] implement device backsolve for upper Hessenberg (or device QR)
+      * [ ] keep y on device and update x via device axpy
+    * [ ] MPI-aware reductions for device scalars
+
+      * [ ] add cuda-aware MPI path for device scalar Allreduce (if enabled)
+      * [ ] fallback: staged host Allreduce only at restart boundary
+    * [ ] Validation + benchmarks
+
+      * [ ] add GMRES smoke variant that forces device GMRES path
+      * [ ] verify residual history monotone-ish and parity with host path
+      * [ ] reprofile std-greenland (tuned + default configs)
+      * [ ] keep only if kernel/CPU wall time improves (define threshold)
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -651,6 +678,7 @@
   * Reduced reduction sync overhead by fusing staggered dot/norm reductions and reusing device scalar buffers (Nsight shows ~50% fewer D2H copies in timestep GPU smoke).
   * Preallocated SSA/GMRES scratch fields and thermodynamics tridiagonal buffers to eliminate per-step cudaMalloc/cudaFree and cut cudaHostAlloc counts in GPU timestep runs.
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
+  * Enabled CUDA-aware MPI by default (opt-out via `GPISM_CUDA_AWARE_MPI=0`).
   * Added legacy `x1`/`y1` NetCDF dimension support in restart reader and a legacy-dims IO smoke test.
   * Ran a minimal gpism std-greenland step and documented the gpism quick-check command in `examples/std-greenland/README.md`.
   * Wired multigrid as a device-capable SSA GMRES preconditioner (GPU restrict/prolong/jacobi/residual kernels) and reprofiles show MG adds GPU work but does not reduce GMRES dot/orth counts yet.
