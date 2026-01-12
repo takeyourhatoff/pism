@@ -478,7 +478,7 @@
 
       * [x] add GMRES smoke variant that forces device GMRES path
       * [x] verify residual history monotone-ish and parity with host path
-      * [ ] reprofile std-greenland (tuned + default configs)
+      * [x] reprofile std-greenland (tuned + default configs)
       * [ ] keep only if kernel/CPU wall time improves (define threshold)
 * [ ] Mixed precision option (optional but high value)
 
@@ -690,6 +690,7 @@
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
   * Extended sync audit to report non-field H2D/D2H during GPU hot loops (strict mode optional).
   * Added device-full GMRES smoke coverage (identity + scaled) with residual parity checks; full CUDA test suite passes (36/36).
+  * Reprofiled std-greenland 4-year run: 10.13 s baseline, 10.12 s with `ssa.gmres.device_full=1` (no material change).
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
