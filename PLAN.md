@@ -473,6 +473,13 @@
   * [x] dot_stag_kernel optimization
   * [x] Audit dot_stag reduction/atomics; list new ideas before coding
   * [x] Implement best dot_stag change, run full tests, reprofile; keep only if >=5% wall-time win
+* [x] Apply + Jacobi deeper optimization pass (post dot_stag)
+
+  * [x] Audit apply_kernel (memory traffic, shared-memory tiling, split kernels) and list new ideas
+  * [x] Implement 1 apply_kernel deep optimization (e.g., fused apply+jacobi for MG, tiling) and reprofile; keep only if >=5% wall-time win
+  * [x] Audit jacobi_update_kernel (fuse with apply for MG, inline diag) and list new ideas
+  * [x] Implement 1 jacobi_update deep optimization and reprofile; keep only if >=5% wall-time win
+  * [x] Run full test suite and keep/revert based on wall-time + correctness
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
@@ -683,6 +690,7 @@
   * Captured fresh 4-year std-greenland baseline (4.73s, kernel mix dominated by apply/jacobi/dot_stag).
   * Tried apply_kernel and jacobi_update_kernel micro-optimizations (no >=5% win; reverted).
   * Optimized dot_stag_kernel with block-level reduction; 4-year wall time 4.73s → 4.06s and dot_stag_kernel share dropped to ~0.8% GPU time.
+  * Added fused Jacobi smoother (single-rank) to eliminate separate apply+jacobi passes; 4-year wall time 4.06s → 3.78s and jacobi_fused kernel now dominates GPU time.
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.

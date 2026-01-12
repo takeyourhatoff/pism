@@ -44,6 +44,16 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            const int* mask_u, const int* mask_v,
                            int stride_bc_u, int stride_bc_v, const double* bc_u,
                            const double* bc_v, int has_bc, int has_values);
+void mg_jacobi_fused_cuda(
+    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
+    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_b_u,
+    int stride_b_v, double* x_u, double* x_v, const double* nu_u,
+    const double* nu_v, const double* beta_u, const double* beta_v,
+    const double* b_u, const double* b_v, double omega, double inv_dx2,
+    double inv_dy2, double inv_2dx, double inv_2dy, int stride_mask_u,
+    int stride_mask_v, const int* mask_u, const int* mask_v, int stride_bc_u,
+    int stride_bc_v, const double* bc_u, const double* bc_v, int has_bc,
+    int has_values);
 void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                              const double* r_u, const double* r_v,
                              const double* diag_u, const double* diag_v,
@@ -849,6 +859,30 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
         has_values ? bc->values->component(0).stride() : 0;
     const int bc_stride_v =
         has_values ? bc->values->component(1).stride() : 0;
+    const bool single_rank =
+        !(context && context->mpi_enabled() && context->size() > 1);
+    if (single_rank) {
+      for (int iter = 0; iter < iterations; ++iter) {
+        mg_jacobi_fused_cuda(
+            grid.local_mx(), grid.local_my(), x.ghost_width(),
+            x.component(0).stride(), x.component(1).stride(),
+            nuH.component(0).stride(), nuH.component(1).stride(),
+            beta.component(0).stride(), beta.component(1).stride(),
+            b.component(0).stride(), b.component(1).stride(),
+            x.component(0).device_data(), x.component(1).device_data(),
+            nuH.component(0).device_data(), nuH.component(1).device_data(),
+            beta.component(0).device_data(), beta.component(1).device_data(),
+            b.component(0).device_data(), b.component(1).device_data(), omega,
+            inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+            has_bc ? bc->mask->component(0).device_data() : nullptr,
+            has_bc ? bc->mask->component(1).device_data() : nullptr,
+            bc_stride_u, bc_stride_v,
+            has_values ? bc->values->component(0).device_data() : nullptr,
+            has_values ? bc->values->component(1).device_data() : nullptr,
+            has_bc ? 1 : 0, has_values ? 1 : 0);
+      }
+      return;
+    }
     mg_compute_diag_cuda(
         grid.local_mx(), grid.local_my(), diag.ghost_width(),
         diag.component(0).stride(), diag.component(1).stride(),
