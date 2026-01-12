@@ -1,6 +1,7 @@
 #include "gpism/multigrid.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include "gpism/field_sync.h"
@@ -79,9 +80,20 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const int* mask_u, const int* mask_v, int has_bc);
 #endif
 
+void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                    const FieldStag2D<double>& beta,
+                    const FieldStag2D<double>& x, FieldStag2D<double>& Ax,
+                    const SSABoundaryCondition* bc,
+                    const Context* context);
+
 namespace {
 
 int coarsen_dim(int n) { return (n + 1) / 2; }
+
+void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                         const FieldStag2D<double>& beta,
+                         FieldStag2D<double>& diag,
+                         const SSABoundaryCondition* bc);
 
 bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
   if (!bc || !bc->mask) {
@@ -180,6 +192,154 @@ void ssa_apply_host(const Grid2D& grid, const FieldStag2D<double>& nuH,
   }
 }
 
+double global_sum(const Context* context, double local_value) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    double global_value = 0.0;
+    MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_SUM,
+                  MPI_COMM_WORLD);
+    return global_value;
+  }
+#endif
+  return local_value;
+}
+
+void compute_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                  const FieldStag2D<double>& beta, FieldStag2D<double>& diag,
+                  const SSABoundaryCondition* bc, const Context* context) {
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask;
+  const bool device_ready = nuH.component(0).has_device_data() &&
+                            nuH.component(1).has_device_data() &&
+                            beta.component(0).has_device_data() &&
+                            beta.component(1).has_device_data() &&
+                            diag.component(0).has_device_data() &&
+                            diag.component(1).has_device_data() &&
+                            (!has_bc ||
+                             (bc->mask->component(0).has_device_data() &&
+                              bc->mask->component(1).has_device_data()));
+  if (device_ready) {
+    const double dx = grid.dx();
+    const double dy = grid.dy();
+    const double inv_dx2 = 1.0 / (dx * dx);
+    const double inv_dy2 = 1.0 / (dy * dy);
+    const int mask_stride_u =
+        has_bc ? bc->mask->component(0).stride() : 0;
+    const int mask_stride_v =
+        has_bc ? bc->mask->component(1).stride() : 0;
+    mg_compute_diag_cuda(
+        grid.local_mx(), grid.local_my(), diag.ghost_width(),
+        diag.component(0).stride(), diag.component(1).stride(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        diag.component(0).device_data(), diag.component(1).device_data(),
+        inv_dx2, inv_dy2, mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    return;
+  }
+#endif
+  compute_jacobi_diag(grid, nuH, beta, diag, bc);
+}
+
+double estimate_lambda_max(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                           const FieldStag2D<double>& beta,
+                           FieldStag2D<double>& x, FieldStag2D<double>& y,
+                           FieldStag2D<double>& Ax, FieldStag2D<double>& diag,
+                           const SSABoundaryCondition* bc,
+                           const Context* context, int iterations) {
+  const int iters = std::max(1, iterations);
+  compute_diag(grid, nuH, beta, diag, bc, context);
+  set(1.0, x);
+
+  double lambda = 0.0;
+  for (int iter = 0; iter < iters; ++iter) {
+    apply_operator(grid, nuH, beta, x, Ax, bc, context);
+
+#if GPISM_HAVE_CUDA
+    const bool has_bc = bc && bc->mask;
+    const bool device_ready = Ax.component(0).has_device_data() &&
+                              Ax.component(1).has_device_data() &&
+                              diag.component(0).has_device_data() &&
+                              diag.component(1).has_device_data() &&
+                              y.component(0).has_device_data() &&
+                              y.component(1).has_device_data() &&
+                              (!has_bc ||
+                               (bc->mask->component(0).has_device_data() &&
+                                bc->mask->component(1).has_device_data()));
+    if (device_ready) {
+      const int mask_stride_u =
+          has_bc ? bc->mask->component(0).stride() : 0;
+      const int mask_stride_v =
+          has_bc ? bc->mask->component(1).stride() : 0;
+      mg_cheby_compute_z_cuda(
+          grid.local_mx(), grid.local_my(), y.ghost_width(),
+          y.component(0).stride(), y.component(1).stride(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(),
+          diag.component(0).device_data(), diag.component(1).device_data(),
+          y.component(0).device_data(), y.component(1).device_data(),
+          mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+    } else
+#endif
+    {
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          for (int comp = 0; comp < 2; ++comp) {
+            if (is_dirichlet(bc, i, j, comp)) {
+              y(i, j, comp) = 0.0;
+            } else {
+              const double dloc = diag(i, j, comp);
+              y(i, j, comp) = (dloc != 0.0) ? (Ax(i, j, comp) / dloc) : 0.0;
+            }
+          }
+        }
+      }
+    }
+
+    const double num = std::sqrt(global_sum(context, dot(y, y)));
+    const double den = std::sqrt(global_sum(context, dot(x, x)));
+    lambda = (den > 0.0) ? (num / den) : 0.0;
+    if (num > 0.0) {
+      copy(y, x);
+      scal(1.0 / num, x);
+    }
+  }
+
+  return lambda;
+}
+
+struct ChebyBounds {
+  double min = 0.0;
+  double max = 0.0;
+};
+
+ChebyBounds cheby_bounds_for_level(MGLevel& level, double lambda_min,
+                                   double lambda_max, bool estimate,
+                                   int estimate_iters, double min_factor,
+                                   double max_factor,
+                                   const SSABoundaryCondition* bc,
+                                   const Context* context) {
+  if (!estimate) {
+    return {lambda_min, lambda_max};
+  }
+  const double lambda_est =
+      estimate_lambda_max(level.grid, level.nuH, level.beta, level.r, level.z,
+                          level.Ax, level.diag, bc, context, estimate_iters);
+  if (!std::isfinite(lambda_est) || lambda_est <= 0.0) {
+    return {lambda_min, lambda_max};
+  }
+  const double min_val = lambda_est * min_factor;
+  const double max_val = lambda_est * max_factor;
+  if (!std::isfinite(min_val) || !std::isfinite(max_val) || min_val <= 0.0 ||
+      max_val <= min_val) {
+    return {lambda_min, lambda_max};
+  }
+  return {min_val, max_val};
+}
 void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
                          const FieldStag2D<double>& beta,
                          FieldStag2D<double>& diag,
@@ -352,7 +512,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
 #endif
 #if GPISM_HAVE_CUDA
   const bool has_bc = bc && bc->mask;
-  const bool device_ready = context &&
+  const bool device_ready =
       nuH.component(0).has_device_data() &&
       nuH.component(1).has_device_data() &&
       beta.component(0).has_device_data() &&
@@ -838,17 +998,45 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
   FieldStag2D<double> z(grid.local_mx(), grid.local_my(), grid.ghost_width());
   FieldStag2D<double> p(grid.local_mx(), grid.local_my(), grid.ghost_width());
 
+  const bool use_device = device_enabled();
+  if (use_device) {
+    sync_host_to_device(const_cast<FieldStag2D<double>&>(nuH));
+    sync_host_to_device(const_cast<FieldStag2D<double>&>(beta));
+    sync_host_to_device(const_cast<FieldStag2D<double>&>(b));
+    sync_host_to_device(x);
+  }
+
   chebyshev_smooth(grid, nuH, beta, b, x, iterations, lambda_min, lambda_max,
                    diag, Ax, r, z, p, bc, nullptr);
+
+  if (use_device) {
+    sync_device_to_host(x);
+  }
 }
 
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              int coarse_iters, double omega, MGSmoother smoother,
              double cheby_lambda_min, double cheby_lambda_max,
+             bool cheby_estimate, int cheby_estimate_iters,
+             double cheby_estimate_min_factor,
+             double cheby_estimate_max_factor,
              const SSABoundaryCondition* bc, const Context* context) {
   const int levels = mg.num_levels();
   if (levels == 0) {
     return;
+  }
+
+  std::vector<ChebyBounds> cheby_bounds;
+  if (smoother == MGSmoother::Chebyshev) {
+    cheby_bounds.reserve(levels);
+    for (int level = 0; level < levels; ++level) {
+      cheby_bounds.push_back(
+          cheby_bounds_for_level(mg.level(level), cheby_lambda_min,
+                                 cheby_lambda_max, cheby_estimate,
+                                 cheby_estimate_iters,
+                                 cheby_estimate_min_factor,
+                                 cheby_estimate_max_factor, bc, context));
+    }
   }
 
   for (int level = 0; level < levels - 1; ++level) {
@@ -856,8 +1044,9 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     MGLevel& coarse = mg.level(level + 1);
 
     if (smoother == MGSmoother::Chebyshev) {
+      const ChebyBounds bounds = cheby_bounds.at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
-                       pre_iters, cheby_lambda_min, cheby_lambda_max,
+                       pre_iters, bounds.min, bounds.max,
                        fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
                        context);
     } else {
@@ -872,9 +1061,10 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
 
   MGLevel& coarsest = mg.level(levels - 1);
   if (smoother == MGSmoother::Chebyshev) {
+    const ChebyBounds bounds = cheby_bounds.at(levels - 1);
     chebyshev_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
-                     coarsest.u, coarse_iters, cheby_lambda_min,
-                     cheby_lambda_max, coarsest.diag, coarsest.Ax, coarsest.r,
+                     coarsest.u, coarse_iters, bounds.min, bounds.max,
+                     coarsest.diag, coarsest.Ax, coarsest.r,
                      coarsest.z, coarsest.corr, bc, context);
   } else {
     jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
@@ -888,8 +1078,9 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     prolong_stag(coarse.u, fine.corr);
     axpy(1.0, fine.corr, fine.u);
     if (smoother == MGSmoother::Chebyshev) {
+      const ChebyBounds bounds = cheby_bounds.at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
-                       post_iters, cheby_lambda_min, cheby_lambda_max,
+                       post_iters, bounds.min, bounds.max,
                        fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
                        context);
     } else {

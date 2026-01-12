@@ -15,7 +15,9 @@ void MultigridPreconditioner::apply(const FieldStag2D<double>& x,
   set(0.0, fine.u);
 
   v_cycle(mg_, pre_iters_, post_iters_, coarse_iters_, omega_, smoother_,
-          cheby_lambda_min_, cheby_lambda_max_, bc_, context_);
+          cheby_lambda_min_, cheby_lambda_max_, cheby_estimate_,
+          cheby_estimate_iters_, cheby_estimate_min_factor_,
+          cheby_estimate_max_factor_, bc_, context_);
 
   copy(fine.u, y);
 }

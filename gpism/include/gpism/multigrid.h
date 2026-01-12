@@ -75,6 +75,9 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              int coarse_iters, double omega,
              MGSmoother smoother = MGSmoother::Jacobi,
              double cheby_lambda_min = 0.1, double cheby_lambda_max = 2.0,
+             bool cheby_estimate = false, int cheby_estimate_iters = 5,
+             double cheby_estimate_min_factor = 0.1,
+             double cheby_estimate_max_factor = 1.1,
              const SSABoundaryCondition* bc = nullptr,
              const Context* context = nullptr);
 

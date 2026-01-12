@@ -70,6 +70,10 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.mg.smoother"] = "jacobi";
   values_["ssa.mg.chebyshev.lambda_min"] = "0.1";
   values_["ssa.mg.chebyshev.lambda_max"] = "2.0";
+  values_["ssa.mg.chebyshev.estimate"] = "0";
+  values_["ssa.mg.chebyshev.estimate_iters"] = "5";
+  values_["ssa.mg.chebyshev.estimate_min_factor"] = "0.1";
+  values_["ssa.mg.chebyshev.estimate_max_factor"] = "1.1";
   values_["ssa.tauc_default"] = "2e5";
   values_["ssa.tauc_floor"] = "0.0";
   values_["ssa.mg.diagnostic"] = "0";

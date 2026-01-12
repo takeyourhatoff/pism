@@ -12,6 +12,10 @@ public:
                           MGSmoother smoother = MGSmoother::Jacobi,
                           double cheby_lambda_min = 0.1,
                           double cheby_lambda_max = 2.0,
+                          bool cheby_estimate = false,
+                          int cheby_estimate_iters = 5,
+                          double cheby_estimate_min_factor = 0.1,
+                          double cheby_estimate_max_factor = 1.1,
                           const SSABoundaryCondition* bc = nullptr,
                           const Context* context = nullptr)
       : mg_(mg),
@@ -22,6 +26,10 @@ public:
         smoother_(smoother),
         cheby_lambda_min_(cheby_lambda_min),
         cheby_lambda_max_(cheby_lambda_max),
+        cheby_estimate_(cheby_estimate),
+        cheby_estimate_iters_(cheby_estimate_iters),
+        cheby_estimate_min_factor_(cheby_estimate_min_factor),
+        cheby_estimate_max_factor_(cheby_estimate_max_factor),
         bc_(bc),
         context_(context) {}
 
@@ -37,6 +45,10 @@ private:
   MGSmoother smoother_;
   double cheby_lambda_min_;
   double cheby_lambda_max_;
+  bool cheby_estimate_;
+  int cheby_estimate_iters_;
+  double cheby_estimate_min_factor_;
+  double cheby_estimate_max_factor_;
   const SSABoundaryCondition* bc_;
   const Context* context_;
 };

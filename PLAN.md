@@ -301,6 +301,7 @@
 * [x] Reprofile std-greenland with tuned MG params and compare kernel mix + iterations
   * [x] run std-greenland MG parameter sweep (pre/post/coarse/omega) and pick best wall time
 * [x] Measure std-greenland wall time with/without tauc fallback to quantify MG impact
+* [x] Add Chebyshev eigenvalue bound estimation (power iteration) and auto lambda_min/max config; compare vs fixed bounds
 
 ### M6 Definition of Done
 
@@ -639,6 +640,9 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Added Chebyshev MG auto-bound estimation (power iteration) with new config knobs and diagnostics.
+  * Fixed Chebyshev/Jacobi device-host sync paths for tests; revalidated MG preconditioner effectiveness tests.
+  * Benchmarked std-greenland: Jacobi ~1.06s vs Chebyshev-est ~6.07s wall time (Chebyshev slower with per-precond estimation).
   * Added MG usage logging (params + CUDA path) and GMRES preconditioner diagnostics (left-preconditioned log + ||r||/||r-A M^{-1} r|| report), verified on std-greenland.
   * Extended MG diagnostics with ||M^{-1} r||/||A M^{-1} r|| and fine-level nuH/beta/diag stats; std-greenland has no vel_bc fields and no tauc (beta=0), diag min 0/max ~45, MG preconditioner blows up (||M^{-1} r|| ~3e23).
   * Added `ssa.tauc_default`/`ssa.tauc_floor` config handling; std-greenland with tauc=100k yields beta≈1000, diag≈[1000,1045], and MG diagnostic improves (||r - A M^{-1} r||/||r||≈3.7e-4).
