@@ -16,7 +16,6 @@ public:
                           int cheby_estimate_iters = 5,
                           double cheby_estimate_min_factor = 0.1,
                           double cheby_estimate_max_factor = 1.1,
-                          const std::vector<ChebyBounds>* cheby_bounds_cached = nullptr,
                           const SSABoundaryCondition* bc = nullptr,
                           const Context* context = nullptr)
       : mg_(mg),
@@ -31,11 +30,6 @@ public:
         cheby_estimate_iters_(cheby_estimate_iters),
         cheby_estimate_min_factor_(cheby_estimate_min_factor),
         cheby_estimate_max_factor_(cheby_estimate_max_factor),
-        cheby_bounds_cache_(
-            cheby_bounds_cached ? *cheby_bounds_cached
-                                : std::vector<ChebyBounds>{}),
-        cheby_bounds_cached_(cheby_bounds_cached &&
-                             !cheby_bounds_cached->empty()),
         bc_(bc),
         context_(context) {}
 

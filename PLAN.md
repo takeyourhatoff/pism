@@ -302,7 +302,7 @@
   * [x] run std-greenland MG parameter sweep (pre/post/coarse/omega) and pick best wall time
 * [x] Measure std-greenland wall time with/without tauc fallback to quantify MG impact
 * [x] Add Chebyshev eigenvalue bound estimation (power iteration) and auto lambda_min/max config; compare vs fixed bounds
-* [x] Cache Chebyshev bounds across Picard iterations (avoid per-Picard power iteration) and recheck std-greenland wall time
+* [x] Drop Picard-level Chebyshev cache option (keep per-preconditioner cache; default Jacobi)
 
 ### M6 Definition of Done
 
@@ -433,6 +433,7 @@
   * [x] reductions/norms are device kernels and do not force implicit device syncs
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
   * [x] add hot-loop sync audit to `gpism-timestep-gpu-smoke` (fail if field syncs occur during the loop)
+  * [x] re-run `gpism-timestep-gpu-smoke` sync audit after Chebyshev changes
   * [ ] I/O staging is async and double-buffered when possible; GPU work can overlap output
   * [x] add GPU timestep smoke test (no NetCDF) to exercise full DAG + profile host/device transfers
 * [x] Overlap comm/compute
@@ -646,6 +647,8 @@
   * Benchmarked std-greenland: Jacobi ~1.06s vs Chebyshev-est ~6.07s wall time (Chebyshev slower with per-precond estimation).
   * Cached Chebyshev bounds per MG preconditioner; std-greenland Chebyshev-est improved to ~3.52s but still slower than Jacobi.
   * Added optional cache across Picard iterations (ssa.mg.chebyshev.cache_picard=1); std-greenland ~3.49s (no material improvement vs per-precond cache).
+  * Re-ran `gpism-timestep-gpu-smoke` sync audit after Chebyshev changes (pass).
+  * Dropped Picard-level Chebyshev cache option; kept per-preconditioner caching with Jacobi default.
   * Added MG usage logging (params + CUDA path) and GMRES preconditioner diagnostics (left-preconditioned log + ||r||/||r-A M^{-1} r|| report), verified on std-greenland.
   * Extended MG diagnostics with ||M^{-1} r||/||A M^{-1} r|| and fine-level nuH/beta/diag stats; std-greenland has no vel_bc fields and no tauc (beta=0), diag min 0/max ~45, MG preconditioner blows up (||M^{-1} r|| ~3e23).
   * Added `ssa.tauc_default`/`ssa.tauc_floor` config handling; std-greenland with tauc=100k yields beta≈1000, diag≈[1000,1045], and MG diagnostic improves (||r - A M^{-1} r||/||r||≈3.7e-4).

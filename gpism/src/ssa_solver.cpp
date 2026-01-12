@@ -385,10 +385,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   const Context* context = options.context;
 
   workspace_.ensure(grid_);
-  if (options.mg_cheby_cache_picard) {
-    workspace_.mg_cheby_bounds_cache.clear();
-    workspace_.mg_cheby_bounds_valid = false;
-  }
   auto& usurf = workspace_.usurf;
   auto& dhdx = workspace_.dhdx;
   auto& dhdy = workspace_.dhdy;
@@ -466,22 +462,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       for (int level = 1; level < mg.num_levels(); ++level) {
         restrict_stag(mg.level(level - 1).nuH, mg.level(level).nuH);
       }
-      std::vector<ChebyBounds>* cheby_bounds_ptr = nullptr;
-      if (options.mg_smoother == MGSmoother::Chebyshev &&
-          options.mg_cheby_estimate && options.mg_cheby_cache_picard) {
-        if (!workspace_.mg_cheby_bounds_valid ||
-            static_cast<int>(workspace_.mg_cheby_bounds_cache.size()) !=
-                mg.num_levels()) {
-          workspace_.mg_cheby_bounds_cache = estimate_cheby_bounds(
-              mg, options.mg_cheby_lambda_min, options.mg_cheby_lambda_max,
-              options.mg_cheby_estimate, options.mg_cheby_estimate_iters,
-              options.mg_cheby_estimate_min_factor,
-              options.mg_cheby_estimate_max_factor,
-              options.use_bc ? &bc : nullptr, context);
-          workspace_.mg_cheby_bounds_valid = true;
-        }
-        cheby_bounds_ptr = &workspace_.mg_cheby_bounds_cache;
-      }
       precond.emplace(mg, options.mg_pre_iters, options.mg_post_iters,
                       options.mg_coarse_iters, options.mg_omega,
                       options.mg_smoother, options.mg_cheby_lambda_min,
@@ -490,7 +470,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                       options.mg_cheby_estimate_iters,
                       options.mg_cheby_estimate_min_factor,
                       options.mg_cheby_estimate_max_factor,
-                      cheby_bounds_ptr,
                       options.use_bc ? &bc : nullptr, context);
       precond_ptr = &(*precond);
       if (options.mg_diagnostic && iter == 0) {
