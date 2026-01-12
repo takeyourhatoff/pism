@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 import urllib.parse
 from typing import Dict, List
+from pathlib import Path
 
 import boto3
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, FileResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 
 from pism_cloud.aws import aws_region
 from pism_cloud.batch import describe_jobs, resolve_instance_metadata
@@ -28,12 +30,17 @@ from pism_cloud.preview import (
 )
 
 LOG_GROUP = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
+STATIC_ROOT = (Path(__file__).resolve().parent / ".." / "pism_cloud" / "static").resolve()
+ASSETS_ROOT = STATIC_ROOT / "assets"
 TEMPLATES = Jinja2Templates(
     directory=os.path.join(os.path.dirname(__file__), "..", "pism_cloud", "templates")
 )
 ACTIVE_STATUSES = {"SUBMITTED", "PENDING", "RUNNABLE", "STARTING", "RUNNING"}
 
 app = FastAPI()
+
+if ASSETS_ROOT.exists():
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_ROOT)), name="assets")
 
 
 def log_url(log_stream: str) -> str:
@@ -95,6 +102,9 @@ def _list_output_objects(uri: str, max_keys: int = 50) -> List[Dict[str, object]
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    index_path = STATIC_ROOT / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     return TEMPLATES.TemplateResponse("dashboard.html", {"request": request})
 
 

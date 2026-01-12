@@ -17,6 +17,9 @@ __pycache__/
 .venv/
 .venv*/
 *.egg-info/
+cloud/dashboard-ui/node_modules/
+cloud/dashboard-ui/.vite/
+cloud/pism_cloud/static/
 out.*
 examples/**/*.png
 examples/**/*.zip

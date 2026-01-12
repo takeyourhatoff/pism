@@ -128,6 +128,16 @@ ETA is available when PISM logs a `* Run time:` line plus `S ...` progress lines
 
 ### 7) Launch the dashboard
 
+Build the React UI once (re-run after frontend changes):
+
+```
+cd cloud/dashboard-ui
+npm install
+npm run build
+```
+
+Then start the FastAPI dashboard:
+
 ```
 pism-cloud dashboard --port 8080
 ```

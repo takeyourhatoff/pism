@@ -7,6 +7,7 @@ Changes since v2.2.0
 - Added a minimal AWS Batch based ensemble runner and dashboard under `cloud/`.
 - Added a NetCDF preview panel to the `pism-cloud` dashboard for visualizing the latest
   output or checkpoint field.
+- Rebuilt the `pism-cloud` dashboard UI as a React + Tailwind single-page app.
 - Fixed a minor bug: EISMINT II simplified geometry experiments should use the "cold"
   (temperature-based) energy conservation model. In PISM 2.2.0 the EISMINT II default of
   `energy.model` was mistakenly set to "none", i.e. isothermal mode without energy
