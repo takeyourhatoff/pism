@@ -135,6 +135,7 @@ if(GPISM_ENABLE_CUDA)
   list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/ssa_solver_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/linear_algebra_cuda.cu)
+  list(APPEND GPISM_CORE_SOURCES src/multigrid_cuda.cu)
   list(APPEND GPISM_CORE_SOURCES src/thermodynamics_cuda.cu)
 endif()
 
@@ -348,6 +349,25 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-mg-preconditioner-smoke tests/mg_preconditioner_smoke.cpp)
   target_link_libraries(gpism-mg-preconditioner-smoke PRIVATE gpism-core)
   add_test(NAME gpism-mg-preconditioner-smoke COMMAND gpism-mg-preconditioner-smoke)
+
+  add_executable(gpism-mg-preconditioner-effectiveness-smoke
+                 tests/mg_preconditioner_effectiveness_smoke.cpp)
+  target_link_libraries(gpism-mg-preconditioner-effectiveness-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-mg-preconditioner-effectiveness-smoke
+           COMMAND gpism-mg-preconditioner-effectiveness-smoke)
+
+  add_executable(gpism-mg-preconditioner-effectiveness-bc-mpi-smoke
+                 tests/mg_preconditioner_effectiveness_bc_mpi_smoke.cpp)
+  target_link_libraries(gpism-mg-preconditioner-effectiveness-bc-mpi-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-mg-preconditioner-effectiveness-bc-mpi-smoke
+           COMMAND gpism-mg-preconditioner-effectiveness-bc-mpi-smoke)
+  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+    add_test(
+      NAME gpism-mg-preconditioner-effectiveness-bc-mpi-smoke-2
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+              $<TARGET_FILE:gpism-mg-preconditioner-effectiveness-bc-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+    )
+  endif()
 
   add_executable(gpism-multigrid-coeff-smoke tests/multigrid_coeff_smoke.cpp)
   target_link_libraries(gpism-multigrid-coeff-smoke PRIVATE gpism-core)

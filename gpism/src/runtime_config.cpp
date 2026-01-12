@@ -61,6 +61,16 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
   values_["ssa.gmres_tol"] = "1e-8";
+  values_["ssa.mg.enabled"] = "1";
+  values_["ssa.mg.pre_iters"] = "2";
+  values_["ssa.mg.post_iters"] = "2";
+  values_["ssa.mg.coarse_iters"] = "20";
+  values_["ssa.mg.omega"] = "0.8";
+  values_["ssa.mg.min_size"] = "4";
+  values_["ssa.tauc_default"] = "2e5";
+  values_["ssa.tauc_floor"] = "0.0";
+  values_["ssa.mg.diagnostic"] = "0";
+  values_["ssa.gmres.precond_diagnostic"] = "0";
   values_["io.format"] = "netcdf";
   values_["io.size"] = "small";
   values_["io.time_index"] = "-1";

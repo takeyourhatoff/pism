@@ -23,8 +23,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const double* nu_v, const double* beta_u,
                     const double* beta_v, double* out_u, double* out_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
-                    double inv_2dy, const int* mask_u, const int* mask_v,
-                    int has_bc);
+                    double inv_2dy, int stride_mask_u, int stride_mask_v,
+                    const int* mask_u, const int* mask_v, int has_bc);
 void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            int stride_nu_u, int stride_nu_v, int stride_beta_u,
                            int stride_beta_v, int stride_out_u, int stride_out_v,
@@ -32,9 +32,9 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            const double* nu_v, const double* beta_u,
                            const double* beta_v, double* out_u, double* out_v,
                            double inv_dx2, double inv_dy2, double inv_2dx,
-                           double inv_2dy, const int* mask_u, const int* mask_v,
-                           int has_bc, int i_start, int i_end, int j_start,
-                           int j_end);
+                           double inv_2dy, int stride_mask_u, int stride_mask_v,
+                           const int* mask_u, const int* mask_v, int has_bc,
+                           int i_start, int i_end, int j_start, int j_end);
 }  // namespace gpism
 #endif
 
@@ -175,6 +175,8 @@ void SSAOperator::apply_region(const Grid2D& grid,
         beta.component(0).device_data(), beta.component(1).device_data(),
         out.component(0).device_data(), out.component(1).device_data(),
         inv_dx2, inv_dy2, inv_2dx, inv_2dy,
+        has_bc ? bc->mask->component(0).stride() : 0,
+        has_bc ? bc->mask->component(1).stride() : 0,
         has_bc ? bc->mask->component(0).device_data() : nullptr,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
         has_bc ? 1 : 0, i0, i1, j0, j1);

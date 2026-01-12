@@ -7,6 +7,7 @@
 
 namespace gpism {
 
+class Context;
 struct SSABoundaryCondition;
 
 struct MGLevel {
@@ -16,6 +17,9 @@ struct MGLevel {
   FieldStag2D<double> r;
   FieldStag2D<double> nuH;
   FieldStag2D<double> beta;
+  FieldStag2D<double> diag;
+  FieldStag2D<double> Ax;
+  FieldStag2D<double> corr;
 
   explicit MGLevel(const Grid2D& grid_in)
       : grid(grid_in),
@@ -23,7 +27,10 @@ struct MGLevel {
         rhs(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         r(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         nuH(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
-        beta(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()) {}
+        beta(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        diag(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        Ax(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        corr(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()) {}
 };
 
 class MultigridHierarchy {
@@ -45,11 +52,15 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
                       const FieldStag2D<double>& beta,
                       const FieldStag2D<double>& b,
                       const FieldStag2D<double>& x, FieldStag2D<double>& r,
-                      const SSABoundaryCondition* bc = nullptr);
+                      FieldStag2D<double>& Ax,
+                      const SSABoundaryCondition* bc = nullptr,
+                      const Context* context = nullptr);
 void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                    const FieldStag2D<double>& beta, const FieldStag2D<double>& b,
                    FieldStag2D<double>& x, int iterations, double omega,
-                   const SSABoundaryCondition* bc = nullptr);
+                   FieldStag2D<double>& diag, FieldStag2D<double>& Ax,
+                   const SSABoundaryCondition* bc = nullptr,
+                   const Context* context = nullptr);
 void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                              const FieldStag2D<double>& beta,
                              const FieldStag2D<double>& b, FieldStag2D<double>& x,
@@ -57,6 +68,8 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                              double lambda_max,
                              const SSABoundaryCondition* bc = nullptr);
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
-             int coarse_iters, double omega);
+             int coarse_iters, double omega,
+             const SSABoundaryCondition* bc = nullptr,
+             const Context* context = nullptr);
 
 }  // namespace gpism

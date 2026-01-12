@@ -230,6 +230,7 @@ private:
       return;
     }
     cudaMalloc(reinterpret_cast<void**>(&device_data_), elements * sizeof(T));
+    cudaMemset(device_data_, 0, elements * sizeof(T));
 #else
     (void)elements;
 #endif

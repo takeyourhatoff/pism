@@ -1,4 +1,5 @@
 #include "gpism/mg_preconditioner.h"
+#include "gpism/field_sync.h"
 
 #include <cmath>
 #include <iostream>
@@ -22,6 +23,10 @@ int main() {
     lvl.beta.fill(2.0);
     lvl.u.fill(0.0);
     lvl.rhs.fill(0.0);
+    gpism::sync_host_to_device(lvl.nuH);
+    gpism::sync_host_to_device(lvl.beta);
+    gpism::sync_host_to_device(lvl.u);
+    gpism::sync_host_to_device(lvl.rhs);
   }
 
   gpism::FieldStag2D<double> x(grid.local_mx(), grid.local_my(), gw);
@@ -34,7 +39,9 @@ int main() {
   }
 
   gpism::MultigridPreconditioner pc(mg, 1, 0, 1, 1.0);
+  gpism::sync_host_to_device(x);
   pc.apply(x, y);
+  gpism::sync_device_to_host(y);
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {

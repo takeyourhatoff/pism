@@ -12,6 +12,7 @@ struct IOFields2D {
   Field2D<double> thk;
   Field2D<double> topg;
   Field2D<double> tauc;
+  bool has_tauc = false;
   Field2D<double> u_bc;
   Field2D<double> v_bc;
   Field2D<int> vel_bc_mask;

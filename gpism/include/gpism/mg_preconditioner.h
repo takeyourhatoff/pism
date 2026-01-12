@@ -8,12 +8,16 @@ namespace gpism {
 class MultigridPreconditioner final : public Preconditioner {
 public:
   MultigridPreconditioner(MultigridHierarchy& mg, int pre_iters,
-                          int post_iters, int coarse_iters, double omega)
+                          int post_iters, int coarse_iters, double omega,
+                          const SSABoundaryCondition* bc = nullptr,
+                          const Context* context = nullptr)
       : mg_(mg),
         pre_iters_(pre_iters),
         post_iters_(post_iters),
         coarse_iters_(coarse_iters),
-        omega_(omega) {}
+        omega_(omega),
+        bc_(bc),
+        context_(context) {}
 
   void apply(const FieldStag2D<double>& x,
              FieldStag2D<double>& y) const override;
@@ -24,6 +28,8 @@ private:
   int post_iters_;
   int coarse_iters_;
   double omega_;
+  const SSABoundaryCondition* bc_;
+  const Context* context_;
 };
 
 }  // namespace gpism

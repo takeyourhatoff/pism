@@ -1,4 +1,5 @@
 #include "gpism/multigrid.h"
+#include "gpism/field_sync.h"
 
 #include <cmath>
 #include <iostream>
@@ -39,7 +40,17 @@ int main() {
   coarse.u.fill(0.0);
   coarse.rhs.fill(0.0);
 
+  gpism::sync_host_to_device(fine.nuH);
+  gpism::sync_host_to_device(fine.beta);
+  gpism::sync_host_to_device(fine.u);
+  gpism::sync_host_to_device(fine.rhs);
+  gpism::sync_host_to_device(coarse.nuH);
+  gpism::sync_host_to_device(coarse.beta);
+  gpism::sync_host_to_device(coarse.u);
+  gpism::sync_host_to_device(coarse.rhs);
+
   gpism::v_cycle(mg, 1, 0, 1, 1.0);
+  gpism::sync_device_to_host(fine.u);
 
   for (int j = 0; j < fine.grid.local_my(); ++j) {
     for (int i = 0; i < fine.grid.local_mx(); ++i) {

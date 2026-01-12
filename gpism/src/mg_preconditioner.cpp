@@ -1,5 +1,7 @@
 #include "gpism/mg_preconditioner.h"
 
+#include "gpism/linear_algebra.h"
+
 namespace gpism {
 
 void MultigridPreconditioner::apply(const FieldStag2D<double>& x,
@@ -9,22 +11,12 @@ void MultigridPreconditioner::apply(const FieldStag2D<double>& x,
   }
 
   MGLevel& fine = mg_.level(0);
-  for (int j = 0; j < fine.grid.local_my(); ++j) {
-    for (int i = 0; i < fine.grid.local_mx(); ++i) {
-      fine.rhs(i, j, 0) = x(i, j, 0);
-      fine.rhs(i, j, 1) = x(i, j, 1);
-    }
-  }
-  fine.u.fill(0.0);
+  copy(x, fine.rhs);
+  set(0.0, fine.u);
 
-  v_cycle(mg_, pre_iters_, post_iters_, coarse_iters_, omega_);
+  v_cycle(mg_, pre_iters_, post_iters_, coarse_iters_, omega_, bc_, context_);
 
-  for (int j = 0; j < fine.grid.local_my(); ++j) {
-    for (int i = 0; i < fine.grid.local_mx(); ++i) {
-      y(i, j, 0) = fine.u(i, j, 0);
-      y(i, j, 1) = fine.u(i, j, 1);
-    }
-  }
+  copy(fine.u, y);
 }
 
 }  // namespace gpism

@@ -1,4 +1,5 @@
 #include "gpism/multigrid.h"
+#include "gpism/field_sync.h"
 
 #include <cmath>
 #include <iostream>
@@ -36,14 +37,26 @@ double run_case(int n) {
     }
   }
 
-  gpism::compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r);
+  for (int level = 0; level < mg.num_levels(); ++level) {
+    gpism::MGLevel& lvl = mg.level(level);
+    gpism::sync_host_to_device(lvl.nuH);
+    gpism::sync_host_to_device(lvl.beta);
+    gpism::sync_host_to_device(lvl.u);
+    gpism::sync_host_to_device(lvl.rhs);
+  }
+
+  gpism::compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
+                          fine.r, fine.Ax);
+  gpism::sync_device_to_host(fine.r);
   const double r0 = norm2_host(fine.r);
 
   for (int cycle = 0; cycle < 3; ++cycle) {
     gpism::v_cycle(mg, 2, 2, 4, 0.8);
   }
 
-  gpism::compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r);
+  gpism::compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
+                          fine.r, fine.Ax);
+  gpism::sync_device_to_host(fine.r);
   const double r1 = norm2_host(fine.r);
 
   return (r0 > 0.0) ? (r1 / r0) : 0.0;

@@ -84,6 +84,7 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
                              const double* beta_u, const double* beta_v,
                              double* out_u, double* out_v, double inv_dx2,
                              double inv_dy2, double inv_2dx, double inv_2dy,
+                             int stride_mask_u, int stride_mask_v,
                              const int* mask_u, const int* mask_v, int has_bc) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
@@ -93,7 +94,9 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
 
   const int c_u = idx(i, j, gw, stride_u);
   const int c_v = idx(i, j, gw, stride_v);
-  if (has_bc && mask_u && mask_u[c_u] != 0) {
+  const int mask_u_idx = idx(i, j, gw, stride_mask_u);
+  const int mask_v_idx = idx(i, j, gw, stride_mask_v);
+  if (has_bc && mask_u && mask_u[mask_u_idx] != 0) {
     out_u[c_u] = u[c_u];
   } else {
     const int e = idx(i + 1, j, gw, stride_u);
@@ -121,7 +124,7 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
                  beta_u[idx(i, j, gw, stride_beta_u)] * u[c_u];
   }
 
-  if (has_bc && mask_v && mask_v[c_v] != 0) {
+  if (has_bc && mask_v && mask_v[mask_v_idx] != 0) {
     out_v[c_v] = v[c_v];
   } else {
     const int e = idx(i + 1, j, gw, stride_v);
@@ -157,7 +160,8 @@ __global__ void apply_region_kernel(
     const double* nu_v, const double* beta_u, const double* beta_v,
     double* out_u, double* out_v, double inv_dx2, double inv_dy2,
     double inv_2dx, double inv_2dy, const int* mask_u, const int* mask_v,
-    int has_bc, int i_start, int i_end, int j_start, int j_end) {
+    int stride_mask_u, int stride_mask_v, int has_bc, int i_start, int i_end,
+    int j_start, int j_end) {
   int i = blockIdx.x * blockDim.x + threadIdx.x + i_start;
   int j = blockIdx.y * blockDim.y + threadIdx.y + j_start;
   if (i >= i_end || j >= j_end) {
@@ -166,7 +170,9 @@ __global__ void apply_region_kernel(
 
   const int c_u = idx(i, j, gw, stride_u);
   const int c_v = idx(i, j, gw, stride_v);
-  if (has_bc && mask_u && mask_u[c_u] != 0) {
+  const int mask_u_idx = idx(i, j, gw, stride_mask_u);
+  const int mask_v_idx = idx(i, j, gw, stride_mask_v);
+  if (has_bc && mask_u && mask_u[mask_u_idx] != 0) {
     out_u[c_u] = u[c_u];
   } else {
     const int e = idx(i + 1, j, gw, stride_u);
@@ -194,7 +200,7 @@ __global__ void apply_region_kernel(
                  beta_u[idx(i, j, gw, stride_beta_u)] * u[c_u];
   }
 
-  if (has_bc && mask_v && mask_v[c_v] != 0) {
+  if (has_bc && mask_v && mask_v[mask_v_idx] != 0) {
     out_v[c_v] = v[c_v];
   } else {
     const int e = idx(i + 1, j, gw, stride_v);
@@ -259,8 +265,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const double* nu_v, const double* beta_u,
                     const double* beta_v, double* out_u, double* out_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
-                    double inv_2dy, const int* mask_u, const int* mask_v,
-                    int has_bc) {
+                    double inv_2dy, int stride_mask_u, int stride_mask_v,
+                    const int* mask_u, const int* mask_v, int has_bc) {
   CudaEventTimer timer("ssa_apply");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
@@ -269,8 +275,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                     stride_nu_v, stride_beta_u, stride_beta_v,
                                     stride_out_u, stride_out_v, u, v, nu_u,
                                     nu_v, beta_u, beta_v, out_u, out_v, inv_dx2,
-                                    inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
-                                    has_bc);
+                                    inv_dy2, inv_2dx, inv_2dy, stride_mask_u,
+                                    stride_mask_v, mask_u, mask_v, has_bc);
 }
 
 void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -281,6 +287,7 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            const double* beta_u, const double* beta_v,
                            double* out_u, double* out_v, double inv_dx2,
                            double inv_dy2, double inv_2dx, double inv_2dy,
+                           int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
                            int i_start, int i_end, int j_start, int j_end) {
   CudaEventTimer timer("ssa_apply");
@@ -294,7 +301,7 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
       mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v, stride_beta_u,
       stride_beta_v, stride_out_u, stride_out_v, u, v, nu_u, nu_v, beta_u,
       beta_v, out_u, out_v, inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
-      has_bc, i_start, i_end, j_start, j_end);
+      stride_mask_u, stride_mask_v, has_bc, i_start, i_end, j_start, j_end);
 }
 
 }  // namespace gpism

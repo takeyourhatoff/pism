@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -183,6 +184,13 @@ double global_sum(const Context* context, double local_value) {
   return local_value;
 }
 
+bool is_rank0(const Context* context) {
+  if (!context || !context->mpi_enabled()) {
+    return true;
+  }
+  return context->rank() == 0;
+}
+
 }  // namespace
 
 void IdentityPreconditioner::apply(const FieldStag2D<double>& x,
@@ -211,6 +219,32 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   copy(b, r);
   axpy(-1.0, Ax, r);
   M->apply(r, z);
+
+  if (options.precond_diagnostic) {
+    const double r_norm =
+        std::sqrt(global_sum(options.context, dot(r, r)));
+    op.apply(z, Ax);
+    const double z_norm =
+        std::sqrt(global_sum(options.context, dot(z, z)));
+    const double az_norm =
+        std::sqrt(global_sum(options.context, dot(Ax, Ax)));
+    copy(r, w);
+    axpy(-1.0, Ax, w);
+    const double r_az_norm =
+        std::sqrt(global_sum(options.context, dot(w, w)));
+    if (is_rank0(options.context)) {
+      std::cout << "GMRES preconditioning: left (Krylov on M^{-1}A), "
+                   "apply M^{-1} to residual and A*V_j\n";
+      std::cout << "GMRES preconditioner diagnostic: ||r||=" << r_norm
+                << " ||M^{-1} r||=" << z_norm
+                << " ||A M^{-1} r||=" << az_norm
+                << " ||r - A M^{-1} r||=" << r_az_norm;
+      if (r_norm > 0.0) {
+        std::cout << " ratio=" << (r_az_norm / r_norm);
+      }
+      std::cout << '\n';
+    }
+  }
 
   double beta = std::sqrt(global_sum(options.context, dot(z, z)));
   result.residual = beta;

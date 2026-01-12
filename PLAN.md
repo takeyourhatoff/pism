@@ -238,6 +238,9 @@
   * [x] measure iterations, residual curves
   * [x] SSA operator smoke solve (few GMRES iterations, residual drops)
 * [x] Add non-trivial SSA GMRES regression (nuH>0, known solution)
+* [x] Wire multigrid preconditioner into SSA GMRES (configurable) and reprofile
+* [x] Add MG preconditioner effectiveness diagnostic (||r|| vs ||r - A M^{-1} r||, CPU vs GPU compare)
+* [x] Add MG effectiveness diagnostic with Dirichlet BCs + MPI (check halo exchange correctness)
 * [x] Validate GMRES convergence on simple SSA cases under MPI decomposition
 * [x] Add MPI decomposition stability test for GMRES iterations (1 vs 2 ranks)
 
@@ -282,7 +285,21 @@
   * [x] variable coefficient cases (nuH varies)
   * [x] scaling test: iterations vs resolution
   * [x] GMRES vs GMRES+MG iteration comparison smoke test
-  * [x] MG refinement sanity check (16x16 vs 32x32)
+* [x] MG refinement sanity check (16x16 vs 32x32)
+* [x] Audit MG preconditioner integration in GMRES
+
+  * [x] confirm std-greenland run uses MG (not identity) and report params + CUDA path
+  * [x] verify GMRES preconditioning form (left vs right) and that MG applies to correct vector
+  * [x] add runtime diagnostic: compute z=M^{-1}r and report ||r|| and ||r-Az||
+* [x] Investigate large ||r-A M^{-1} r|| on std-greenland
+
+  * [x] inspect std-greenland BC mask/value ranges and check if MG should treat BCs differently
+  * [x] extend diagnostic to print ||z|| and ||A z|| (and NaN/inf check) to localize blow-up
+  * [x] compare diagnostic with/without BC values in MG preconditioner (N/A: BC fields missing in std-greenland)
+  * [x] add optional tauc default/floor (config) and rerun MG diagnostic
+* [~] Tune MG parameters for SSA (pre/post/coarse iters, omega, min_size)
+* [~] Reprofile std-greenland with tuned MG params and compare kernel mix + iterations
+* [x] Measure std-greenland wall time with/without tauc fallback to quantify MG impact
 
 ### M6 Definition of Done
 
@@ -500,6 +517,7 @@
 * [ ] Calving + front evolution
 * [ ] Subglacial hydrology coupling
 * [ ] Bed deformation / GIA coupling
+* [ ] Derive basal yield stress (`tauc`) from PISM-style physics (topg_to_phi + Mohr-Coulomb) when missing
 * [ ] Adjoint/inversion workflows
 * [ ] More I/O formats and post-processing integrations
 
@@ -611,6 +629,15 @@
   * Batched GMRES orthogonalization on GPU to cut scalar D2H copies further (Nsight shows ~280 D2H copies vs ~1420 previously in timestep GPU smoke).
   * Added legacy `x1`/`y1` NetCDF dimension support in restart reader and a legacy-dims IO smoke test.
   * Ran a minimal gpism std-greenland step and documented the gpism quick-check command in `examples/std-greenland/README.md`.
+  * Wired multigrid as a device-capable SSA GMRES preconditioner (GPU restrict/prolong/jacobi/residual kernels) and reprofiles show MG adds GPU work but does not reduce GMRES dot/orth counts yet.
+  * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
+  * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
+  * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Added MG usage logging (params + CUDA path) and GMRES preconditioner diagnostics (left-preconditioned log + ||r||/||r-A M^{-1} r|| report), verified on std-greenland.
+  * Extended MG diagnostics with ||M^{-1} r||/||A M^{-1} r|| and fine-level nuH/beta/diag stats; std-greenland has no vel_bc fields and no tauc (beta=0), diag min 0/max ~45, MG preconditioner blows up (||M^{-1} r|| ~3e23).
+  * Added `ssa.tauc_default`/`ssa.tauc_floor` config handling; std-greenland with tauc=100k yields beta≈1000, diag≈[1000,1045], and MG diagnostic improves (||r - A M^{-1} r||/||r||≈3.7e-4).
+  * Timed std-greenland: baseline (tauc missing) wall=40.37s vs tauc=100k wall=1.38s (~29.3x speedup).
+  * Set `ssa.tauc_default` to 2e5 Pa to match PISM constant default; added backlog item to implement PISM-style tauc derivation.
 * 🧱 Blocked:
 
   * -

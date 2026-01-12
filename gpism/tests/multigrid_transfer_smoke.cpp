@@ -1,4 +1,5 @@
 #include "gpism/multigrid.h"
+#include "gpism/field_sync.h"
 
 #include <cmath>
 #include <iostream>
@@ -92,13 +93,16 @@ int main() {
       fine(i, j, 1) = static_cast<double>(100 + i + 10 * j);
     }
   }
+  gpism::sync_host_to_device(fine);
 
   gpism::restrict_stag(fine, coarse);
+  gpism::sync_device_to_host(coarse);
   if (!check_restrict(coarse, fine)) {
     return 1;
   }
 
   gpism::prolong_stag(coarse, fine_from_coarse);
+  gpism::sync_device_to_host(fine_from_coarse);
   if (!check_prolong(fine_from_coarse, coarse)) {
     return 1;
   }

@@ -1,10 +1,13 @@
 #pragma once
 
+#include <memory>
+
 #include "gpism/field2d.h"
 #include "gpism/field3d.h"
 #include "gpism/field_stag2d.h"
 #include "gpism/geometry.h"
 #include "gpism/grid2d.h"
+#include "gpism/multigrid.h"
 #include "gpism/ssa_operator.h"
 #include "gpism/viscosity.h"
 
@@ -25,6 +28,15 @@ struct SSASolverOptions {
   int gmres_restart = 30;
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;
+
+  bool use_mg_precond = false;
+  int mg_pre_iters = 2;
+  int mg_post_iters = 2;
+  int mg_coarse_iters = 10;
+  double mg_omega = 0.8;
+  int mg_min_size = 4;
+  bool mg_diagnostic = false;
+  bool gmres_precond_diagnostic = false;
 
   bool use_bc = false;
   const Field3D<double>* enthalpy = nullptr;
@@ -74,6 +86,8 @@ private:
     FieldStag2D<double> vel_prev;
     FieldStag2D<int> bc_mask;
     FieldStag2D<double> bc_values;
+    std::unique_ptr<MultigridHierarchy> mg;
+    int mg_min_size = 0;
 
     void ensure(const Grid2D& grid) {
       const int mx_new = grid.local_mx();

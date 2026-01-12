@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iostream>
+#include <limits>
+#include <optional>
 
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
@@ -10,6 +13,7 @@
 #include "gpism/gmres.h"
 #include "gpism/halo_exchange.h"
 #include "gpism/linear_algebra.h"
+#include "gpism/mg_preconditioner.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -67,6 +71,149 @@ double global_sum(const Context* context, double local_value) {
   }
 #endif
   return local_value;
+}
+
+double global_min(const Context* context, double local_value) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    double global_value = 0.0;
+    MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_MIN,
+                  MPI_COMM_WORLD);
+    return global_value;
+  }
+#endif
+  return local_value;
+}
+
+double global_max(const Context* context, double local_value) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    double global_value = 0.0;
+    MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_MAX,
+                  MPI_COMM_WORLD);
+    return global_value;
+  }
+#endif
+  return local_value;
+}
+
+bool is_rank0(const Context* context) {
+  if (!context || !context->mpi_enabled()) {
+    return true;
+  }
+  return context->rank() == 0;
+}
+
+bool mg_device_ready(const MultigridHierarchy& mg,
+                     const SSABoundaryCondition* bc) {
+#if GPISM_HAVE_CUDA
+  if (!device_enabled()) {
+    return false;
+  }
+  const bool has_bc = bc && bc->mask;
+  const bool has_values = has_bc && bc->values;
+  if (has_bc) {
+    if (!bc->mask->component(0).has_device_data() ||
+        !bc->mask->component(1).has_device_data()) {
+      return false;
+    }
+  }
+  if (has_values) {
+    if (!bc->values->component(0).has_device_data() ||
+        !bc->values->component(1).has_device_data()) {
+      return false;
+    }
+  }
+  auto has_device = [](const FieldStag2D<double>& field) {
+    return field.component(0).has_device_data() &&
+           field.component(1).has_device_data();
+  };
+  for (int level = 0; level < mg.num_levels(); ++level) {
+    const MGLevel& lvl = mg.level(level);
+    if (!has_device(lvl.u) || !has_device(lvl.rhs) || !has_device(lvl.r) ||
+        !has_device(lvl.nuH) || !has_device(lvl.beta) ||
+        !has_device(lvl.diag) || !has_device(lvl.Ax) ||
+        !has_device(lvl.corr)) {
+      return false;
+    }
+  }
+  return true;
+#else
+  (void)mg;
+  (void)bc;
+  return false;
+#endif
+}
+
+struct FieldStats {
+  double min = 0.0;
+  double max = 0.0;
+  bool all_finite = true;
+};
+
+FieldStats field_stats(const FieldStag2D<double>& field) {
+  FieldStats stats;
+  stats.min = std::numeric_limits<double>::infinity();
+  stats.max = -std::numeric_limits<double>::infinity();
+  const int mx = field.local_mx();
+  const int my = field.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      for (int comp = 0; comp < 2; ++comp) {
+        const double value = field(i, j, comp);
+        if (!std::isfinite(value)) {
+          stats.all_finite = false;
+          continue;
+        }
+        stats.min = std::min(stats.min, value);
+        stats.max = std::max(stats.max, value);
+      }
+    }
+  }
+  if (stats.min == std::numeric_limits<double>::infinity()) {
+    stats.min = 0.0;
+    stats.max = 0.0;
+  }
+  return stats;
+}
+
+FieldStats diag_stats(const Grid2D& grid, const FieldStag2D<double>& nuH,
+                      const FieldStag2D<double>& beta) {
+  FieldStats stats;
+  stats.min = std::numeric_limits<double>::infinity();
+  stats.max = -std::numeric_limits<double>::infinity();
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  const double inv_dx2 = 1.0 / (grid.dx() * grid.dx());
+  const double inv_dy2 = 1.0 / (grid.dy() * grid.dy());
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      const double dxx_u =
+          (nuH(i + 1, j, 0) + nuH(i - 1, j, 0)) * inv_dx2;
+      const double dyy_u =
+          (nuH(i, j + 1, 0) + nuH(i, j - 1, 0)) * inv_dy2;
+      const double diag_u = beta(i, j, 0) + dxx_u + dyy_u;
+      const double dxx_v =
+          (nuH(i + 1, j, 1) + nuH(i - 1, j, 1)) * inv_dx2;
+      const double dyy_v =
+          (nuH(i, j + 1, 1) + nuH(i, j - 1, 1)) * inv_dy2;
+      const double diag_v = beta(i, j, 1) + dxx_v + dyy_v;
+      const double values[2] = {diag_u, diag_v};
+      for (double value : values) {
+        if (!std::isfinite(value)) {
+          stats.all_finite = false;
+          continue;
+        }
+        stats.min = std::min(stats.min, value);
+        stats.max = std::max(stats.max, value);
+      }
+    }
+  }
+  if (stats.min == std::numeric_limits<double>::infinity()) {
+    stats.min = 0.0;
+    stats.max = 0.0;
+  }
+  return stats;
 }
 
 double clamp_value(double value, double min_value, double max_value) {
@@ -265,6 +412,24 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     exchange_for_device(beta, grid_, *context);
   }
 
+  if (options.use_mg_precond) {
+    const int min_size = std::max(2, options.mg_min_size);
+    const bool needs_rebuild =
+        !workspace_.mg || workspace_.mg_min_size != min_size ||
+        workspace_.mg->level(0).grid.local_mx() != grid_.local_mx() ||
+        workspace_.mg->level(0).grid.local_my() != grid_.local_my() ||
+        workspace_.mg->level(0).grid.ghost_width() != grid_.ghost_width();
+    if (needs_rebuild) {
+      workspace_.mg = std::make_unique<MultigridHierarchy>(grid_, min_size);
+      workspace_.mg_min_size = min_size;
+    }
+    MultigridHierarchy& mg = *workspace_.mg;
+    copy(beta, mg.level(0).beta);
+    for (int level = 1; level < mg.num_levels(); ++level) {
+      restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
+    }
+  }
+
   ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
                     options.use_bc ? &bc : nullptr);
   if (context && context->mpi_enabled()) {
@@ -288,15 +453,66 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       exchange_for_device(nuH, grid_, *context);
     }
 
+    const MultigridPreconditioner* precond_ptr = nullptr;
+    std::optional<MultigridPreconditioner> precond;
+    if (options.use_mg_precond) {
+      MultigridHierarchy& mg = *workspace_.mg;
+      copy(nuH, mg.level(0).nuH);
+      for (int level = 1; level < mg.num_levels(); ++level) {
+        restrict_stag(mg.level(level - 1).nuH, mg.level(level).nuH);
+      }
+      precond.emplace(mg, options.mg_pre_iters, options.mg_post_iters,
+                      options.mg_coarse_iters, options.mg_omega,
+                      options.use_bc ? &bc : nullptr, context);
+      precond_ptr = &(*precond);
+      if (options.mg_diagnostic && iter == 0) {
+        auto& fine = mg.level(0);
+        sync_device_to_host(fine.nuH);
+        sync_device_to_host(fine.beta);
+        const FieldStats nuH_stats = field_stats(fine.nuH);
+        const FieldStats beta_stats = field_stats(fine.beta);
+        const FieldStats diag = diag_stats(fine.grid, fine.nuH, fine.beta);
+        const double nuH_min = global_min(context, nuH_stats.min);
+        const double nuH_max = global_max(context, nuH_stats.max);
+        const double beta_min = global_min(context, beta_stats.min);
+        const double beta_max = global_max(context, beta_stats.max);
+        const double diag_min = global_min(context, diag.min);
+        const double diag_max = global_max(context, diag.max);
+        if (is_rank0(context)) {
+          const bool mg_cuda =
+              mg_device_ready(mg, options.use_bc ? &bc : nullptr);
+          std::cout << "SSA GMRES preconditioner: multigrid\n";
+          std::cout << "MG params: pre=" << options.mg_pre_iters
+                    << " post=" << options.mg_post_iters
+                    << " coarse=" << options.mg_coarse_iters
+                    << " omega=" << options.mg_omega
+                    << " min_size=" << options.mg_min_size
+                    << " levels=" << mg.num_levels()
+                    << " device_path=" << (mg_cuda ? "cuda" : "host")
+                    << '\n';
+          std::cout << "MG fine-level stats: nuH[min,max]=[" << nuH_min << ", "
+                    << nuH_max << "] beta[min,max]=[" << beta_min << ", "
+                    << beta_max << "] diag[min,max]=[" << diag_min << ", "
+                    << diag_max << "]";
+          if (!(nuH_stats.all_finite && beta_stats.all_finite && diag.all_finite)) {
+            std::cout << " (non-finite values detected)";
+          }
+          std::cout << '\n';
+        }
+      }
+    }
+
     GMRESOptions gmres_opts;
     gmres_opts.restart = options.gmres_restart;
     gmres_opts.max_iter = options.gmres_max_iter;
     gmres_opts.tol = options.gmres_tol;
+    gmres_opts.precond_diagnostic =
+        options.gmres_precond_diagnostic && (iter == 0);
     gmres_opts.context = context;
 
     SSAApplyOperator op(ssa_, grid_, nuH, beta, options.use_bc ? &bc : nullptr,
                         context);
-    GMRESResult gmres_result = gmres_solve(op, rhs, vel, gmres_opts);
+    GMRESResult gmres_result = gmres_solve(op, rhs, vel, gmres_opts, precond_ptr);
     result.linear_iters = gmres_result.iterations;
     result.linear_residual = gmres_result.residual;
 

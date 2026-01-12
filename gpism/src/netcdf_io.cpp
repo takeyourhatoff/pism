@@ -493,8 +493,9 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   ok = read_var_2d_slice(ncid, "topg", dim_time, time_index, xs, ys, mx, my,
                          fields.topg, true, 0.0) &&
        ok;
+  bool has_tauc = false;
   ok = read_var_2d_slice(ncid, "tauc", dim_time, time_index, xs, ys, mx, my,
-                         fields.tauc, false, 0.0) &&
+                         fields.tauc, false, 0.0, &has_tauc) &&
        ok;
   bool has_u_bc = false;
   bool has_v_bc = false;
@@ -509,6 +510,7 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
                          fields.vel_bc_mask, false, 0, &has_vel_bc_mask) &&
        ok;
   fields.has_vel_bc = has_u_bc || has_v_bc || has_vel_bc_mask;
+  fields.has_tauc = has_tauc;
 
   bool has_uvel = false;
   bool has_vvel = false;

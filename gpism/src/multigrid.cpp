@@ -3,9 +3,58 @@
 #include <algorithm>
 #include <vector>
 
+#include "gpism/field_sync.h"
+#include "gpism/halo_exchange.h"
+#include "gpism/linear_algebra.h"
 #include "gpism/ssa_operator.h"
 
 namespace gpism {
+
+#if GPISM_HAVE_CUDA
+void mg_restrict_stag_cuda(int fine_mx, int fine_my, int fine_gw,
+                           int fine_stride_u, int fine_stride_v, int coarse_mx,
+                           int coarse_my, int coarse_gw, int coarse_stride_u,
+                           int coarse_stride_v, const double* fine_u,
+                           const double* fine_v, double* coarse_u,
+                           double* coarse_v);
+void mg_prolong_stag_cuda(int coarse_mx, int coarse_my, int coarse_gw,
+                          int coarse_stride_u, int coarse_stride_v, int fine_mx,
+                          int fine_my, int fine_gw, int fine_stride_u,
+                          int fine_stride_v, const double* coarse_u,
+                          const double* coarse_v, double* fine_u,
+                          double* fine_v);
+void mg_compute_diag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                          const double* nu_u, const double* nu_v,
+                          const double* beta_u, const double* beta_v,
+                          double* diag_u, double* diag_v, double inv_dx2,
+                          double inv_dy2, int stride_mask_u, int stride_mask_v,
+                          const int* mask_u, const int* mask_v, int has_bc);
+void mg_residual_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                      const double* b_u, const double* b_v, const double* Ax_u,
+                      const double* Ax_v, double* r_u, double* r_v,
+                      int stride_mask_u, int stride_mask_v, const int* mask_u,
+                      const int* mask_v, int has_bc);
+void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                           const double* b_u, const double* b_v,
+                           const double* Ax_u, const double* Ax_v,
+                           const double* diag_u, const double* diag_v,
+                           double* x_u, double* x_v, double omega,
+                           int stride_mask_u, int stride_mask_v,
+                           const int* mask_u, const int* mask_v,
+                           int stride_bc_u, int stride_bc_v, const double* bc_u,
+                           const double* bc_v, int has_bc, int has_values);
+
+void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                    int stride_nu_u, int stride_nu_v, int stride_beta_u,
+                    int stride_beta_v, int stride_out_u, int stride_out_v,
+                    const double* u, const double* v, const double* nu_u,
+                    const double* nu_v, const double* beta_u,
+                    const double* beta_v, double* out_u, double* out_v,
+                    double inv_dx2, double inv_dy2, double inv_2dx,
+                    double inv_2dy, int stride_mask_u, int stride_mask_v,
+                    const int* mask_u, const int* mask_v, int has_bc);
+#endif
+
 namespace {
 
 int coarsen_dim(int n) { return (n + 1) / 2; }
@@ -15,6 +64,27 @@ bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
     return false;
   }
   return (*bc->mask)(i, j, comp) != 0;
+}
+
+template <typename T>
+void exchange_for_device(FieldStag2D<T>& field, const Grid2D& grid,
+                         const Context* context) {
+  if (!context || !context->mpi_enabled()) {
+    return;
+  }
+  HaloExchange2D exchange;
+#if GPISM_HAVE_CUDA
+  const bool can_device = context->cuda_aware_mpi() &&
+                          field.component(0).device_data() != nullptr &&
+                          field.component(1).device_data() != nullptr;
+  if (can_device) {
+    exchange.exchange(field, grid, *context, HaloExchange2D::Mode::Device);
+    return;
+  }
+#endif
+  sync_device_to_host(field);
+  exchange.exchange(field, grid, *context, HaloExchange2D::Mode::Host);
+  sync_host_to_device(field);
 }
 
 void ssa_apply_host(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -155,6 +225,21 @@ MultigridHierarchy::MultigridHierarchy(const Grid2D& fine_grid, int min_size) {
 }
 
 void restrict_stag(const FieldStag2D<double>& fine, FieldStag2D<double>& coarse) {
+#if GPISM_HAVE_CUDA
+  if (fine.component(0).has_device_data() &&
+      fine.component(1).has_device_data() &&
+      coarse.component(0).has_device_data() &&
+      coarse.component(1).has_device_data()) {
+    mg_restrict_stag_cuda(
+        fine.local_mx(), fine.local_my(), fine.ghost_width(),
+        fine.component(0).stride(), fine.component(1).stride(),
+        coarse.local_mx(), coarse.local_my(), coarse.ghost_width(),
+        coarse.component(0).stride(), coarse.component(1).stride(),
+        fine.component(0).device_data(), fine.component(1).device_data(),
+        coarse.component(0).device_data(), coarse.component(1).device_data());
+    return;
+  }
+#endif
   const int coarse_mx = coarse.local_mx();
   const int coarse_my = coarse.local_my();
   for (int j = 0; j < coarse_my; ++j) {
@@ -173,6 +258,21 @@ void restrict_stag(const FieldStag2D<double>& fine, FieldStag2D<double>& coarse)
 }
 
 void prolong_stag(const FieldStag2D<double>& coarse, FieldStag2D<double>& fine) {
+#if GPISM_HAVE_CUDA
+  if (coarse.component(0).has_device_data() &&
+      coarse.component(1).has_device_data() &&
+      fine.component(0).has_device_data() &&
+      fine.component(1).has_device_data()) {
+    mg_prolong_stag_cuda(
+        coarse.local_mx(), coarse.local_my(), coarse.ghost_width(),
+        coarse.component(0).stride(), coarse.component(1).stride(),
+        fine.local_mx(), fine.local_my(), fine.ghost_width(),
+        fine.component(0).stride(), fine.component(1).stride(),
+        coarse.component(0).device_data(), coarse.component(1).device_data(),
+        fine.component(0).device_data(), fine.component(1).device_data());
+    return;
+  }
+#endif
   const int coarse_mx = coarse.local_mx();
   const int coarse_my = coarse.local_my();
   const int fine_mx = fine.local_mx();
@@ -214,8 +314,74 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
                       const FieldStag2D<double>& beta,
                       const FieldStag2D<double>& b,
                       const FieldStag2D<double>& x, FieldStag2D<double>& r,
-                      const SSABoundaryCondition* bc) {
-  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
+                      FieldStag2D<double>& Ax,
+                      const SSABoundaryCondition* bc,
+                      const Context* context) {
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
+    exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
+    exchange_for_device(const_cast<FieldStag2D<double>&>(x), grid, context);
+  }
+#else
+  (void)context;
+#endif
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask;
+  const bool device_ready =
+      nuH.component(0).has_device_data() &&
+      nuH.component(1).has_device_data() &&
+      beta.component(0).has_device_data() &&
+      beta.component(1).has_device_data() &&
+      b.component(0).has_device_data() &&
+      b.component(1).has_device_data() &&
+      x.component(0).has_device_data() &&
+      x.component(1).has_device_data() &&
+      r.component(0).has_device_data() &&
+      r.component(1).has_device_data() &&
+      Ax.component(0).has_device_data() &&
+      Ax.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data()));
+  if (device_ready) {
+    const double dx = grid.dx();
+    const double dy = grid.dy();
+    const double inv_dx2 = 1.0 / (dx * dx);
+    const double inv_dy2 = 1.0 / (dy * dy);
+    const double inv_2dx = 1.0 / (2.0 * dx);
+    const double inv_2dy = 1.0 / (2.0 * dy);
+    const int mask_stride_u =
+        has_bc ? bc->mask->component(0).stride() : 0;
+    const int mask_stride_v =
+        has_bc ? bc->mask->component(1).stride() : 0;
+    ssa_apply_cuda(
+        grid.local_mx(), grid.local_my(), x.ghost_width(),
+        x.component(0).stride(), x.component(1).stride(),
+        nuH.component(0).stride(), nuH.component(1).stride(),
+        beta.component(0).stride(), beta.component(1).stride(),
+        Ax.component(0).stride(), Ax.component(1).stride(),
+        x.component(0).device_data(), x.component(1).device_data(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        Ax.component(0).device_data(), Ax.component(1).device_data(),
+        inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    mg_residual_cuda(
+        grid.local_mx(), grid.local_my(), r.ghost_width(),
+        r.component(0).stride(), r.component(1).stride(),
+        b.component(0).device_data(), b.component(1).device_data(),
+        Ax.component(0).device_data(), Ax.component(1).device_data(),
+        r.component(0).device_data(), r.component(1).device_data(),
+        mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    return;
+  }
+#endif
   ssa_apply_host(grid, nuH, beta, x, Ax, bc);
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
@@ -233,17 +399,115 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
 void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                    const FieldStag2D<double>& beta, const FieldStag2D<double>& b,
                    FieldStag2D<double>& x, int iterations, double omega,
-                   const SSABoundaryCondition* bc) {
+                   FieldStag2D<double>& diag, FieldStag2D<double>& Ax,
+                   const SSABoundaryCondition* bc,
+                   const Context* context) {
   if (iterations <= 0) {
     return;
   }
 
-  FieldStag2D<double> diag(grid.local_mx(), grid.local_my(), grid.ghost_width());
-  FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), grid.ghost_width());
+#if GPISM_HAVE_MPI
+  if (context && context->mpi_enabled()) {
+    exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
+    exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
+  }
+#else
+  (void)context;
+#endif
 
+#if GPISM_HAVE_CUDA
+  const bool has_bc = bc && bc->mask;
+  const bool has_values =
+      has_bc && bc->values &&
+      bc->values->component(0).has_device_data() &&
+      bc->values->component(1).has_device_data();
+  const bool device_ready =
+      nuH.component(0).has_device_data() &&
+      nuH.component(1).has_device_data() &&
+      beta.component(0).has_device_data() &&
+      beta.component(1).has_device_data() &&
+      b.component(0).has_device_data() &&
+      b.component(1).has_device_data() &&
+      x.component(0).has_device_data() &&
+      x.component(1).has_device_data() &&
+      diag.component(0).has_device_data() &&
+      diag.component(1).has_device_data() &&
+      Ax.component(0).has_device_data() &&
+      Ax.component(1).has_device_data() &&
+      (!has_bc ||
+       (bc->mask->component(0).has_device_data() &&
+        bc->mask->component(1).has_device_data()));
+  if (device_ready) {
+    const double dx = grid.dx();
+    const double dy = grid.dy();
+    const double inv_dx2 = 1.0 / (dx * dx);
+    const double inv_dy2 = 1.0 / (dy * dy);
+    const double inv_2dx = 1.0 / (2.0 * dx);
+    const double inv_2dy = 1.0 / (2.0 * dy);
+    const int mask_stride_u =
+        has_bc ? bc->mask->component(0).stride() : 0;
+    const int mask_stride_v =
+        has_bc ? bc->mask->component(1).stride() : 0;
+    const int bc_stride_u =
+        has_values ? bc->values->component(0).stride() : 0;
+    const int bc_stride_v =
+        has_values ? bc->values->component(1).stride() : 0;
+    mg_compute_diag_cuda(
+        grid.local_mx(), grid.local_my(), diag.ghost_width(),
+        diag.component(0).stride(), diag.component(1).stride(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        beta.component(0).device_data(), beta.component(1).device_data(),
+        diag.component(0).device_data(), diag.component(1).device_data(),
+        inv_dx2, inv_dy2, mask_stride_u, mask_stride_v,
+        has_bc ? bc->mask->component(0).device_data() : nullptr,
+        has_bc ? bc->mask->component(1).device_data() : nullptr,
+        has_bc ? 1 : 0);
+    for (int iter = 0; iter < iterations; ++iter) {
+#if GPISM_HAVE_MPI
+      if (context && context->mpi_enabled()) {
+        exchange_for_device(x, grid, context);
+      }
+#endif
+      ssa_apply_cuda(
+          grid.local_mx(), grid.local_my(), x.ghost_width(),
+          x.component(0).stride(), x.component(1).stride(),
+          nuH.component(0).stride(), nuH.component(1).stride(),
+          beta.component(0).stride(), beta.component(1).stride(),
+          Ax.component(0).stride(), Ax.component(1).stride(),
+          x.component(0).device_data(), x.component(1).device_data(),
+          nuH.component(0).device_data(), nuH.component(1).device_data(),
+          beta.component(0).device_data(), beta.component(1).device_data(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(),
+          inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+      mg_jacobi_update_cuda(
+          grid.local_mx(), grid.local_my(), x.ghost_width(),
+          x.component(0).stride(), x.component(1).stride(),
+          b.component(0).device_data(), b.component(1).device_data(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(),
+          diag.component(0).device_data(), diag.component(1).device_data(),
+          x.component(0).device_data(), x.component(1).device_data(), omega,
+          mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          bc_stride_u, bc_stride_v,
+          has_values ? bc->values->component(0).device_data() : nullptr,
+          has_values ? bc->values->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0, has_values ? 1 : 0);
+    }
+    return;
+  }
+#endif
   compute_jacobi_diag(grid, nuH, beta, diag, bc);
 
   for (int iter = 0; iter < iterations; ++iter) {
+#if GPISM_HAVE_MPI
+    if (context && context->mpi_enabled()) {
+      exchange_for_device(x, grid, context);
+    }
+#endif
     ssa_apply_host(grid, nuH, beta, x, Ax, bc);
     for (int j = 0; j < grid.local_my(); ++j) {
       for (int i = 0; i < grid.local_mx(); ++i) {
@@ -360,7 +624,8 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
 }
 
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
-             int coarse_iters, double omega) {
+             int coarse_iters, double omega,
+             const SSABoundaryCondition* bc, const Context* context) {
   const int levels = mg.num_levels();
   if (levels == 0) {
     return;
@@ -371,30 +636,25 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
     MGLevel& coarse = mg.level(level + 1);
 
     jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, pre_iters,
-                  omega);
-    compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r);
+                  omega, fine.diag, fine.Ax, bc, context);
+    compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r,
+                     fine.Ax, bc, context);
     restrict_stag(fine.r, coarse.rhs);
-    coarse.u.fill(0.0);
+    set(0.0, coarse.u);
   }
 
   MGLevel& coarsest = mg.level(levels - 1);
   jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
-                coarsest.u, coarse_iters, omega);
+                coarsest.u, coarse_iters, omega, coarsest.diag, coarsest.Ax,
+                bc, context);
 
   for (int level = levels - 2; level >= 0; --level) {
     MGLevel& fine = mg.level(level);
     MGLevel& coarse = mg.level(level + 1);
-    FieldStag2D<double> corr(fine.grid.local_mx(), fine.grid.local_my(),
-                             fine.grid.ghost_width());
-    prolong_stag(coarse.u, corr);
-    for (int j = 0; j < fine.grid.local_my(); ++j) {
-      for (int i = 0; i < fine.grid.local_mx(); ++i) {
-        fine.u(i, j, 0) += corr(i, j, 0);
-        fine.u(i, j, 1) += corr(i, j, 1);
-      }
-    }
+    prolong_stag(coarse.u, fine.corr);
+    axpy(1.0, fine.corr, fine.u);
     jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, post_iters,
-                  omega);
+                  omega, fine.diag, fine.Ax, bc, context);
   }
 }
 

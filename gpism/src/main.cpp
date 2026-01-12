@@ -1,8 +1,9 @@
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <string>
-#include <vector>
 #include <utility>
+#include <vector>
 
 #include "gpism/context.h"
 #include "gpism/field_sync.h"
@@ -192,6 +193,28 @@ int main(int argc, char** argv) {
       return 2;
     }
 
+    const double tauc_default = config.get_double("ssa.tauc_default");
+    const double tauc_floor = config.get_double("ssa.tauc_floor");
+    if (!fields.has_tauc) {
+      if (tauc_default != 0.0) {
+        fields.tauc.fill(tauc_default);
+        log_rank0(context,
+                  "Input missing tauc; using ssa.tauc_default=" +
+                      std::to_string(tauc_default));
+      } else {
+        log_rank0(context, "Input missing tauc; defaulting to 0.0");
+      }
+    }
+    if (tauc_floor > 0.0) {
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          fields.tauc(i, j) = std::max(fields.tauc(i, j), tauc_floor);
+        }
+      }
+      log_rank0(context,
+                "Applied ssa.tauc_floor=" + std::to_string(tauc_floor));
+    }
+
     const double start_year = config.get_double("time.start_year");
     const double run_years = config.get_double("time.years");
     const double dt = config.get_double("time.dt");
@@ -219,6 +242,15 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
+    ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
+    ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");
+    ssa_options.mg_coarse_iters = config.get_int("ssa.mg.coarse_iters");
+    ssa_options.mg_omega = config.get_double("ssa.mg.omega");
+    ssa_options.mg_min_size = config.get_int("ssa.mg.min_size");
+    ssa_options.mg_diagnostic = config.get_bool("ssa.mg.diagnostic");
+    ssa_options.gmres_precond_diagnostic =
+        config.get_bool("ssa.gmres.precond_diagnostic");
     ssa_options.use_bc = fields.has_vel_bc;
     ssa_options.context = &context;
 

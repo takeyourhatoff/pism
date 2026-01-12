@@ -1,4 +1,5 @@
 #include "gpism/multigrid.h"
+#include "gpism/field_sync.h"
 
 #include <cmath>
 #include <iostream>
@@ -21,6 +22,8 @@ int main() {
   gpism::FieldStag2D<double> beta(mx, my, gw);
   gpism::FieldStag2D<double> b(mx, my, gw);
   gpism::FieldStag2D<double> x(mx, my, gw);
+  gpism::FieldStag2D<double> diag(mx, my, gw);
+  gpism::FieldStag2D<double> Ax(mx, my, gw);
 
   nuH.fill(0.0);
   beta.fill(2.0);
@@ -33,7 +36,13 @@ int main() {
     }
   }
 
-  gpism::jacobi_smooth(grid, nuH, beta, b, x, 1, 1.0);
+  gpism::sync_host_to_device(nuH);
+  gpism::sync_host_to_device(beta);
+  gpism::sync_host_to_device(b);
+  gpism::sync_host_to_device(x);
+
+  gpism::jacobi_smooth(grid, nuH, beta, b, x, 1, 1.0, diag, Ax);
+  gpism::sync_device_to_host(x);
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
