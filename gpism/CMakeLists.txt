@@ -124,7 +124,7 @@ set(GPISM_CORE_SOURCES
 )
 
 if(GPISM_ENABLE_NETCDF)
-  list(APPEND GPISM_CORE_SOURCES src/netcdf_io.cpp)
+  list(APPEND GPISM_CORE_SOURCES src/netcdf_io.cpp src/async_output.cpp)
 endif()
 
 if(GPISM_ENABLE_CUDA)

@@ -436,7 +436,7 @@
   * [x] avoid per-step device allocations in hot kernels (or quantify + justify where unavoidable)
   * [x] add hot-loop sync audit to `gpism-timestep-gpu-smoke` (fail if field syncs occur during the loop)
   * [x] re-run `gpism-timestep-gpu-smoke` sync audit after Chebyshev changes
-  * [ ] I/O staging is async and double-buffered when possible; GPU work can overlap output
+  * [x] I/O staging is async and double-buffered when possible; GPU work can overlap output
   * [x] add GPU timestep smoke test (no NetCDF) to exercise full DAG + profile host/device transfers
 * [x] Overlap comm/compute
 
@@ -444,16 +444,16 @@
   * [x] boundary compute after halos arrive
 * [ ] Memory bandwidth optimization
 
-  * [ ] fuse kernels where it matters (operator apply + coefficient loads)
-  * [ ] minimize temporaries
+  * [x] fuse kernels where it matters (operator apply + coefficient loads)
+  * [x] minimize temporaries
 * [ ] Mixed precision option (optional but high value)
 
   * [ ] keep solution in FP64, smoothers in FP32 (or configurable)
 * [ ] Scaling benchmarks
 
-  * [ ] 1 GPU strong scaling
-  * [ ] multi-GPU weak scaling
-  * [ ] write benchmark report in `docs/performance.md`
+  * [x] 1 GPU strong scaling
+  * [x] multi-GPU weak scaling
+  * [x] write benchmark report in `docs/performance.md`
 * [x] Add Chebyshev smoother option for MG (device-capable)
 
   * [x] add config switch for MG smoother selection
@@ -645,6 +645,11 @@
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
+  * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
+  * Fused SSA apply + residual in multigrid `compute_residual` (CUDA kernel) to reduce extra residual kernel traffic; benchmarked with Nsight Systems (no clear win yet).
+  * Ran std-greenland perf baselines (pre/post fuse) and recorded kernel mix + wall time deltas in `docs/performance.md`.
+  * Added single-GPU scaling runs (1 vs 2 MPI ranks on one GPU) and a weak-scaling proxy (1 rank half-size vs 2 ranks full-size); documented limitations and timings.
+  * Verified `gpism-timestep-io-smoke` passes with async output enabled by default.
   * Added Chebyshev MG auto-bound estimation (power iteration) with new config knobs and diagnostics.
   * Fixed Chebyshev/Jacobi device-host sync paths for tests; revalidated MG preconditioner effectiveness tests.
   * Benchmarked std-greenland: Jacobi ~1.06s vs Chebyshev-est ~6.07s wall time (Chebyshev slower with per-precond estimation).

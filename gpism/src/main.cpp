@@ -13,6 +13,7 @@
 #include "gpism/version.h"
 
 #if GPISM_HAVE_NETCDF
+#include "gpism/async_output.h"
 #include "gpism/netcdf_io.h"
 #endif
 #include "gpism/geometry.h"
@@ -184,6 +185,7 @@ int main(int argc, char** argv) {
     gpism::Grid2D grid(0, 0, 1.0, 1.0, 1, context.rank(), context.size());
     gpism::IOFields2D fields;
     gpism::NetcdfIO io;
+    gpism::AsyncOutputWriter output_writer;
     int time_index = -1;
     if (config.has("io.time_index")) {
       time_index = config.get_int("io.time_index");
@@ -192,6 +194,8 @@ int main(int argc, char** argv) {
       std::cerr << "Error: failed to read input file " << options.input << '\n';
       return 2;
     }
+    const bool async_output = config.get_bool("io.async_output");
+    output_writer.configure(grid, fields, async_output);
 
     const double tauc_default = config.get_double("ssa.tauc_default");
     const double tauc_floor = config.get_double("ssa.tauc_floor");
@@ -371,13 +375,8 @@ int main(int argc, char** argv) {
         gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
         fields.has_usurf = true;
         fields.has_velocity = true;
-        gpism::sync_device_to_host(fields.thk);
-        gpism::sync_device_to_host(fields.usurf);
-        gpism::sync_device_to_host(fields.uvel);
-        gpism::sync_device_to_host(fields.vvel);
-
-        if (!io.write_output_append(options.output, context, grid, fields,
-                                    clock.time())) {
+        if (!output_writer.enqueue(options.output, context, grid, fields,
+                                   clock.time())) {
           std::cerr << "Error: failed to write output file " << options.output
                     << '\n';
           return 2;
@@ -411,6 +410,12 @@ int main(int argc, char** argv) {
       }
 
       clock.advance();
+    }
+
+    if (!output_writer.flush()) {
+      std::cerr << "Error: failed to flush output file " << options.output
+                << '\n';
+      return 2;
     }
 
     return 0;

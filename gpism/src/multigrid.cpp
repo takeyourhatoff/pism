@@ -88,6 +88,27 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            double inv_2dy, int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
                            int i_start, int i_end, int j_start, int j_end);
+void ssa_apply_residual_cuda(
+    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
+    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_out_u,
+    int stride_out_v, int stride_b_u, int stride_b_v, int stride_r_u,
+    int stride_r_v, const double* u, const double* v, const double* nu_u,
+    const double* nu_v, const double* beta_u, const double* beta_v,
+    const double* b_u, const double* b_v, double* out_u, double* out_v,
+    double* r_u, double* r_v, double inv_dx2, double inv_dy2, double inv_2dx,
+    double inv_2dy, int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int has_bc);
+void ssa_apply_residual_region_cuda(
+    int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
+    int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_out_u,
+    int stride_out_v, int stride_b_u, int stride_b_v, int stride_r_u,
+    int stride_r_v, const double* u, const double* v, const double* nu_u,
+    const double* nu_v, const double* beta_u, const double* beta_v,
+    const double* b_u, const double* b_v, double* out_u, double* out_v,
+    double* r_u, double* r_v, double inv_dx2, double inv_dy2, double inv_2dx,
+    double inv_2dy, int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int has_bc, int i_start, int i_end, int j_start,
+    int j_end);
 #endif
 
 void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -587,15 +608,19 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
       const int j0 = gw;
       const int j1 = my - gw;
       if (i0 < i1 && j0 < j1) {
-        ssa_apply_region_cuda(
+        ssa_apply_residual_region_cuda(
             mx, my, gw, x.component(0).stride(), x.component(1).stride(),
             nuH.component(0).stride(), nuH.component(1).stride(),
             beta.component(0).stride(), beta.component(1).stride(),
             Ax.component(0).stride(), Ax.component(1).stride(),
+            b.component(0).stride(), b.component(1).stride(),
+            r.component(0).stride(), r.component(1).stride(),
             x.component(0).device_data(), x.component(1).device_data(),
             nuH.component(0).device_data(), nuH.component(1).device_data(),
             beta.component(0).device_data(), beta.component(1).device_data(),
+            b.component(0).device_data(), b.component(1).device_data(),
             Ax.component(0).device_data(), Ax.component(1).device_data(),
+            r.component(0).device_data(), r.component(1).device_data(),
             inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
             has_bc ? bc->mask->component(0).device_data() : nullptr,
             has_bc ? bc->mask->component(1).device_data() : nullptr,
@@ -606,15 +631,19 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
 #endif
       auto apply_band = [&](int is, int ie, int js, int je) {
         if (is < ie && js < je) {
-          ssa_apply_region_cuda(
+          ssa_apply_residual_region_cuda(
               mx, my, gw, x.component(0).stride(), x.component(1).stride(),
               nuH.component(0).stride(), nuH.component(1).stride(),
               beta.component(0).stride(), beta.component(1).stride(),
               Ax.component(0).stride(), Ax.component(1).stride(),
+              b.component(0).stride(), b.component(1).stride(),
+              r.component(0).stride(), r.component(1).stride(),
               x.component(0).device_data(), x.component(1).device_data(),
               nuH.component(0).device_data(), nuH.component(1).device_data(),
               beta.component(0).device_data(), beta.component(1).device_data(),
+              b.component(0).device_data(), b.component(1).device_data(),
               Ax.component(0).device_data(), Ax.component(1).device_data(),
+              r.component(0).device_data(), r.component(1).device_data(),
               inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
               has_bc ? bc->mask->component(0).device_data() : nullptr,
               has_bc ? bc->mask->component(1).device_data() : nullptr,
@@ -626,30 +655,24 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
       apply_band(gw, mx - gw, 0, gw);
       apply_band(gw, mx - gw, my - gw, my);
     } else {
-      ssa_apply_cuda(
+      ssa_apply_residual_cuda(
           mx, my, gw, x.component(0).stride(), x.component(1).stride(),
           nuH.component(0).stride(), nuH.component(1).stride(),
           beta.component(0).stride(), beta.component(1).stride(),
           Ax.component(0).stride(), Ax.component(1).stride(),
+          b.component(0).stride(), b.component(1).stride(),
+          r.component(0).stride(), r.component(1).stride(),
           x.component(0).device_data(), x.component(1).device_data(),
           nuH.component(0).device_data(), nuH.component(1).device_data(),
           beta.component(0).device_data(), beta.component(1).device_data(),
+          b.component(0).device_data(), b.component(1).device_data(),
           Ax.component(0).device_data(), Ax.component(1).device_data(),
+          r.component(0).device_data(), r.component(1).device_data(),
           inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
           has_bc ? bc->mask->component(0).device_data() : nullptr,
           has_bc ? bc->mask->component(1).device_data() : nullptr,
           has_bc ? 1 : 0);
     }
-    mg_residual_cuda(
-        mx, my, r.ghost_width(),
-        r.component(0).stride(), r.component(1).stride(),
-        b.component(0).device_data(), b.component(1).device_data(),
-        Ax.component(0).device_data(), Ax.component(1).device_data(),
-        r.component(0).device_data(), r.component(1).device_data(),
-        mask_stride_u, mask_stride_v,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0);
     return;
   }
 #endif
