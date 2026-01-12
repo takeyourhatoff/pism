@@ -658,7 +658,7 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
-  * Added device-resident GMRES inner loop (device Hessenberg/Givens, deferred convergence checks) with new config keys and benchmarked std-greenland 4y: 98.92s → 90.08s (~8.9% faster).
+  * Added device-resident GMRES inner loop (device Hessenberg/Givens, deferred convergence checks) with new config keys; benchmarked std-greenland 4y: default config 98.92s → 90.08s (~8.9% faster), tuned 4y config 10.13s → 10.11s (no meaningful change).
   * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Profiled std-greenland with Nsight Systems and recorded kernel mix + wall time (GPU kernels not yet dominating wall time).
   * Ran a longer std-greenland profile (y=0.5, reduced output) and recorded kernel mix; still not kernel-dominated.
