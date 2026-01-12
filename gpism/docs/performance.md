@@ -62,6 +62,39 @@ Top kernels (`cuda_gpu_kern_sum`):
 This run is **not yet kernel-dominated** at the wall-clock level; longer runs
 or reduced host allocations are required to satisfy the M10 DoD.
 
+## Nsight Systems profile (std-greenland, longer run)
+
+Command (single rank, reduced output frequency):
+
+```
+nsys profile --force-overwrite true --stats=true -t cuda,osrt,nvtx \
+  -o /tmp/gpism_stdgreenland_long_nsys \
+  gpism/build-cuda-mpi/gpism \
+  -i /home/ec2-user/pism/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+  -o /tmp/gpism_stdgreenland_long_out_nsys.nc \
+  -y 0.5 \
+  -config_override /tmp/gpism_std_greenland_long.cfg
+```
+
+Wall time (same args, no profiler): **1.57 s** (`/usr/bin/time -p`).
+
+### CUDA summary highlights (`cuda_api_sum`)
+
+- CUDA API time dominated by `cudaMemcpy` (~375 ms total), then
+  `cudaHostAlloc` (~258 ms) and `cudaFreeHost` (~128 ms).
+- Total kernel time ~**151 ms** (from `cuda_gpu_kern_sum`).
+
+Top kernels (`cuda_gpu_kern_sum`):
+
+- `apply_region_kernel`: 43.8%
+- `jacobi_update_kernel`: 14.7%
+- `dot_stag_kernel`: 12.5%
+- `dot_stag_batch_kernel`: 8.4%
+- `diff_norm1_stag_kernel`: 4.3%
+
+Even with reduced output, this run is **still not kernel-dominated**; host
+allocations and memcopies remain the largest contributors.
+
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.
