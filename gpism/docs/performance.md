@@ -119,6 +119,28 @@ Kernels now account for a large share of runtime, but `cudaMemcpy` still shows
 up prominently in the CUDA API breakdown (likely sync points around scalar
 reductions and GMRES orthogonalization).
 
+## GMRES device-inner loop (single rank, default config)
+
+Config override:
+
+```
+ssa.gmres.device_inner = 1
+ssa.gmres.device_check_interval = 1
+```
+
+Wall time (`-y 4.0`, default config, no profiler):
+
+- **Baseline:** 98.92 s
+- **Device-inner:** 90.08 s (**~8.9% faster**)
+
+Notes:
+
+- These timings use **default SSA config** (max Picard 10, GMRES max 200) and
+  are not directly comparable to the shorter 4-year benchmark above.
+- Nsight Systems (0.5y, same config) shows a similar kernel mix; new kernels
+  appear (`gmres_update_hessenberg_kernel`, `scal_device_kernel`). MemOp counts
+  were slightly higher (D2H 111 → 121; H2D 46 → 61) in this short profile.
+
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.

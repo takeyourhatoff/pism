@@ -17,4 +17,9 @@ double norm1(const FieldStag2D<double>& a);
 
 double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b);
 
+bool dot_device(const FieldStag2D<double>& a, const FieldStag2D<double>& b,
+                double* out_dev);
+
+bool scal_device(FieldStag2D<double>& x, const double* alpha_dev);
+
 }  // namespace gpism
