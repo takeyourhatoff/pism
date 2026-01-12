@@ -458,6 +458,12 @@
   * [x] 1 GPU strong scaling
   * [x] multi-GPU weak scaling
   * [x] write benchmark report in `docs/performance.md`
+* [ ] M10 DoD closure (explicit evidence)
+
+  * [x] add repeatable benchmark scripts + inputs list (std-greenland + GPU smoke)
+  * [ ] capture GPU utilization evidence (Nsight Systems stats + kernel/CPU wall split)
+  * [ ] rerun multi-GPU scaling on available hardware and record trends
+  * [ ] summarize results + commands in `docs/performance.md` (with git hash)
 * [x] Add Chebyshev smoother option for MG (device-capable)
 
   * [x] add config switch for MG smoother selection
@@ -648,6 +654,7 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Added repeatable benchmark scripts for std-greenland + GPU timestep smoke with a documented input list.
   * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added async, double-buffered output staging for single-rank NetCDF writes and a new `io.async_output` toggle; fixed async thread MPI finalize by avoiding `Context` copies.
   * Tried fusing SSA apply + residual in multigrid `compute_residual`, benchmarked, and reverted due to no clear win.

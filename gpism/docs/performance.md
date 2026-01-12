@@ -21,6 +21,16 @@ time.output_interval=0.05
 io.async_output=1
 ```
 
+## Repeatable benchmarks
+
+Scripts live in `gpism/scripts/benchmarks/`:
+
+- `run_std_greenland.sh` (std-greenland, fixed override config)
+- `run_gpu_smoke.sh` (device-resident hot loop smoke runtime)
+
+See `gpism/scripts/benchmarks/README.md` for required inputs and environment
+variables.
+
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.
