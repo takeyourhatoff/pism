@@ -1,5 +1,8 @@
 boto3
 PyYAML
 fastapi
+netCDF4
+numpy
+pillow
 uvicorn[standard]
 jinja2

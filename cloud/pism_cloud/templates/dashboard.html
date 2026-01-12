@@ -117,6 +117,33 @@
       overflow: auto;
     }
 
+    #preview {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #preview-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    #preview-controls select {
+      font-family: inherit;
+      font-size: 12px;
+      padding: 2px 4px;
+    }
+
+    #preview img {
+      width: 100%;
+      max-height: 420px;
+      object-fit: contain;
+      border: 1px solid var(--border);
+      background: #fafafa;
+    }
+
     a {
       color: var(--accent);
       text-decoration: none;
@@ -166,6 +193,11 @@
       </div>
 
       <div class="section">
+        <h3>Preview</h3>
+        <div id="preview"></div>
+      </div>
+
+      <div class="section">
         <h3>History</h3>
         <div id="history"></div>
       </div>
@@ -184,11 +216,13 @@
     const statusEl = document.getElementById("status");
     const costEl = document.getElementById("cost");
     const dataEl = document.getElementById("data");
+    const previewEl = document.getElementById("preview");
     const historyEl = document.getElementById("history");
     const argsEl = document.getElementById("args");
     const refreshStatus = document.getElementById("refresh-status");
 
     let selectedJob = null;
+    let previewVar = null;
 
     function getJobFromUrl() {
       const params = new URLSearchParams(window.location.search);
@@ -321,6 +355,18 @@
       const response = await fetch(`/api/jobs/${jobName}`);
       if (!response.ok) return null;
       return response.json();
+    }
+
+    async function fetchPreviewMeta(jobName) {
+      try {
+        const response = await fetch(`/api/jobs/${encodeURIComponent(jobName)}/preview/meta`);
+        if (!response.ok) {
+          return { available: false, message: "Preview unavailable." };
+        }
+        return response.json();
+      } catch (error) {
+        return { available: false, message: "Preview unavailable." };
+      }
     }
 
     function renderJobs(jobs) {
@@ -500,6 +546,61 @@
       }
     }
 
+    function updatePreviewImage(jobName) {
+      const img = document.getElementById("preview-image");
+      if (!img || !previewVar || !jobName) return;
+      const url = `/api/jobs/${encodeURIComponent(jobName)}/preview.png?var=${encodeURIComponent(previewVar)}&t=${Date.now()}`;
+      img.src = url;
+    }
+
+    function renderPreview(meta, jobName) {
+      previewEl.innerHTML = "";
+      if (!meta || !meta.available) {
+        const message = meta && meta.message ? meta.message : "No preview available.";
+        previewEl.innerHTML = `<div class="empty">${message}</div>`;
+        return;
+      }
+
+      if (!previewVar || !meta.variables.includes(previewVar)) {
+        previewVar = meta.default_var || meta.variables[0];
+      }
+
+      const controls = document.createElement("div");
+      controls.id = "preview-controls";
+      const label = document.createElement("div");
+      label.textContent = "Variable";
+      const select = document.createElement("select");
+      meta.variables.forEach((name) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        if (name === previewVar) {
+          option.selected = true;
+        }
+        select.appendChild(option);
+      });
+      select.onchange = () => {
+        previewVar = select.value;
+        updatePreviewImage(jobName);
+      };
+      controls.appendChild(label);
+      controls.appendChild(select);
+
+      const img = document.createElement("img");
+      img.id = "preview-image";
+      img.alt = "NetCDF preview";
+      img.loading = "lazy";
+
+      const source = document.createElement("div");
+      source.className = "muted";
+      source.textContent = meta.source_key ? `Source: ${meta.source_key}` : "";
+
+      previewEl.appendChild(controls);
+      previewEl.appendChild(img);
+      previewEl.appendChild(source);
+      updatePreviewImage(jobName);
+    }
+
     function renderHistory(detail) {
       historyEl.innerHTML = "";
       if (!detail) return;
@@ -528,16 +629,22 @@
       statusEl.innerHTML = '<div class="muted">Loading...</div>';
       costEl.innerHTML = '<div class="muted">Loading...</div>';
       dataEl.innerHTML = '<div class="muted">Loading...</div>';
+      previewEl.innerHTML = '<div class="muted">Loading...</div>';
       historyEl.innerHTML = '<div class="muted">Loading...</div>';
       argsEl.textContent = jobName ? "Loading..." : "";
     }
 
     async function selectJob(jobName) {
       selectedJob = jobName;
+      previewVar = null;
       setJobInUrl(jobName);
       setLoading(jobName);
       setRefreshing(true);
-      const [jobs, detail] = await Promise.all([fetchJobs(), fetchJobDetail(jobName)]);
+      const [jobs, detail, previewMeta] = await Promise.all([
+        fetchJobs(),
+        fetchJobDetail(jobName),
+        fetchPreviewMeta(jobName),
+      ]);
       const job = jobs.find((item) => item.job_name === jobName);
       renderJobs(jobs);
       if (job && detail) {
@@ -550,6 +657,7 @@
         renderStatus(job, detail);
         renderCost(detail);
         renderData(detail);
+        renderPreview(previewMeta, job.job_name);
         renderHistory(detail);
         renderArgs(detail);
       }
@@ -561,7 +669,10 @@
       const jobs = await fetchJobs();
       renderJobs(jobs);
       if (selectedJob) {
-        const detail = await fetchJobDetail(selectedJob);
+        const [detail, previewMeta] = await Promise.all([
+          fetchJobDetail(selectedJob),
+          fetchPreviewMeta(selectedJob),
+        ]);
         const job = jobs.find((item) => item.job_name === selectedJob);
         if (job && detail) {
           jobTitle.textContent = job.job_name;
@@ -573,6 +684,7 @@
           renderStatus(job, detail);
           renderCost(detail);
           renderData(detail);
+          renderPreview(previewMeta, job.job_name);
           renderHistory(detail);
           renderArgs(detail);
         } else if (!job) {

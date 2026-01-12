@@ -8,7 +8,7 @@ from typing import Dict, List
 
 import boto3
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from pism_cloud.aws import aws_region
@@ -20,6 +20,12 @@ from pism_cloud.progress import estimate_progress
 from pism_cloud.runtime import hourly_rate, summarize_costs, summarize_runtime_seconds
 from pism_cloud.s3 import parse_s3_uri
 from pism_cloud.timeline import build_timeline_for_attempts
+from pism_cloud.preview import (
+    PreviewDependencyError,
+    PreviewUnavailable,
+    preview_meta,
+    render_preview_png,
+)
 
 LOG_GROUP = os.environ.get("PISM_LOG_GROUP", "/aws/batch/pism")
 TEMPLATES = Jinja2Templates(
@@ -273,3 +279,40 @@ async def job_detail(job_name: str) -> Dict[str, object]:
             for event in timeline
         ],
     }
+
+
+@app.get("/api/jobs/{job_name}/preview/meta")
+async def job_preview_meta(job_name: str) -> Dict[str, object]:
+    table = get_table()
+    job_item = get_job(table, job_name)
+    if not job_item:
+        raise HTTPException(status_code=404, detail="Job not found")
+    output_s3 = job_item.get("output_s3")
+    if not output_s3:
+        return {"available": False, "message": "No output S3 configured."}
+    try:
+        return preview_meta(str(output_s3))
+    except PreviewDependencyError as exc:
+        return {"available": False, "message": str(exc)}
+    except Exception:
+        return {"available": False, "message": "Preview unavailable."}
+
+
+@app.get("/api/jobs/{job_name}/preview.png")
+async def job_preview_png(job_name: str, var: str | None = None) -> Response:
+    table = get_table()
+    job_item = get_job(table, job_name)
+    if not job_item:
+        raise HTTPException(status_code=404, detail="Job not found")
+    output_s3 = job_item.get("output_s3")
+    if not output_s3:
+        raise HTTPException(status_code=404, detail="No output S3 configured.")
+    try:
+        payload = render_preview_png(str(output_s3), var_name=var)
+    except PreviewDependencyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PreviewUnavailable as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Preview failed") from exc
+    return Response(content=payload, media_type="image/png")
