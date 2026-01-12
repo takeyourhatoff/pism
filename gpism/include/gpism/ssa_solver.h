@@ -42,6 +42,7 @@ struct SSASolverOptions {
   int mg_cheby_estimate_iters = 5;
   double mg_cheby_estimate_min_factor = 0.1;
   double mg_cheby_estimate_max_factor = 1.1;
+  bool mg_cheby_cache_picard = false;
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
 
@@ -95,6 +96,8 @@ private:
     FieldStag2D<double> bc_values;
     std::unique_ptr<MultigridHierarchy> mg;
     int mg_min_size = 0;
+    std::vector<ChebyBounds> mg_cheby_bounds_cache;
+    bool mg_cheby_bounds_valid = false;
 
     void ensure(const Grid2D& grid) {
       const int mx_new = grid.local_mx();
@@ -127,6 +130,8 @@ private:
         vel_prev.resize(mx, my, gw);
         bc_mask.resize(mx, my, gw);
         bc_values.resize(mx, my, gw);
+        mg_cheby_bounds_cache.clear();
+        mg_cheby_bounds_valid = false;
       }
       initialized = true;
     }
