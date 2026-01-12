@@ -28,8 +28,6 @@ struct SSASolverOptions {
   int gmres_restart = 30;
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;
-  bool gmres_device_inner = false;
-  int gmres_device_check_interval = 1;
 
   bool use_mg_precond = false;
   int mg_pre_iters = 2;
