@@ -115,7 +115,7 @@ bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
 template <typename T>
 void exchange_for_device(FieldStag2D<T>& field, const Grid2D& grid,
                          const Context* context) {
-  if (!context || !context->mpi_enabled()) {
+  if (!context || !context->mpi_enabled() || context->size() <= 1) {
     return;
   }
   HaloExchange2D exchange;
@@ -204,7 +204,7 @@ void ssa_apply_host(const Grid2D& grid, const FieldStag2D<double>& nuH,
 
 double global_sum(const Context* context, double local_value) {
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     double global_value = 0.0;
     MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
@@ -535,7 +535,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
   HaloExchange2D::StagExchangeHandle<double> handle{};
   bool exchange_active = false;
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
     exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
     if (x.ghost_width() > 0) {
@@ -681,7 +681,7 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
   HaloExchange2D::StagExchangeHandle<double> handle{};
   bool exchange_active = false;
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
     exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
     if (x.ghost_width() > 0) {
@@ -804,7 +804,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
   }
 
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
     exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
   }
@@ -864,7 +864,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
       HaloExchange2D::StagExchangeHandle<double> handle{};
       bool exchange_active = false;
 #if GPISM_HAVE_MPI
-      if (context && context->mpi_enabled()) {
+      if (context && context->mpi_enabled() && context->size() > 1) {
         if (x.ghost_width() > 0) {
           auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
           handle =
@@ -959,7 +959,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
 
   for (int iter = 0; iter < iterations; ++iter) {
 #if GPISM_HAVE_MPI
-    if (context && context->mpi_enabled()) {
+    if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(x, grid, context);
     }
 #endif

@@ -409,7 +409,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   geometry.compute_surface_slopes(grid_, usurf, dhdx, dhdy);
 
   ssa_.compute_basal_drag(grid_, tauc, beta);
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(beta, grid_, *context);
   }
 
@@ -433,7 +433,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
 
   ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
                     options.use_bc ? &bc : nullptr);
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(rhs, grid_, *context);
   }
 
@@ -441,7 +441,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     copy(nuH, nuH_prev);
     copy(vel, vel_prev);
 
-    if (context && context->mpi_enabled()) {
+    if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(vel, grid_, *context);
     }
     viscosity_.compute_nuH(grid_, thk, vel, nuH, options.enthalpy,
@@ -450,7 +450,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
         options.nuH_relax < 1.0) {
       apply_nuH_constraints(nuH, nuH_prev, options);
     }
-    if (context && context->mpi_enabled()) {
+    if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(nuH, grid_, *context);
     }
 

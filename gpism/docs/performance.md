@@ -95,6 +95,30 @@ Top kernels (`cuda_gpu_kern_sum`):
 Even with reduced output, this run is **still not kernel-dominated**; host
 allocations and memcopies remain the largest contributors.
 
+## Nsight Systems profile (std-greenland, 4-year run, single rank)
+
+Config: `-y 4.0` with output interval `4.0` (`/tmp/gpism_std_greenland_4yr.cfg`).
+
+Wall time (no profiler): **10.11 s** (`/usr/bin/time -p`), improved from
+**26.39 s** prior to skipping halo exchange on single-rank MPI runs.
+
+### CUDA summary highlights (`cuda_api_gpu_sum`)
+
+- `cudaMemcpy`: **6.49 s** (5469 calls)
+- `dot_stag_batch_kernel`: **5.60 s** (1819 calls)
+- `apply_kernel`: **0.92 s** (93780 calls)
+- `jacobi_update_kernel`: **0.75 s** (79192 calls)
+- `dot_stag_kernel`: **0.66 s** (2084 calls)
+
+Memcopy volume dropped dramatically (from ~47 GB total to ~17 MB total):
+
+- D2H: **8.4 MB** over 4229 calls
+- H2D: **8.6 MB** over 3644 calls
+
+Kernels now account for a large share of runtime, but `cudaMemcpy` still shows
+up prominently in the CUDA API breakdown (likely sync points around scalar
+reductions and GMRES orthogonalization).
+
 ## Fused SSA apply+residual (MG `compute_residual`)
 
 Goal: reduce memory traffic by fusing the SSA apply and residual computation.

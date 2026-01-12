@@ -329,7 +329,7 @@ int main(int argc, char** argv) {
 
     gpism::HaloExchange2D exchange;
     auto exchange_field2d = [&](auto& field) {
-      if (!context.mpi_enabled()) {
+      if (!context.mpi_enabled() || context.size() <= 1) {
         return;
       }
 #if GPISM_HAVE_CUDA
@@ -348,7 +348,7 @@ int main(int argc, char** argv) {
     };
 
     auto exchange_field_stag = [&](auto& field) {
-      if (!context.mpi_enabled()) {
+      if (!context.mpi_enabled() || context.size() <= 1) {
         return;
       }
 #if GPISM_HAVE_CUDA
