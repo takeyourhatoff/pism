@@ -78,6 +78,16 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, int stride_mask_u, int stride_mask_v,
                     const int* mask_u, const int* mask_v, int has_bc);
+void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                           int stride_nu_u, int stride_nu_v, int stride_beta_u,
+                           int stride_beta_v, int stride_out_u, int stride_out_v,
+                           const double* u, const double* v, const double* nu_u,
+                           const double* nu_v, const double* beta_u,
+                           const double* beta_v, double* out_u, double* out_v,
+                           double inv_dx2, double inv_dy2, double inv_2dx,
+                           double inv_2dy, int stride_mask_u, int stride_mask_v,
+                           const int* mask_u, const int* mask_v, int has_bc,
+                           int i_start, int i_end, int j_start, int j_end);
 #endif
 
 void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -521,11 +531,20 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
                       FieldStag2D<double>& Ax,
                       const SSABoundaryCondition* bc,
                       const Context* context) {
+  HaloExchange2D exchange;
+  HaloExchange2D::StagExchangeHandle<double> handle{};
+  bool exchange_active = false;
 #if GPISM_HAVE_MPI
   if (context && context->mpi_enabled()) {
     exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
     exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
-    exchange_for_device(const_cast<FieldStag2D<double>&>(x), grid, context);
+    if (x.ghost_width() > 0) {
+      auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
+      handle =
+          exchange.start_exchange(mutable_x, grid, *context,
+                                  HaloExchange2D::Mode::Auto);
+      exchange_active = handle.u.active || handle.v.active;
+    }
   }
 #else
   (void)context;
@@ -549,6 +568,9 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
        (bc->mask->component(0).has_device_data() &&
         bc->mask->component(1).has_device_data()));
   if (device_ready) {
+    const int mx = grid.local_mx();
+    const int my = grid.local_my();
+    const int gw = x.ghost_width();
     const double dx = grid.dx();
     const double dy = grid.dy();
     const double inv_dx2 = 1.0 / (dx * dx);
@@ -559,22 +581,67 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
         has_bc ? bc->mask->component(0).stride() : 0;
     const int mask_stride_v =
         has_bc ? bc->mask->component(1).stride() : 0;
-    ssa_apply_cuda(
-        grid.local_mx(), grid.local_my(), x.ghost_width(),
-        x.component(0).stride(), x.component(1).stride(),
-        nuH.component(0).stride(), nuH.component(1).stride(),
-        beta.component(0).stride(), beta.component(1).stride(),
-        Ax.component(0).stride(), Ax.component(1).stride(),
-        x.component(0).device_data(), x.component(1).device_data(),
-        nuH.component(0).device_data(), nuH.component(1).device_data(),
-        beta.component(0).device_data(), beta.component(1).device_data(),
-        Ax.component(0).device_data(), Ax.component(1).device_data(),
-        inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0);
+    if (exchange_active) {
+      const int i0 = gw;
+      const int i1 = mx - gw;
+      const int j0 = gw;
+      const int j1 = my - gw;
+      if (i0 < i1 && j0 < j1) {
+        ssa_apply_region_cuda(
+            mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+            nuH.component(0).stride(), nuH.component(1).stride(),
+            beta.component(0).stride(), beta.component(1).stride(),
+            Ax.component(0).stride(), Ax.component(1).stride(),
+            x.component(0).device_data(), x.component(1).device_data(),
+            nuH.component(0).device_data(), nuH.component(1).device_data(),
+            beta.component(0).device_data(), beta.component(1).device_data(),
+            Ax.component(0).device_data(), Ax.component(1).device_data(),
+            inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+            has_bc ? bc->mask->component(0).device_data() : nullptr,
+            has_bc ? bc->mask->component(1).device_data() : nullptr,
+            has_bc ? 1 : 0, i0, i1, j0, j1);
+      }
+#if GPISM_HAVE_MPI
+      exchange.finish_exchange(handle);
+#endif
+      auto apply_band = [&](int is, int ie, int js, int je) {
+        if (is < ie && js < je) {
+          ssa_apply_region_cuda(
+              mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+              nuH.component(0).stride(), nuH.component(1).stride(),
+              beta.component(0).stride(), beta.component(1).stride(),
+              Ax.component(0).stride(), Ax.component(1).stride(),
+              x.component(0).device_data(), x.component(1).device_data(),
+              nuH.component(0).device_data(), nuH.component(1).device_data(),
+              beta.component(0).device_data(), beta.component(1).device_data(),
+              Ax.component(0).device_data(), Ax.component(1).device_data(),
+              inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+              has_bc ? bc->mask->component(0).device_data() : nullptr,
+              has_bc ? bc->mask->component(1).device_data() : nullptr,
+              has_bc ? 1 : 0, is, ie, js, je);
+        }
+      };
+      apply_band(0, gw, 0, my);
+      apply_band(mx - gw, mx, 0, my);
+      apply_band(gw, mx - gw, 0, gw);
+      apply_band(gw, mx - gw, my - gw, my);
+    } else {
+      ssa_apply_cuda(
+          mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+          nuH.component(0).stride(), nuH.component(1).stride(),
+          beta.component(0).stride(), beta.component(1).stride(),
+          Ax.component(0).stride(), Ax.component(1).stride(),
+          x.component(0).device_data(), x.component(1).device_data(),
+          nuH.component(0).device_data(), nuH.component(1).device_data(),
+          beta.component(0).device_data(), beta.component(1).device_data(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(),
+          inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+    }
     mg_residual_cuda(
-        grid.local_mx(), grid.local_my(), r.ghost_width(),
+        mx, my, r.ghost_width(),
         r.component(0).stride(), r.component(1).stride(),
         b.component(0).device_data(), b.component(1).device_data(),
         Ax.component(0).device_data(), Ax.component(1).device_data(),
@@ -584,6 +651,11 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
         has_bc ? 1 : 0);
     return;
+  }
+#endif
+#if GPISM_HAVE_MPI
+  if (exchange_active) {
+    exchange.finish_exchange(handle);
   }
 #endif
   ssa_apply_host(grid, nuH, beta, x, Ax, bc);
@@ -605,11 +677,20 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
                     const FieldStag2D<double>& x, FieldStag2D<double>& Ax,
                     const SSABoundaryCondition* bc,
                     const Context* context) {
+  HaloExchange2D exchange;
+  HaloExchange2D::StagExchangeHandle<double> handle{};
+  bool exchange_active = false;
 #if GPISM_HAVE_MPI
   if (context && context->mpi_enabled()) {
     exchange_for_device(const_cast<FieldStag2D<double>&>(nuH), grid, context);
     exchange_for_device(const_cast<FieldStag2D<double>&>(beta), grid, context);
-    exchange_for_device(const_cast<FieldStag2D<double>&>(x), grid, context);
+    if (x.ghost_width() > 0) {
+      auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
+      handle =
+          exchange.start_exchange(mutable_x, grid, *context,
+                                  HaloExchange2D::Mode::Auto);
+      exchange_active = handle.u.active || handle.v.active;
+    }
   }
 #else
   (void)context;
@@ -629,6 +710,9 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
        (bc->mask->component(0).has_device_data() &&
         bc->mask->component(1).has_device_data()));
   if (device_ready) {
+    const int mx = grid.local_mx();
+    const int my = grid.local_my();
+    const int gw = x.ghost_width();
     const double dx = grid.dx();
     const double dy = grid.dy();
     const double inv_dx2 = 1.0 / (dx * dx);
@@ -639,21 +723,71 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
         has_bc ? bc->mask->component(0).stride() : 0;
     const int mask_stride_v =
         has_bc ? bc->mask->component(1).stride() : 0;
-    ssa_apply_cuda(
-        grid.local_mx(), grid.local_my(), x.ghost_width(),
-        x.component(0).stride(), x.component(1).stride(),
-        nuH.component(0).stride(), nuH.component(1).stride(),
-        beta.component(0).stride(), beta.component(1).stride(),
-        Ax.component(0).stride(), Ax.component(1).stride(),
-        x.component(0).device_data(), x.component(1).device_data(),
-        nuH.component(0).device_data(), nuH.component(1).device_data(),
-        beta.component(0).device_data(), beta.component(1).device_data(),
-        Ax.component(0).device_data(), Ax.component(1).device_data(),
-        inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0);
+    if (exchange_active) {
+      const int i0 = gw;
+      const int i1 = mx - gw;
+      const int j0 = gw;
+      const int j1 = my - gw;
+      if (i0 < i1 && j0 < j1) {
+        ssa_apply_region_cuda(
+            mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+            nuH.component(0).stride(), nuH.component(1).stride(),
+            beta.component(0).stride(), beta.component(1).stride(),
+            Ax.component(0).stride(), Ax.component(1).stride(),
+            x.component(0).device_data(), x.component(1).device_data(),
+            nuH.component(0).device_data(), nuH.component(1).device_data(),
+            beta.component(0).device_data(), beta.component(1).device_data(),
+            Ax.component(0).device_data(), Ax.component(1).device_data(),
+            inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+            has_bc ? bc->mask->component(0).device_data() : nullptr,
+            has_bc ? bc->mask->component(1).device_data() : nullptr,
+            has_bc ? 1 : 0, i0, i1, j0, j1);
+      }
+#if GPISM_HAVE_MPI
+      exchange.finish_exchange(handle);
+#endif
+      auto apply_band = [&](int is, int ie, int js, int je) {
+        if (is < ie && js < je) {
+          ssa_apply_region_cuda(
+              mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+              nuH.component(0).stride(), nuH.component(1).stride(),
+              beta.component(0).stride(), beta.component(1).stride(),
+              Ax.component(0).stride(), Ax.component(1).stride(),
+              x.component(0).device_data(), x.component(1).device_data(),
+              nuH.component(0).device_data(), nuH.component(1).device_data(),
+              beta.component(0).device_data(), beta.component(1).device_data(),
+              Ax.component(0).device_data(), Ax.component(1).device_data(),
+              inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+              has_bc ? bc->mask->component(0).device_data() : nullptr,
+              has_bc ? bc->mask->component(1).device_data() : nullptr,
+              has_bc ? 1 : 0, is, ie, js, je);
+        }
+      };
+      apply_band(0, gw, 0, my);
+      apply_band(mx - gw, mx, 0, my);
+      apply_band(gw, mx - gw, 0, gw);
+      apply_band(gw, mx - gw, my - gw, my);
+    } else {
+      ssa_apply_cuda(
+          mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+          nuH.component(0).stride(), nuH.component(1).stride(),
+          beta.component(0).stride(), beta.component(1).stride(),
+          Ax.component(0).stride(), Ax.component(1).stride(),
+          x.component(0).device_data(), x.component(1).device_data(),
+          nuH.component(0).device_data(), nuH.component(1).device_data(),
+          beta.component(0).device_data(), beta.component(1).device_data(),
+          Ax.component(0).device_data(), Ax.component(1).device_data(),
+          inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+          has_bc ? bc->mask->component(0).device_data() : nullptr,
+          has_bc ? bc->mask->component(1).device_data() : nullptr,
+          has_bc ? 1 : 0);
+    }
     return;
+  }
+#endif
+#if GPISM_HAVE_MPI
+  if (exchange_active) {
+    exchange.finish_exchange(handle);
   }
 #endif
   ssa_apply_host(grid, nuH, beta, x, Ax, bc);
@@ -726,25 +860,83 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
         has_bc ? 1 : 0);
     for (int iter = 0; iter < iterations; ++iter) {
+      HaloExchange2D exchange;
+      HaloExchange2D::StagExchangeHandle<double> handle{};
+      bool exchange_active = false;
 #if GPISM_HAVE_MPI
       if (context && context->mpi_enabled()) {
-        exchange_for_device(x, grid, context);
+        if (x.ghost_width() > 0) {
+          auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
+          handle =
+              exchange.start_exchange(mutable_x, grid, *context,
+                                      HaloExchange2D::Mode::Auto);
+          exchange_active = handle.u.active || handle.v.active;
+        }
       }
 #endif
-      ssa_apply_cuda(
-          grid.local_mx(), grid.local_my(), x.ghost_width(),
-          x.component(0).stride(), x.component(1).stride(),
-          nuH.component(0).stride(), nuH.component(1).stride(),
-          beta.component(0).stride(), beta.component(1).stride(),
-          Ax.component(0).stride(), Ax.component(1).stride(),
-          x.component(0).device_data(), x.component(1).device_data(),
-          nuH.component(0).device_data(), nuH.component(1).device_data(),
-          beta.component(0).device_data(), beta.component(1).device_data(),
-          Ax.component(0).device_data(), Ax.component(1).device_data(),
-          inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
-          has_bc ? bc->mask->component(0).device_data() : nullptr,
-          has_bc ? bc->mask->component(1).device_data() : nullptr,
-          has_bc ? 1 : 0);
+      const int mx = grid.local_mx();
+      const int my = grid.local_my();
+      const int gw = x.ghost_width();
+      if (exchange_active) {
+        const int i0 = gw;
+        const int i1 = mx - gw;
+        const int j0 = gw;
+        const int j1 = my - gw;
+        if (i0 < i1 && j0 < j1) {
+          ssa_apply_region_cuda(
+              mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+              nuH.component(0).stride(), nuH.component(1).stride(),
+              beta.component(0).stride(), beta.component(1).stride(),
+              Ax.component(0).stride(), Ax.component(1).stride(),
+              x.component(0).device_data(), x.component(1).device_data(),
+              nuH.component(0).device_data(), nuH.component(1).device_data(),
+              beta.component(0).device_data(), beta.component(1).device_data(),
+              Ax.component(0).device_data(), Ax.component(1).device_data(),
+              inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+              has_bc ? bc->mask->component(0).device_data() : nullptr,
+              has_bc ? bc->mask->component(1).device_data() : nullptr,
+              has_bc ? 1 : 0, i0, i1, j0, j1);
+        }
+#if GPISM_HAVE_MPI
+        exchange.finish_exchange(handle);
+#endif
+        auto apply_band = [&](int is, int ie, int js, int je) {
+          if (is < ie && js < je) {
+            ssa_apply_region_cuda(
+                mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+                nuH.component(0).stride(), nuH.component(1).stride(),
+                beta.component(0).stride(), beta.component(1).stride(),
+                Ax.component(0).stride(), Ax.component(1).stride(),
+                x.component(0).device_data(), x.component(1).device_data(),
+                nuH.component(0).device_data(), nuH.component(1).device_data(),
+                beta.component(0).device_data(),
+                beta.component(1).device_data(),
+                Ax.component(0).device_data(), Ax.component(1).device_data(),
+                inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+                has_bc ? bc->mask->component(0).device_data() : nullptr,
+                has_bc ? bc->mask->component(1).device_data() : nullptr,
+                has_bc ? 1 : 0, is, ie, js, je);
+          }
+        };
+        apply_band(0, gw, 0, my);
+        apply_band(mx - gw, mx, 0, my);
+        apply_band(gw, mx - gw, 0, gw);
+        apply_band(gw, mx - gw, my - gw, my);
+      } else {
+        ssa_apply_cuda(
+            mx, my, gw, x.component(0).stride(), x.component(1).stride(),
+            nuH.component(0).stride(), nuH.component(1).stride(),
+            beta.component(0).stride(), beta.component(1).stride(),
+            Ax.component(0).stride(), Ax.component(1).stride(),
+            x.component(0).device_data(), x.component(1).device_data(),
+            nuH.component(0).device_data(), nuH.component(1).device_data(),
+            beta.component(0).device_data(), beta.component(1).device_data(),
+            Ax.component(0).device_data(), Ax.component(1).device_data(),
+            inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
+            has_bc ? bc->mask->component(0).device_data() : nullptr,
+            has_bc ? bc->mask->component(1).device_data() : nullptr,
+            has_bc ? 1 : 0);
+      }
       mg_jacobi_update_cuda(
           grid.local_mx(), grid.local_my(), x.ghost_width(),
           x.component(0).stride(), x.component(1).stride(),

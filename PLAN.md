@@ -441,7 +441,7 @@
 * [x] Overlap comm/compute
 
   * [x] interior compute while halos exchange
-  * [ ] boundary compute after halos arrive
+  * [x] boundary compute after halos arrive
 * [ ] Memory bandwidth optimization
 
   * [ ] fuse kernels where it matters (operator apply + coefficient loads)
@@ -644,6 +644,7 @@
   * Added MG preconditioner effectiveness diagnostic (CPU/GPU) reporting ||r|| vs ||r - A M^{-1} r||; CPU/GPU agree and MG reduces residual.
   * Added MG effectiveness diagnostic with Dirichlet BCs + MPI and fixed CUDA BC mask/values indexing to respect mask strides across MG levels.
   * Ran a std-greenland MG tuning pass (pre/post=3) and reprofiled; dot_stag_batch share dropped (~70.1% → ~66.6%) but apply_kernel/jacobi_update increased.
+  * Overlapped multigrid SSA apply with halo exchange: compute interior during async exchange and boundary after halos arrive (device path).
   * Added Chebyshev MG auto-bound estimation (power iteration) with new config knobs and diagnostics.
   * Fixed Chebyshev/Jacobi device-host sync paths for tests; revalidated MG preconditioner effectiveness tests.
   * Benchmarked std-greenland: Jacobi ~1.06s vs Chebyshev-est ~6.07s wall time (Chebyshev slower with per-precond estimation).
