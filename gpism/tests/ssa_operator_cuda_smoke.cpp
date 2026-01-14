@@ -1,3 +1,4 @@
+#include "gpism/geometry.h"
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
@@ -27,6 +28,9 @@ void sync_host_to_device(gpism::Field2D<T>& field) {
 template <typename T>
 void sync_device_to_host(gpism::Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!field.device_data()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
@@ -62,14 +66,17 @@ bool is_dirichlet(const gpism::SSABoundaryCondition* bc, int i, int j, int comp)
 void compute_basal_drag_ref(const gpism::Grid2D& grid,
                             const gpism::Field2D<double>& tauc,
                             gpism::FieldStag2D<double>& beta,
-                            double u_threshold) {
-  const double denom = std::max(u_threshold, 1e-6);
+                            double regularization) {
+  const double denom = std::max(regularization, 1e-6);
+  auto beta_center = [&](int i, int j) {
+    return tauc(i, j) / denom;
+  };
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
-      const double tauc_u = avg2(tauc(i, j), tauc(i + 1, j));
-      const double tauc_v = avg2(tauc(i, j), tauc(i, j + 1));
-      beta(i, j, 0) = tauc_u / denom;
-      beta(i, j, 1) = tauc_v / denom;
+      const int ie = (i == grid.local_mx() - 1) ? i : i + 1;
+      const int jn = (j == grid.local_my() - 1) ? j : j + 1;
+      beta(i, j, 0) = 0.5 * (beta_center(i, j) + beta_center(ie, j));
+      beta(i, j, 1) = 0.5 * (beta_center(i, j) + beta_center(i, jn));
     }
   }
 }
@@ -203,8 +210,8 @@ int main() {
 
   const double rho = 910.0;
   const double g = 9.81;
-  const double u_threshold = 100.0;
-  gpism::SSAOperator op(rho, g, u_threshold);
+  const double plastic_reg = 100.0;
+  gpism::SSAOperator op(rho, g);
 
   gpism::Field2D<double> tauc(mx, my, gw);
   tauc.fill(100.0);
@@ -217,9 +224,15 @@ int main() {
   gpism::Field2D<double> thk(mx, my, gw);
   gpism::Field2D<double> dhdx(mx, my, gw);
   gpism::Field2D<double> dhdy(mx, my, gw);
+  gpism::Field2D<double> u_center(mx, my, gw);
+  gpism::Field2D<double> v_center(mx, my, gw);
+  gpism::Field2D<int> cell_type(mx, my, gw);
   thk.fill(2.0);
   dhdx.fill(0.5);
   dhdy.fill(-0.25);
+  u_center.fill(0.0);
+  v_center.fill(0.0);
+  cell_type.fill(gpism::GroundedIce);
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       thk(i, j) = 2.0 + 0.1 * i - 0.05 * j;
@@ -255,7 +268,7 @@ int main() {
     }
   }
 
-  compute_basal_drag_ref(grid, tauc, beta_ref, u_threshold);
+  compute_basal_drag_ref(grid, tauc, beta_ref, plastic_reg);
   assemble_rhs_ref(grid, thk, dhdx, dhdy, rhs_ref, rho, g, &bc);
   apply_ref(grid, nuH, beta_ref, vel, out_ref, &bc);
 
@@ -267,10 +280,16 @@ int main() {
   sync_host_to_device(thk);
   sync_host_to_device(dhdx);
   sync_host_to_device(dhdy);
+  sync_host_to_device(u_center);
+  sync_host_to_device(v_center);
+  sync_host_to_device(cell_type);
   sync_host_to_device(bc_mask);
   sync_host_to_device(bc_values);
 
-  op.compute_basal_drag(grid, tauc, beta_gpu);
+  gpism::BasalResistanceParams basal_params;
+  basal_params.plastic_regularization = plastic_reg;
+  op.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta_gpu,
+                        basal_params);
   sync_device_to_host(beta_gpu);
   if (!compare_stag(beta_gpu, beta_ref, "basal_drag")) {
     return 1;

@@ -236,9 +236,40 @@ int main(int argc, char** argv) {
 
     gpism::FieldStag2D<double> flux(grid.local_mx(), grid.local_my(),
                                     grid.ghost_width());
-    gpism::Field2D<int> mask(grid.local_mx(), grid.local_my(), grid.ghost_width());
-    gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
-    gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
+    gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(),
+                                  grid.ghost_width());
+
+    const double rho_ice = config.get_double("constants.ice.density");
+    const double rho_water = config.get_double("constants.sea_water.density");
+    const double gravity = config.get_double("constants.standard_gravity");
+    const double sea_level = config.get_double("constants.sea_level");
+    const double seconds_per_year =
+        config.get_double("constants.seconds_per_year");
+    const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
+    const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
+    const double softness =
+        config.get_double("flow_law.isothermal_Glen.ice_softness");
+    const double enhancement =
+        config.get_double("stress_balance.ssa.enhancement_factor");
+    const double schoof_vel =
+        config.get_double("flow_law.Schoof_regularizing_velocity");
+    const double schoof_length_km =
+        config.get_double("flow_law.Schoof_regularizing_length");
+    const double schoof_length = schoof_length_km * 1000.0;
+    const double eps0 =
+        (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
+    const double A_year = softness * seconds_per_year;
+
+    if (flow_law != "isothermal_glen" && context.rank() == 0) {
+      std::cout << "Warning: SSA flow law '" << flow_law
+                << "' not implemented; using isothermal_glen.\n";
+    }
+
+    gpism::ViscosityModel viscosity(A_year, glen_n, eps0, enhancement);
+    gpism::SSASolver solver(
+        grid, rho_ice, gravity,
+        config.get_double("basal_resistance.pseudo_plastic.u_threshold"),
+        viscosity);
 
     gpism::SSASolverOptions ssa_options;
     ssa_options.max_picard = config.get_int("ssa.max_picard");
@@ -246,6 +277,8 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    ssa_options.nuH_min =
+        config.get_double("stress_balance.ssa.epsilon") / seconds_per_year;
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
     ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
     ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");
@@ -276,7 +309,33 @@ int main(int argc, char** argv) {
     ssa_options.gmres_precond_diagnostic =
         config.get_bool("ssa.gmres.precond_diagnostic");
     ssa_options.use_bc = fields.has_vel_bc;
+    ssa_options.sea_level = sea_level;
+    ssa_options.rho_ice = rho_ice;
+    ssa_options.rho_water = rho_water;
+    ssa_options.surface_gradient_inward =
+        config.get_bool("stress_balance.ssa.compute_surface_gradient_inward");
+    ssa_options.surface_slope_uphill =
+        config.get_bool("stress_balance.ssa.fd.upstream_surface_slope_approximation");
+    ssa_options.use_cfbc =
+        config.get_bool("stress_balance.calving_front_stress_bc");
     ssa_options.context = &context;
+
+    gpism::BasalResistanceParams basal_params;
+    basal_params.q =
+        config.get_double("basal_resistance.pseudo_plastic.q");
+    basal_params.u_threshold =
+        config.get_double("basal_resistance.pseudo_plastic.u_threshold");
+    basal_params.plastic_regularization =
+        config.get_double("basal_resistance.plastic.regularization");
+    basal_params.sliding_scale_factor =
+        config.get_double("basal_resistance.pseudo_plastic.sliding_scale_factor");
+    basal_params.beta_ice_free_bedrock =
+        config.get_double("basal_resistance.beta_ice_free_bedrock");
+    basal_params.law =
+        config.get_bool("basal_resistance.pseudo_plastic.enabled")
+            ? gpism::BasalResistanceLaw::PseudoPlastic
+            : gpism::BasalResistanceLaw::Plastic;
+    ssa_options.basal_params = basal_params;
 
     const bool thermo_enabled = config.get_bool("thermo.enabled");
     gpism::Field3D<double> enthalpy;
@@ -369,12 +428,21 @@ int main(int argc, char** argv) {
       exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
     };
 
+    double last_output_time = -1.0;
     while (!clock.done()) {
       if (clock.should_output()) {
-        geometry.compute_usurf(grid, fields.thk, fields.topg, fields.usurf);
-        gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
+        gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
+                                 rho_ice, rho_water, cell_type);
+        gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
+                                       cell_type, sea_level, rho_ice,
+                                       rho_water, fields.usurf);
+        gpism::compute_cell_center_velocity(grid, vel, fields.uvel,
+                                            fields.vvel);
+        gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
+                                            fields.v_ssa);
         fields.has_usurf = true;
         fields.has_velocity = true;
+        fields.has_ssa_velocity = true;
         if (!output_writer.enqueue(options.output, context, grid, fields,
                                    clock.time())) {
           std::cerr << "Error: failed to write output file " << options.output
@@ -383,6 +451,7 @@ int main(int argc, char** argv) {
         }
         log_rank0(context, "Wrote output to " + options.output);
         clock.mark_output();
+        last_output_time = clock.time();
       }
 
       if (run_ssa) {
@@ -406,10 +475,33 @@ int main(int argc, char** argv) {
         gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
         gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
                                 fields.thk);
-        gpism::update_mask(grid, fields.thk, mask);
+        gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
+                                 rho_ice, rho_water, cell_type);
       }
 
       clock.advance();
+    }
+
+    if (!options.output.empty() &&
+        (last_output_time < clock.time() - 1e-12)) {
+      gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
+                               rho_ice, rho_water, cell_type);
+      gpism::compute_usurf_flotation(grid, fields.thk, fields.topg, cell_type,
+                                     sea_level, rho_ice, rho_water,
+                                     fields.usurf);
+      gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
+      gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
+                                          fields.v_ssa);
+      fields.has_usurf = true;
+      fields.has_velocity = true;
+      fields.has_ssa_velocity = true;
+      if (!output_writer.enqueue(options.output, context, grid, fields,
+                                 clock.time())) {
+        std::cerr << "Error: failed to write output file " << options.output
+                  << '\n';
+        return 2;
+      }
+      log_rank0(context, "Wrote final output to " + options.output);
     }
 
     if (!output_writer.flush()) {

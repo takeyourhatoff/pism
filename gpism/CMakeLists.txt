@@ -208,13 +208,17 @@ endif()
 
 if(GPISM_BUILD_TESTS)
   enable_testing()
+  if(MPIEXEC_EXECUTABLE)
+    set(GPISM_MPIEXEC_PREFLAGS ${MPIEXEC_PREFLAGS})
+    list(APPEND GPISM_MPIEXEC_PREFLAGS "--oversubscribe")
+  endif()
   add_executable(gpism-field-smoke tests/field_smoke.cpp)
   target_link_libraries(gpism-field-smoke PRIVATE gpism-core)
   add_test(NAME gpism-field-smoke COMMAND gpism-field-smoke)
   if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
     add_test(
       NAME gpism-field-smoke-mpi
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-field-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
@@ -224,12 +228,12 @@ if(GPISM_BUILD_TESTS)
     target_link_libraries(gpism-gmres-mpi-smoke PRIVATE gpism-core)
     add_test(
       NAME gpism-gmres-mpi-smoke-1
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
     add_test(
       NAME gpism-gmres-mpi-smoke-2
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
@@ -239,12 +243,12 @@ if(GPISM_BUILD_TESTS)
     target_link_libraries(gpism-ssa-picard-mpi-smoke PRIVATE gpism-core)
     add_test(
       NAME gpism-ssa-picard-mpi-smoke-1
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
     add_test(
       NAME gpism-ssa-picard-mpi-smoke-2
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
@@ -265,13 +269,28 @@ if(GPISM_BUILD_TESTS)
     if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
       add_test(
         NAME gpism-io-smoke-mpi
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
                 $<TARGET_FILE:gpism-io-smoke> ${MPIEXEC_POSTFLAGS}
       )
     endif()
     add_executable(gpism-timestep-io-smoke tests/timestep_io_smoke.cpp)
     target_link_libraries(gpism-timestep-io-smoke PRIVATE gpism-core)
     add_test(NAME gpism-timestep-io-smoke COMMAND gpism-timestep-io-smoke)
+
+    add_test(
+      NAME gpism-pism-ssa-compare
+      COMMAND ${CMAKE_COMMAND} -E env
+              GPISM_BIN=$<TARGET_FILE:gpism>
+              COMPARE_STRICT=1
+              COMPARE_TOL_RMS=0.02
+              COMPARE_TOL_MAX=0.05
+              COMPARE_REQUIRE_NONZERO=1
+              COMPARE_ALLOW_MISSING=1
+              MIN_WALL=0
+              YEARS=0.05
+              GPISM_DT=0.05
+              ${CMAKE_CURRENT_SOURCE_DIR}/scripts/compare_pism_gpism.sh
+    )
   endif()
 
   if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE AND GPISM_ENABLE_CUDA)
@@ -279,7 +298,7 @@ if(GPISM_BUILD_TESTS)
     target_link_libraries(gpism-ssa-operator-mpi-smoke PRIVATE gpism-core)
     add_test(
       NAME gpism-ssa-operator-mpi-smoke
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-ssa-operator-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
@@ -364,7 +383,7 @@ if(GPISM_BUILD_TESTS)
   if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
     add_test(
       NAME gpism-mg-preconditioner-effectiveness-bc-mpi-smoke-2
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${MPIEXEC_PREFLAGS}
+      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-mg-preconditioner-effectiveness-bc-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()

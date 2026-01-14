@@ -1,14 +1,25 @@
 #include "gpism/ssa_operator.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "gpism/config.h"
+#include "gpism/geometry.h"
 
 #if GPISM_HAVE_CUDA
 namespace gpism {
-void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
-                                 const double* tauc, double* beta_u,
-                                 double* beta_v, double denom);
+void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
+                                 int stride_u, int stride_v,
+                                 int stride_mask, const double* tauc,
+                                 const double* u_center,
+                                 const double* v_center,
+                                 const int* cell_type, double* beta_u,
+                                 double* beta_v, double q,
+                                 double u_threshold,
+                                 double plastic_regularization,
+                                 double sliding_scale_factor,
+                                 double beta_ice_free_bedrock,
+                                 int pseudo_plastic);
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
                            int stride_dhdx, int stride_dhdy, int stride_rhs,
                            const double* thk, const double* dhdx,
@@ -52,31 +63,84 @@ bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
 
 }  // namespace
 
-SSAOperator::SSAOperator(double rho, double g, double u_threshold)
-    : rho_(rho), g_(g), u_threshold_(u_threshold) {}
+SSAOperator::SSAOperator(double rho, double g) : rho_(rho), g_(g) {}
 
 void SSAOperator::compute_basal_drag(const Grid2D& grid,
                                      const Field2D<double>& tauc,
-                                     FieldStag2D<double>& beta) const {
+                                     const Field2D<double>& u_center,
+                                     const Field2D<double>& v_center,
+                                     const Field2D<int>& cell_type,
+                                     FieldStag2D<double>& beta,
+                                     const BasalResistanceParams& params) const {
 #if GPISM_HAVE_CUDA
-  if (tauc.has_device_data() && beta.component(0).has_device_data() &&
+  if (tauc.has_device_data() && u_center.has_device_data() &&
+      v_center.has_device_data() && cell_type.has_device_data() &&
+      beta.component(0).has_device_data() &&
       beta.component(1).has_device_data()) {
-    const double denom = std::max(u_threshold_, 1e-6);
-    ssa_compute_basal_drag_cuda(grid.local_mx(), grid.local_my(),
-                                tauc.ghost_width(), tauc.stride(),
-                                tauc.device_data(),
-                                beta.component(0).device_data(),
-                                beta.component(1).device_data(), denom);
+    ssa_compute_basal_drag_cuda(
+        grid.local_mx(), grid.local_my(), tauc.ghost_width(), tauc.stride(),
+        u_center.stride(), v_center.stride(), cell_type.stride(),
+        tauc.device_data(), u_center.device_data(), v_center.device_data(),
+        cell_type.device_data(), beta.component(0).device_data(),
+        beta.component(1).device_data(), params.q, params.u_threshold,
+        params.plastic_regularization, params.sliding_scale_factor,
+        params.beta_ice_free_bedrock,
+        params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0);
     return;
   }
 #endif
-  const double denom = std::max(u_threshold_, 1e-6);
+
+  const double reg = params.plastic_regularization;
+  const double q = params.q;
+  const double u_threshold = std::max(params.u_threshold, 1e-6);
+  const double u_threshold_factor = std::pow(u_threshold, -q);
+  const double Aq =
+      (params.sliding_scale_factor > 0.0)
+          ? std::pow(params.sliding_scale_factor, q)
+          : 1.0;
+
+  auto beta_center = [&](int i, int j) {
+    const int mask = cell_type(i, j);
+    if (mask == IceFreeBedrock) {
+      return params.beta_ice_free_bedrock;
+    }
+    if (mask == IceFreeOcean || mask == FloatingIce) {
+      return 0.0;
+    }
+    const double u = u_center(i, j);
+    const double v = v_center(i, j);
+    const double mag2 = reg * reg + u * u + v * v;
+    if (params.law == BasalResistanceLaw::PseudoPlastic) {
+      return (tauc(i, j) / Aq) * std::pow(mag2, 0.5 * (q - 1.0)) *
+             u_threshold_factor;
+    }
+    return tauc(i, j) / std::sqrt(mag2);
+  };
+
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
-      const double tauc_u = avg2(tauc(i, j), tauc(i + 1, j));
-      const double tauc_v = avg2(tauc(i, j), tauc(i, j + 1));
-      beta(i, j, 0) = tauc_u / denom;
-      beta(i, j, 1) = tauc_v / denom;
+      const int ie = (i == grid.local_mx() - 1) ? i : i + 1;
+      const int jn = (j == grid.local_my() - 1) ? j : j + 1;
+
+      const int mask_c = cell_type(i, j);
+      const int mask_e = cell_type(ie, j);
+      const int mask_n = cell_type(i, jn);
+
+      const double beta_c = beta_center(i, j);
+      const double beta_e = beta_center(ie, j);
+      const double beta_n = beta_center(i, jn);
+
+      if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
+        beta(i, j, 0) = params.beta_ice_free_bedrock;
+      } else {
+        beta(i, j, 0) = 0.5 * (beta_c + beta_e);
+      }
+
+      if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
+        beta(i, j, 1) = params.beta_ice_free_bedrock;
+      } else {
+        beta(i, j, 1) = 0.5 * (beta_c + beta_n);
+      }
     }
   }
 }

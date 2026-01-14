@@ -9,7 +9,7 @@ namespace gpism {
 
 class ViscosityModel {
 public:
-  ViscosityModel(double A, double n, double eps0);
+  ViscosityModel(double A, double n, double eps0, double enhancement = 1.0);
 
   void compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
                    const FieldStag2D<double>& vel, FieldStag2D<double>& nuH,
@@ -21,6 +21,7 @@ private:
   double A_;
   double n_;
   double eps0_;
+  double enhancement_;
 };
 
 }  // namespace gpism

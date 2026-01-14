@@ -19,8 +19,11 @@ struct IOFields2D {
   bool has_vel_bc = false;
   Field2D<double> uvel;
   Field2D<double> vvel;
+  Field2D<double> u_ssa;
+  Field2D<double> v_ssa;
   Field2D<double> usurf;
   bool has_velocity = false;
+  bool has_ssa_velocity = false;
   bool has_usurf = false;
 };
 

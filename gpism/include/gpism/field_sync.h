@@ -35,6 +35,9 @@ void sync_device_to_host(Field2D<T>& field) {
   if (!device_enabled()) {
     return;
   }
+  if (!field.device_data()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
@@ -81,6 +84,9 @@ template <typename T>
 void sync_device_to_host(Field3D<T>& field) {
 #if GPISM_HAVE_CUDA
   if (!device_enabled()) {
+    return;
+  }
+  if (!field.device_data()) {
     return;
   }
   if (!field.host_staging_data() || field.elements() == 0) {

@@ -1,5 +1,6 @@
 #include "gpism/ssa_operator.h"
 
+#include "gpism/geometry.h"
 #include "gpism/profile.h"
 
 #include <cuda_runtime.h>
@@ -11,19 +12,86 @@ __device__ inline int idx(int i, int j, int gw, int stride) {
   return (j + gw) * stride + (i + gw);
 }
 
-__global__ void basal_drag_kernel(int mx, int my, int gw, int stride,
-                                  const double* tauc, double* beta_u,
-                                  double* beta_v, double denom) {
+__device__ inline double beta_center(int i, int j, int gw, int stride_tauc,
+                                     int stride_u, int stride_v,
+                                     int stride_mask, const double* tauc,
+                                     const double* u_center,
+                                     const double* v_center,
+                                     const int* cell_type, double q,
+                                     double u_threshold, double reg,
+                                     double sliding_scale_factor,
+                                     double beta_ice_free_bedrock,
+                                     int pseudo_plastic) {
+  const int c = idx(i, j, gw, stride_tauc);
+  const int mask = cell_type[c];
+  if (mask == IceFreeBedrock) {
+    return beta_ice_free_bedrock;
+  }
+  if (mask == IceFreeOcean || mask == FloatingIce) {
+    return 0.0;
+  }
+  const double u = u_center[idx(i, j, gw, stride_u)];
+  const double v = v_center[idx(i, j, gw, stride_v)];
+  const double mag2 = reg * reg + u * u + v * v;
+  if (pseudo_plastic) {
+    const double u_thresh = fmax(u_threshold, 1.0e-6);
+    const double u_thresh_factor = pow(u_thresh, -q);
+    const double Aq =
+        (sliding_scale_factor > 0.0) ? pow(sliding_scale_factor, q) : 1.0;
+    return (tauc[c] / Aq) * pow(mag2, 0.5 * (q - 1.0)) * u_thresh_factor;
+  }
+  return tauc[c] / sqrt(mag2);
+}
+
+__global__ void basal_drag_kernel(
+    int mx, int my, int gw, int stride_tauc, int stride_u, int stride_v,
+    int stride_mask, const double* tauc, const double* u_center,
+    const double* v_center, const int* cell_type, double* beta_u,
+    double* beta_v, double q, double u_threshold, double reg,
+    double sliding_scale_factor, double beta_ice_free_bedrock,
+    int pseudo_plastic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
     return;
   }
-  const int c = idx(i, j, gw, stride);
-  const int e = idx(i + 1, j, gw, stride);
-  const int n = idx(i, j + 1, gw, stride);
-  beta_u[c] = 0.5 * (tauc[c] + tauc[e]) / denom;
-  beta_v[c] = 0.5 * (tauc[c] + tauc[n]) / denom;
+  const int ie = (i == mx - 1) ? i : (i + 1);
+  const int jn = (j == my - 1) ? j : (j + 1);
+  const int c = idx(i, j, gw, stride_tauc);
+  const int e = idx(ie, j, gw, stride_tauc);
+  const int n = idx(i, jn, gw, stride_tauc);
+
+  const int mask_c = cell_type[c];
+  const int mask_e = cell_type[e];
+  const int mask_n = cell_type[n];
+
+  const double beta_c = beta_center(i, j, gw, stride_tauc, stride_u, stride_v,
+                                    stride_mask, tauc, u_center, v_center,
+                                    cell_type, q, u_threshold, reg,
+                                    sliding_scale_factor,
+                                    beta_ice_free_bedrock, pseudo_plastic);
+  const double beta_e = beta_center(ie, j, gw, stride_tauc, stride_u, stride_v,
+                                    stride_mask, tauc, u_center, v_center,
+                                    cell_type, q, u_threshold, reg,
+                                    sliding_scale_factor,
+                                    beta_ice_free_bedrock, pseudo_plastic);
+  const double beta_n = beta_center(i, jn, gw, stride_tauc, stride_u, stride_v,
+                                    stride_mask, tauc, u_center, v_center,
+                                    cell_type, q, u_threshold, reg,
+                                    sliding_scale_factor,
+                                    beta_ice_free_bedrock, pseudo_plastic);
+
+  if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
+    beta_u[c] = beta_ice_free_bedrock;
+  } else {
+    beta_u[c] = 0.5 * (beta_c + beta_e);
+  }
+
+  if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
+    beta_v[c] = beta_ice_free_bedrock;
+  } else {
+    beta_v[c] = 0.5 * (beta_c + beta_n);
+  }
 }
 
 __global__ void rhs_kernel(int mx, int my, int gw, int stride_thk, int stride_dhdx,
@@ -231,15 +299,27 @@ __global__ void apply_region_kernel(
 
 }  // namespace
 
-void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride,
-                                 const double* tauc, double* beta_u,
-                                 double* beta_v, double denom) {
+void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
+                                 int stride_u, int stride_v,
+                                 int stride_mask, const double* tauc,
+                                 const double* u_center,
+                                 const double* v_center,
+                                 const int* cell_type, double* beta_u,
+                                 double* beta_v, double q,
+                                 double u_threshold,
+                                 double plastic_regularization,
+                                 double sliding_scale_factor,
+                                 double beta_ice_free_bedrock,
+                                 int pseudo_plastic) {
   CudaEventTimer timer("ssa_basal_drag");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
-  basal_drag_kernel<<<grid_dim, block>>>(mx, my, gw, stride, tauc, beta_u, beta_v,
-                                         denom);
+  basal_drag_kernel<<<grid_dim, block>>>(
+      mx, my, gw, stride_tauc, stride_u, stride_v, stride_mask, tauc, u_center,
+      v_center, cell_type, beta_u, beta_v, q, u_threshold,
+      plastic_regularization, sliding_scale_factor, beta_ice_free_bedrock,
+      pseudo_plastic);
 }
 
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,

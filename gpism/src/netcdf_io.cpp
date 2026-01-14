@@ -249,6 +249,8 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   int var_tauc = -1;
   int var_uvel = -1;
   int var_vvel = -1;
+  int var_u_ssa = -1;
+  int var_v_ssa = -1;
   int var_usurf = -1;
   int var_u_bc = -1;
   int var_v_bc = -1;
@@ -265,6 +267,13 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   if (fields.has_velocity) {
     if (nc_def_var(ncid, "uvel", NC_DOUBLE, 3, dims_tyx, &var_uvel) != NC_NOERR ||
         nc_def_var(ncid, "vvel", NC_DOUBLE, 3, dims_tyx, &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_def_var(ncid, "u_ssa", NC_DOUBLE, 3, dims_tyx, &var_u_ssa) != NC_NOERR ||
+        nc_def_var(ncid, "v_ssa", NC_DOUBLE, 3, dims_tyx, &var_v_ssa) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -299,6 +308,10 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
     nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
     nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
   }
+  if (fields.has_ssa_velocity) {
+    nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
+  }
   if (fields.has_usurf) {
     nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
   }
@@ -332,6 +345,13 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   if (fields.has_velocity) {
     if (nc_var_par_access(ncid, var_uvel, NC_INDEPENDENT) != NC_NOERR ||
         nc_var_par_access(ncid, var_vvel, NC_INDEPENDENT) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_var_par_access(ncid, var_u_ssa, NC_INDEPENDENT) != NC_NOERR ||
+        nc_var_par_access(ncid, var_v_ssa, NC_INDEPENDENT) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -409,6 +429,18 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
     ok = write_local(var_uvel, fields.uvel) && ok;
     ok = write_local(var_vvel, fields.vvel) && ok;
   }
+  if (fields.has_ssa_velocity) {
+    ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+    ok = write_local(var_v_ssa, fields.v_ssa) && ok;
+  }
+  if (fields.has_ssa_velocity) {
+    ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+    ok = write_local(var_v_ssa, fields.v_ssa) && ok;
+  }
+  if (fields.has_ssa_velocity) {
+    ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+    ok = write_local(var_v_ssa, fields.v_ssa) && ok;
+  }
   if (fields.has_usurf) {
     ok = write_local(var_usurf, fields.usurf) && ok;
   }
@@ -479,6 +511,8 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   fields.vel_bc_mask.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.uvel.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.vvel.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.u_ssa.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
+  fields.v_ssa.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.usurf.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
 
   const int xs = grid.xs();
@@ -514,6 +548,8 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
 
   bool has_uvel = false;
   bool has_vvel = false;
+  bool has_u_ssa = false;
+  bool has_v_ssa = false;
   bool has_usurf = false;
   ok = read_var_2d_slice(ncid, "uvel", dim_time, time_index, xs, ys, mx, my,
                          fields.uvel, false, 0.0, &has_uvel) &&
@@ -521,10 +557,17 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   ok = read_var_2d_slice(ncid, "vvel", dim_time, time_index, xs, ys, mx, my,
                          fields.vvel, false, 0.0, &has_vvel) &&
        ok;
+  ok = read_var_2d_slice(ncid, "u_ssa", dim_time, time_index, xs, ys, mx, my,
+                         fields.u_ssa, false, 0.0, &has_u_ssa) &&
+       ok;
+  ok = read_var_2d_slice(ncid, "v_ssa", dim_time, time_index, xs, ys, mx, my,
+                         fields.v_ssa, false, 0.0, &has_v_ssa) &&
+       ok;
   ok = read_var_2d_slice(ncid, "usurf", dim_time, time_index, xs, ys, mx, my,
                          fields.usurf, false, 0.0, &has_usurf) &&
        ok;
   fields.has_velocity = has_uvel || has_vvel;
+  fields.has_ssa_velocity = has_u_ssa || has_v_ssa;
   fields.has_usurf = has_usurf;
 
   nc_close(ncid);
@@ -552,6 +595,8 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   int var_tauc = -1;
   int var_uvel = -1;
   int var_vvel = -1;
+  int var_u_ssa = -1;
+  int var_v_ssa = -1;
   int var_usurf = -1;
   int var_u_bc = -1;
   int var_v_bc = -1;
@@ -566,6 +611,13 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   if (fields.has_velocity) {
     if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
         nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_inq_varid(ncid, "u_ssa", &var_u_ssa) != NC_NOERR ||
+        nc_inq_varid(ncid, "v_ssa", &var_v_ssa) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -598,6 +650,10 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   if (fields.has_velocity) {
     ok = write_var_2d(ncid, var_uvel, fields.uvel, mx, my, t_index) && ok;
     ok = write_var_2d(ncid, var_vvel, fields.vvel, mx, my, t_index) && ok;
+  }
+  if (fields.has_ssa_velocity) {
+    ok = write_var_2d(ncid, var_u_ssa, fields.u_ssa, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_v_ssa, fields.v_ssa, mx, my, t_index) && ok;
   }
   if (fields.has_usurf) {
     ok = write_var_2d(ncid, var_usurf, fields.usurf, mx, my, t_index) && ok;
@@ -638,6 +694,8 @@ bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
   int var_tauc = -1;
   int var_uvel = -1;
   int var_vvel = -1;
+  int var_u_ssa = -1;
+  int var_v_ssa = -1;
   int var_usurf = -1;
   int var_u_bc = -1;
   int var_v_bc = -1;
@@ -652,6 +710,13 @@ bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
   if (fields.has_velocity) {
     if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
         nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_inq_varid(ncid, "u_ssa", &var_u_ssa) != NC_NOERR ||
+        nc_inq_varid(ncid, "v_ssa", &var_v_ssa) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -681,6 +746,13 @@ bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
   if (fields.has_velocity) {
     if (nc_var_par_access(ncid, var_uvel, NC_INDEPENDENT) != NC_NOERR ||
         nc_var_par_access(ncid, var_vvel, NC_INDEPENDENT) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_var_par_access(ncid, var_u_ssa, NC_INDEPENDENT) != NC_NOERR ||
+        nc_var_par_access(ncid, var_v_ssa, NC_INDEPENDENT) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -811,6 +883,8 @@ bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
       int var_tauc = -1;
       int var_uvel = -1;
       int var_vvel = -1;
+      int var_u_ssa = -1;
+      int var_v_ssa = -1;
       int var_usurf = -1;
       int var_u_bc = -1;
       int var_v_bc = -1;
@@ -824,6 +898,13 @@ bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
       if (fields.has_velocity) {
         if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
             nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+          nc_close(ncid);
+          return false;
+        }
+      }
+      if (fields.has_ssa_velocity) {
+        if (nc_inq_varid(ncid, "u_ssa", &var_u_ssa) != NC_NOERR ||
+            nc_inq_varid(ncid, "v_ssa", &var_v_ssa) != NC_NOERR) {
           nc_close(ncid);
           return false;
         }
@@ -879,6 +960,10 @@ bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
       if (fields.has_velocity) {
         ok = write_local(var_uvel, fields.uvel) && ok;
         ok = write_local(var_vvel, fields.vvel) && ok;
+      }
+      if (fields.has_ssa_velocity) {
+        ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+        ok = write_local(var_v_ssa, fields.v_ssa) && ok;
       }
       if (fields.has_usurf) {
         ok = write_local(var_usurf, fields.usurf) && ok;
@@ -964,6 +1049,8 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       int var_tauc = -1;
       int var_uvel = -1;
       int var_vvel = -1;
+      int var_u_ssa = -1;
+      int var_v_ssa = -1;
       int var_usurf = -1;
       int var_u_bc = -1;
       int var_v_bc = -1;
@@ -980,6 +1067,13 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       if (fields.has_velocity) {
         if (nc_def_var(ncid, "uvel", NC_DOUBLE, 3, dims_tyx, &var_uvel) != NC_NOERR ||
             nc_def_var(ncid, "vvel", NC_DOUBLE, 3, dims_tyx, &var_vvel) != NC_NOERR) {
+          nc_close(ncid);
+          return false;
+        }
+      }
+      if (fields.has_ssa_velocity) {
+        if (nc_def_var(ncid, "u_ssa", NC_DOUBLE, 3, dims_tyx, &var_u_ssa) != NC_NOERR ||
+            nc_def_var(ncid, "v_ssa", NC_DOUBLE, 3, dims_tyx, &var_v_ssa) != NC_NOERR) {
           nc_close(ncid);
           return false;
         }
@@ -1013,6 +1107,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       if (fields.has_velocity) {
         nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
         nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
+      }
+      if (fields.has_ssa_velocity) {
+        nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
+        nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
       }
       if (fields.has_usurf) {
         nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
@@ -1068,6 +1166,8 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
         int var_tauc = -1;
         int var_uvel = -1;
         int var_vvel = -1;
+        int var_u_ssa = -1;
+        int var_v_ssa = -1;
         int var_usurf = -1;
         int var_u_bc = -1;
         int var_v_bc = -1;
@@ -1081,6 +1181,13 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
         if (fields.has_velocity) {
           if (nc_inq_varid(ncid, "uvel", &var_uvel) != NC_NOERR ||
               nc_inq_varid(ncid, "vvel", &var_vvel) != NC_NOERR) {
+            nc_close(ncid);
+            return false;
+          }
+        }
+        if (fields.has_ssa_velocity) {
+          if (nc_inq_varid(ncid, "u_ssa", &var_u_ssa) != NC_NOERR ||
+              nc_inq_varid(ncid, "v_ssa", &var_v_ssa) != NC_NOERR) {
             nc_close(ncid);
             return false;
           }
@@ -1137,6 +1244,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
           ok = write_local(var_uvel, fields.uvel) && ok;
           ok = write_local(var_vvel, fields.vvel) && ok;
         }
+        if (fields.has_ssa_velocity) {
+          ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+          ok = write_local(var_v_ssa, fields.v_ssa) && ok;
+        }
         if (fields.has_usurf) {
           ok = write_local(var_usurf, fields.usurf) && ok;
         }
@@ -1188,6 +1299,8 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   int var_tauc = -1;
   int var_uvel = -1;
   int var_vvel = -1;
+  int var_u_ssa = -1;
+  int var_v_ssa = -1;
   int var_usurf = -1;
   int var_u_bc = -1;
   int var_v_bc = -1;
@@ -1204,6 +1317,13 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   if (fields.has_velocity) {
     if (nc_def_var(ncid, "uvel", NC_DOUBLE, 3, dims_tyx, &var_uvel) != NC_NOERR ||
         nc_def_var(ncid, "vvel", NC_DOUBLE, 3, dims_tyx, &var_vvel) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+  }
+  if (fields.has_ssa_velocity) {
+    if (nc_def_var(ncid, "u_ssa", NC_DOUBLE, 3, dims_tyx, &var_u_ssa) != NC_NOERR ||
+        nc_def_var(ncid, "v_ssa", NC_DOUBLE, 3, dims_tyx, &var_v_ssa) != NC_NOERR) {
       nc_close(ncid);
       return false;
     }
@@ -1237,6 +1357,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   if (fields.has_velocity) {
     nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
     nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
+  }
+  if (fields.has_ssa_velocity) {
+    nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
   }
   if (fields.has_usurf) {
     nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
@@ -1285,6 +1409,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   if (fields.has_velocity) {
     ok = write_var_2d(ncid, var_uvel, fields.uvel, mx, my, 0) && ok;
     ok = write_var_2d(ncid, var_vvel, fields.vvel, mx, my, 0) && ok;
+  }
+  if (fields.has_ssa_velocity) {
+    ok = write_var_2d(ncid, var_u_ssa, fields.u_ssa, mx, my, 0) && ok;
+    ok = write_var_2d(ncid, var_v_ssa, fields.v_ssa, mx, my, 0) && ok;
   }
   if (fields.has_usurf) {
     ok = write_var_2d(ncid, var_usurf, fields.usurf, mx, my, 0) && ok;

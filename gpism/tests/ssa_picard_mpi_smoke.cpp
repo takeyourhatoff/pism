@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -90,6 +91,12 @@ int main(int argc, char** argv) {
   options.vel_relax = 1.0;
   options.nuH_relax = 1.0;
   options.use_bc = false;
+  options.sea_level = 0.0;
+  options.rho_ice = 910.0;
+  options.rho_water = 1028.0;
+  options.surface_gradient_inward = false;
+  options.surface_slope_uphill = true;
+  options.use_cfbc = false;
   options.context = &context;
 
   vel.fill(0.0);
@@ -130,7 +137,117 @@ int main(int argc, char** argv) {
 
   const double speed = global_norm(context, local_vel_norm2(vel));
   if (!std::isfinite(speed) || speed <= 0.0) {
-    std::cerr << "velocity norm is invalid under MPI\n";
+    double min_val = std::numeric_limits<double>::infinity();
+    double max_val = -std::numeric_limits<double>::infinity();
+    for (int j = 0; j < vel.local_my(); ++j) {
+      for (int i = 0; i < vel.local_mx(); ++i) {
+        for (int comp = 0; comp < 2; ++comp) {
+          const double value = vel(i, j, comp);
+          if (!std::isfinite(value)) {
+            continue;
+          }
+          min_val = std::min(min_val, value);
+          max_val = std::max(max_val, value);
+        }
+      }
+    }
+    if (!std::isfinite(min_val)) {
+      min_val = 0.0;
+      max_val = 0.0;
+    }
+    gpism::Field2D<double> usurf(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<double> dhdx(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<double> dhdy(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
+    gpism::FieldStag2D<double> rhs(grid.local_mx(), grid.local_my(), gw);
+    gpism::compute_cell_type(grid, thk, topg, options.sea_level,
+                             options.rho_ice, options.rho_water, cell_type);
+    gpism::compute_usurf_flotation(grid, thk, topg, cell_type, options.sea_level,
+                                   options.rho_ice, options.rho_water, usurf);
+    gpism::compute_surface_slopes_pism(grid, usurf, cell_type, dhdx, dhdy,
+                                       options.surface_gradient_inward,
+                                       options.surface_slope_uphill,
+                                       options.use_cfbc);
+    gpism::SSAOperator op(options.rho_ice, 9.81);
+    op.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
+    gpism::sync_device_to_host(rhs);
+    double rhs_norm = 0.0;
+    for (int j = 0; j < rhs.local_my(); ++j) {
+      for (int i = 0; i < rhs.local_mx(); ++i) {
+        rhs_norm += rhs(i, j, 0) * rhs(i, j, 0) + rhs(i, j, 1) * rhs(i, j, 1);
+      }
+    }
+    rhs_norm = std::sqrt(rhs_norm);
+    gpism::sync_device_to_host(usurf);
+    gpism::sync_device_to_host(cell_type);
+    gpism::sync_device_to_host(dhdx);
+    gpism::sync_device_to_host(dhdy);
+    double usurf_min = std::numeric_limits<double>::infinity();
+    double usurf_max = -std::numeric_limits<double>::infinity();
+    int cell_min = std::numeric_limits<int>::max();
+    int cell_max = std::numeric_limits<int>::min();
+    for (int j = 0; j < usurf.local_my(); ++j) {
+      for (int i = 0; i < usurf.local_mx(); ++i) {
+        usurf_min = std::min(usurf_min, usurf(i, j));
+        usurf_max = std::max(usurf_max, usurf(i, j));
+        cell_min = std::min(cell_min, cell_type(i, j));
+        cell_max = std::max(cell_max, cell_type(i, j));
+      }
+    }
+    const bool prev_device = gpism::device_enabled();
+    gpism::set_device_enabled(false);
+    gpism::Field2D<int> cell_type_cpu(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<double> usurf_cpu(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<double> dhdx_cpu(grid.local_mx(), grid.local_my(), gw);
+    gpism::Field2D<double> dhdy_cpu(grid.local_mx(), grid.local_my(), gw);
+    gpism::compute_cell_type(grid, thk, topg, options.sea_level,
+                             options.rho_ice, options.rho_water, cell_type_cpu);
+    gpism::compute_usurf_flotation(grid, thk, topg, cell_type_cpu,
+                                   options.sea_level, options.rho_ice,
+                                   options.rho_water, usurf_cpu);
+    gpism::compute_surface_slopes_pism(grid, usurf_cpu, cell_type_cpu,
+                                       dhdx_cpu, dhdy_cpu,
+                                       options.surface_gradient_inward,
+                                       options.surface_slope_uphill,
+                                       options.use_cfbc);
+    gpism::FieldStag2D<double> rhs_cpu(grid.local_mx(), grid.local_my(), gw);
+    op.assemble_rhs(grid, thk, dhdx_cpu, dhdy_cpu, rhs_cpu);
+    double rhs_cpu_norm = 0.0;
+    for (int j = 0; j < rhs_cpu.local_my(); ++j) {
+      for (int i = 0; i < rhs_cpu.local_mx(); ++i) {
+        rhs_cpu_norm += rhs_cpu(i, j, 0) * rhs_cpu(i, j, 0) +
+                        rhs_cpu(i, j, 1) * rhs_cpu(i, j, 1);
+      }
+    }
+    rhs_cpu_norm = std::sqrt(rhs_cpu_norm);
+    gpism::set_device_enabled(prev_device);
+    gpism::sync_device_to_host(thk);
+    gpism::sync_device_to_host(topg);
+    double thk_min = std::numeric_limits<double>::infinity();
+    double thk_max = -std::numeric_limits<double>::infinity();
+    double topg_min = std::numeric_limits<double>::infinity();
+    double topg_max = -std::numeric_limits<double>::infinity();
+    for (int j = 0; j < thk.local_my(); ++j) {
+      for (int i = 0; i < thk.local_mx(); ++i) {
+        thk_min = std::min(thk_min, thk(i, j));
+        thk_max = std::max(thk_max, thk(i, j));
+        topg_min = std::min(topg_min, topg(i, j));
+        topg_max = std::max(topg_max, topg(i, j));
+      }
+    }
+    std::cerr << "velocity norm is invalid under MPI (speed=" << speed
+              << ", min=" << min_val << ", max=" << max_val
+              << ", rhs_norm=" << rhs_norm
+              << ", rhs_cpu_norm=" << rhs_cpu_norm
+              << ", usurf[min,max]=[" << usurf_min << "," << usurf_max << "]"
+              << ", cell_type[min,max]=[" << cell_min << "," << cell_max << "]"
+              << ", thk[min,max]=[" << thk_min << "," << thk_max << "]"
+              << ", topg[min,max]=[" << topg_min << "," << topg_max << "]"
+              << ", rho_ice=" << options.rho_ice
+              << ", rho_water=" << options.rho_water
+              << ", sea_level=" << options.sea_level
+              << ", device_enabled=" << gpism::device_enabled()
+              << ")\n";
     return 1;
   }
 

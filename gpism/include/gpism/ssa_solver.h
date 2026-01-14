@@ -45,6 +45,14 @@ struct SSASolverOptions {
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
 
+  BasalResistanceParams basal_params;
+  double sea_level = 0.0;
+  double rho_ice = 910.0;
+  double rho_water = 1028.0;
+  bool surface_gradient_inward = false;
+  bool surface_slope_uphill = true;
+  bool use_cfbc = false;
+
   bool use_bc = false;
   const Field3D<double>* enthalpy = nullptr;
   double enthalpy_gamma = 0.0;
@@ -86,6 +94,9 @@ private:
     Field2D<double> usurf;
     Field2D<double> dhdx;
     Field2D<double> dhdy;
+    Field2D<int> cell_type;
+    Field2D<double> u_center;
+    Field2D<double> v_center;
     FieldStag2D<double> beta;
     FieldStag2D<double> rhs;
     FieldStag2D<double> nuH;
@@ -109,6 +120,9 @@ private:
         usurf.resize(mx, my, gw);
         dhdx.resize(mx, my, gw);
         dhdy.resize(mx, my, gw);
+        cell_type.resize(mx, my, gw);
+        u_center.resize(mx, my, gw);
+        v_center.resize(mx, my, gw);
         beta.resize(mx, my, gw);
         rhs.resize(mx, my, gw);
         nuH.resize(mx, my, gw);
@@ -120,6 +134,9 @@ private:
         usurf.resize(mx, my, gw);
         dhdx.resize(mx, my, gw);
         dhdy.resize(mx, my, gw);
+        cell_type.resize(mx, my, gw);
+        u_center.resize(mx, my, gw);
+        v_center.resize(mx, my, gw);
         beta.resize(mx, my, gw);
         rhs.resize(mx, my, gw);
         nuH.resize(mx, my, gw);

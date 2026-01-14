@@ -4,6 +4,7 @@
 #include "gpism/gmres.h"
 #include "gpism/halo_exchange.h"
 #include "gpism/linear_algebra.h"
+#include "gpism/geometry.h"
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
@@ -37,6 +38,9 @@ void sync_host_to_device(gpism::Field2D<T>& field) {
 template <typename T>
 void sync_device_to_host(gpism::Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!field.device_data()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
@@ -103,22 +107,31 @@ int main(int argc, char** argv) {
   const int gw = 1;
   gpism::Grid2D grid(global_mx, global_my, 1000.0, 1000.0, gw, context.rank(),
                      context.size());
-  gpism::SSAOperator ssa(910.0, 9.81, 100.0);
+  gpism::SSAOperator ssa(910.0, 9.81);
 
   gpism::Field2D<double> tauc(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> thk(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> dhdx(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> dhdy(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> u_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> v_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
 
   tauc.fill(100.0);
   thk.fill(1000.0);
   dhdx.fill(0.01);
   dhdy.fill(-0.02);
+  u_center.fill(0.0);
+  v_center.fill(0.0);
+  cell_type.fill(gpism::GroundedIce);
 
   sync_host_to_device(tauc);
   sync_host_to_device(thk);
   sync_host_to_device(dhdx);
   sync_host_to_device(dhdy);
+  sync_host_to_device(u_center);
+  sync_host_to_device(v_center);
+  sync_host_to_device(cell_type);
 
   gpism::FieldStag2D<double> beta(grid.local_mx(), grid.local_my(), gw);
   gpism::FieldStag2D<double> nuH(grid.local_mx(), grid.local_my(), gw);
@@ -127,7 +140,9 @@ int main(int argc, char** argv) {
   gpism::FieldStag2D<double> Ax(grid.local_mx(), grid.local_my(), gw);
   gpism::FieldStag2D<double> r(grid.local_mx(), grid.local_my(), gw);
 
-  ssa.compute_basal_drag(grid, tauc, beta);
+  gpism::BasalResistanceParams basal_params;
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
+                         basal_params);
   ssa.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
 
   sync_device_to_host(beta);

@@ -24,6 +24,7 @@ public:
 #if GPISM_HAVE_CUDA
         host_staging_(nullptr),
         host_staging_count_(0),
+        host_staging_pinned_(false),
 #endif
         device_data_(nullptr) {}
 
@@ -35,6 +36,7 @@ public:
 #if GPISM_HAVE_CUDA
         host_staging_(nullptr),
         host_staging_count_(0),
+        host_staging_pinned_(false),
 #endif
         device_data_(nullptr) {
     resize_storage();
@@ -143,8 +145,17 @@ private:
       return;
     }
     host_staging_count_ = elements;
-    cudaHostAlloc(reinterpret_cast<void**>(&host_staging_),
-                  elements * sizeof(T), cudaHostAllocDefault);
+    cudaError_t err = cudaHostAlloc(reinterpret_cast<void**>(&host_staging_),
+                                    elements * sizeof(T),
+                                    cudaHostAllocDefault);
+    if (err == cudaSuccess) {
+      host_staging_pinned_ = true;
+      host_staging_fallback_.clear();
+      return;
+    }
+    host_staging_pinned_ = false;
+    host_staging_fallback_.assign(elements, T{});
+    host_staging_ = host_staging_fallback_.data();
 #else
     host_staging_.assign(elements, T{});
 #endif
@@ -152,11 +163,13 @@ private:
 
   void release_host_staging() {
 #if GPISM_HAVE_CUDA
-    if (host_staging_ != nullptr) {
+    if (host_staging_pinned_ && host_staging_ != nullptr) {
       cudaFreeHost(host_staging_);
-      host_staging_ = nullptr;
-      host_staging_count_ = 0;
     }
+    host_staging_ = nullptr;
+    host_staging_count_ = 0;
+    host_staging_pinned_ = false;
+    host_staging_fallback_.clear();
 #else
     host_staging_.clear();
 #endif
@@ -192,6 +205,8 @@ private:
 #if GPISM_HAVE_CUDA
   T* host_staging_;
   std::size_t host_staging_count_;
+  bool host_staging_pinned_;
+  std::vector<T> host_staging_fallback_;
 #else
   std::vector<T> host_staging_;
 #endif

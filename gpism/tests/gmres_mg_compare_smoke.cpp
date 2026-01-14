@@ -1,6 +1,7 @@
 #include "gpism/gmres.h"
 #include "gpism/linear_algebra.h"
 #include "gpism/mg_preconditioner.h"
+#include "gpism/geometry.h"
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
@@ -52,12 +53,20 @@ void fill_pattern(gpism::FieldStag2D<double>& x) {
 SolveStats run_case(int mx, int my) {
   const int gw = 1;
   gpism::Grid2D grid(mx, my, 1000.0, 1000.0, gw, 0, 1);
-  gpism::SSAOperator ssa(910.0, 9.81, 100.0);
+  gpism::SSAOperator ssa(910.0, 9.81);
 
   gpism::Field2D<double> tauc(mx, my, gw);
   tauc.fill(5.0);
+  gpism::Field2D<double> u_center(mx, my, gw);
+  gpism::Field2D<double> v_center(mx, my, gw);
+  gpism::Field2D<int> cell_type(mx, my, gw);
+  u_center.fill(0.0);
+  v_center.fill(0.0);
+  cell_type.fill(gpism::GroundedIce);
   gpism::FieldStag2D<double> beta(mx, my, gw);
-  ssa.compute_basal_drag(grid, tauc, beta);
+  gpism::BasalResistanceParams basal_params;
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
+                         basal_params);
 
   gpism::FieldStag2D<double> nuH(mx, my, gw);
   for (int j = -gw; j < my + gw; ++j) {

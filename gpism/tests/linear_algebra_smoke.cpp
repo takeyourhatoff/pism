@@ -27,6 +27,9 @@ void sync_host_to_device(gpism::Field2D<T>& field) {
 template <typename T>
 void sync_device_to_host(gpism::Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!field.device_data()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }

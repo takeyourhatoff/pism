@@ -32,6 +32,11 @@ template <>
 struct MpiType<double> {
   static MPI_Datatype value() { return MPI_DOUBLE; }
 };
+
+template <>
+struct MpiType<int> {
+  static MPI_Datatype value() { return MPI_INT; }
+};
 #endif
 
 class HaloExchange2D {
@@ -78,10 +83,14 @@ public:
         }
 #if GPISM_HAVE_CUDA
         if (device_enabled()) {
-          cudaHostAlloc(reinterpret_cast<void**>(&ptr),
-                        n * sizeof(T), cudaHostAllocDefault);
-          pinned = true;
-          return;
+          cudaError_t err = cudaHostAlloc(reinterpret_cast<void**>(&ptr),
+                                          n * sizeof(T), cudaHostAllocDefault);
+          if (err == cudaSuccess) {
+            pinned = true;
+            return;
+          }
+          ptr = nullptr;
+          pinned = false;
         }
 #endif
         storage.resize(n);

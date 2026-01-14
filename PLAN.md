@@ -520,6 +520,19 @@
 
 ### M11 Tasks (pick in priority order)
 
+* [~] PISM-match SSA diagnostic outputs (std-greenland)
+
+  * [x] Extract PISM SSA runtime parameters (flow law, basal law, epsilon, enhancement, tolerances)
+  * [x] Implement flotation-based `usurf` and grounded/floating mask (PISM parity)
+  * [x] Match SSA surface-gradient/margin rules (`compute_surface_gradient_inward`, extrapolate at margins)
+  * [x] Implement PISM-style pseudo-plastic basal drag law (q, u_threshold, scaling/regularization)
+  * [x] Implement PISM flow law / viscosity parity (Paterson-Budd/Glen + enhancement factor + epsilon)
+  * [x] Add SSA diagnostic outputs (`u_ssa`/`v_ssa` or `ubar_ssa`/`vbar_ssa`)
+  * [x] Update compare script to use SSA diagnostics + report rel RMS/Max vs PISM
+  * [x] Add regression test: non-zero SSA velocities + parity tolerance for std-greenland diagnostic case
+  * [ ] Pass GPU sync audit: no per-step field syncs in SSA loop (scalar reductions only)
+  * [ ] Reprofile to confirm kernels dominate wall time and no new per-step allocations
+
 * [ ] Implement `-bootstrap` pathway (create initial fields from minimal inputs)
 * [ ] Support reading/writing SSA initial guess fields (`ubar_ssa`, `vbar_ssa`)
 * [x] Support legacy NetCDF dimension/coord aliases (e.g., `x1`/`y1`) when reading PISM inputs
@@ -537,6 +550,14 @@
 ### M11 Definition of Done
 
 * [ ] A real PISM workflow you care about can be replicated using gpism with minimal script changes
+
+#### PISM-match SSA Diagnostic DoD
+
+* [ ] gpism SSA diagnostics match PISM SSA diagnostics within tolerance (rel RMS ≤ 2%, max ≤ 5%) for std-greenland `-no_mass -energy none`
+* [ ] `usurf` matches PISM within tolerance once flotation is enabled
+* [ ] Resolved PISM parameters are logged for the comparison run
+* [ ] GPU sync audit passes (no field D2H/H2D during SSA loop; scalar reductions allowed)
+* [ ] Nsight profile shows kernels dominate wall time; no new per-step allocations
 
 ---
 
@@ -596,6 +617,23 @@
 * 🎯 Next:
 
   * -
+
+**Week of 2026-01-14**
+
+* ✅ Completed:
+
+  * PISM-match SSA parity work: flotation `usurf`, PISM surface-slope rules, pseudo-plastic basal drag, viscosity enhancement, SSA diagnostics, compare script + ctest regression.
+  * Hardened device↔host sync when CUDA allocations are unavailable; updated CUDA smoke tests; aligned basal-drag reference with boundary clamping.
+  * Full `ctest --output-on-failure` run in `gpism/build-cuda-mpi`.
+* 🔧 In progress:
+
+  * Finish remaining PISM-match SSA audit items (GPU sync audit + reprofile).
+* 🧱 Blocked:
+
+  * -
+* 🎯 Next:
+
+  * Run SSA loop sync audit and reprofile for kernel dominance.
 
 **Week of 2026-01-11**
 

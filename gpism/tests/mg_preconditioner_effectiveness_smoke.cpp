@@ -3,6 +3,7 @@
 #include "gpism/gmres.h"
 #include "gpism/linear_algebra.h"
 #include "gpism/mg_preconditioner.h"
+#include "gpism/geometry.h"
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
@@ -55,10 +56,16 @@ Effectiveness measure_effectiveness(bool use_device) {
 
   const int gw = 1;
   gpism::Grid2D grid(32, 32, 1000.0, 1000.0, gw, 0, 1);
-  gpism::SSAOperator ssa(910.0, 9.81, 100.0);
+  gpism::SSAOperator ssa(910.0, 9.81);
 
   gpism::Field2D<double> tauc(grid.local_mx(), grid.local_my(), gw);
   tauc.fill(5.0);
+  gpism::Field2D<double> u_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> v_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
+  u_center.fill(0.0);
+  v_center.fill(0.0);
+  cell_type.fill(gpism::GroundedIce);
   gpism::FieldStag2D<double> beta(grid.local_mx(), grid.local_my(), gw);
 
   gpism::FieldStag2D<double> nuH(grid.local_mx(), grid.local_my(), gw);
@@ -77,11 +84,16 @@ Effectiveness measure_effectiveness(bool use_device) {
 
   if (use_device) {
     gpism::sync_host_to_device(tauc);
+    gpism::sync_host_to_device(u_center);
+    gpism::sync_host_to_device(v_center);
+    gpism::sync_host_to_device(cell_type);
     gpism::sync_host_to_device(nuH);
     gpism::sync_host_to_device(x_true);
   }
 
-  ssa.compute_basal_drag(grid, tauc, beta);
+  gpism::BasalResistanceParams basal_params;
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
+                         basal_params);
 
   SSAOperatorWrapper op(ssa, grid, nuH, beta, nullptr);
 

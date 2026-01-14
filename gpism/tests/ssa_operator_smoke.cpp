@@ -1,3 +1,4 @@
+#include "gpism/geometry.h"
 #include "gpism/ssa_operator.h"
 
 #include <cmath>
@@ -27,6 +28,9 @@ void sync_host_to_device(gpism::Field2D<T>& field) {
 template <typename T>
 void sync_device_to_host(gpism::Field2D<T>& field) {
 #if GPISM_HAVE_CUDA
+  if (!field.device_data()) {
+    return;
+  }
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
@@ -57,13 +61,25 @@ int main() {
   const int my = 3;
   const int gw = 1;
   gpism::Grid2D grid(mx, my, 2.0, 3.0, gw, 0, 1);
-  gpism::SSAOperator op(910.0, 9.81, 100.0);
+  gpism::SSAOperator op(910.0, 9.81);
 
   gpism::Field2D<double> tauc(mx, my, gw);
+  gpism::Field2D<double> u_center(mx, my, gw);
+  gpism::Field2D<double> v_center(mx, my, gw);
+  gpism::Field2D<int> cell_type(mx, my, gw);
   tauc.fill(50.0);
+  u_center.fill(0.0);
+  v_center.fill(0.0);
+  cell_type.fill(gpism::GroundedIce);
   sync_host_to_device(tauc);
+  sync_host_to_device(u_center);
+  sync_host_to_device(v_center);
+  sync_host_to_device(cell_type);
   gpism::FieldStag2D<double> beta(mx, my, gw);
-  op.compute_basal_drag(grid, tauc, beta);
+  gpism::BasalResistanceParams basal_params;
+  basal_params.plastic_regularization = 100.0;
+  op.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
+                        basal_params);
   sync_device_to_host(beta);
 
   for (int j = 0; j < my; ++j) {

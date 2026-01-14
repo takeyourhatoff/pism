@@ -44,6 +44,8 @@ void AsyncOutputWriter::init_frame(Frame& frame, const Grid2D& grid) {
   frame.fields.vel_bc_mask.resize(mx, my, 0);
   frame.fields.uvel.resize(mx, my, 0);
   frame.fields.vvel.resize(mx, my, 0);
+  frame.fields.u_ssa.resize(mx, my, 0);
+  frame.fields.v_ssa.resize(mx, my, 0);
   frame.fields.usurf.resize(mx, my, 0);
 }
 
@@ -52,6 +54,7 @@ void AsyncOutputWriter::stage_fields(Frame& frame, const Grid2D& grid,
   frame.fields.has_tauc = fields.has_tauc;
   frame.fields.has_vel_bc = fields.has_vel_bc;
   frame.fields.has_velocity = fields.has_velocity;
+  frame.fields.has_ssa_velocity = fields.has_ssa_velocity;
   frame.fields.has_usurf = fields.has_usurf;
 
   sync_device_to_host(fields.thk);
@@ -66,6 +69,13 @@ void AsyncOutputWriter::stage_fields(Frame& frame, const Grid2D& grid,
     sync_device_to_host(fields.vvel);
     copy_interior(grid, fields.uvel, frame.fields.uvel);
     copy_interior(grid, fields.vvel, frame.fields.vvel);
+  }
+
+  if (fields.has_ssa_velocity) {
+    sync_device_to_host(fields.u_ssa);
+    sync_device_to_host(fields.v_ssa);
+    copy_interior(grid, fields.u_ssa, frame.fields.u_ssa);
+    copy_interior(grid, fields.v_ssa, frame.fields.v_ssa);
   }
 
   if (fields.has_usurf) {

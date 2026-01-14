@@ -33,8 +33,9 @@ double center_from_faces(double left, double right) {
 
 }  // namespace
 
-ViscosityModel::ViscosityModel(double A, double n, double eps0)
-    : A_(A), n_(n), eps0_(eps0) {}
+ViscosityModel::ViscosityModel(double A, double n, double eps0,
+                               double enhancement)
+    : A_(A), n_(n), eps0_(eps0), enhancement_(enhancement) {}
 
 void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
                                  const FieldStag2D<double>& vel,
@@ -53,7 +54,8 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
   if (thk.has_device_data() && vel.component(0).has_device_data() &&
       vel.component(1).has_device_data() && nuH.component(0).has_device_data() &&
       nuH.component(1).has_device_data()) {
-    const double A_eff = clamp_positive(A_, 1e-20);
+    const double enhancement = clamp_positive(enhancement_, 1.0);
+    const double A_eff = clamp_positive(A_ * enhancement, 1e-20);
     const double n_eff = clamp_positive(n_, 1.0);
     const double B = std::pow(2.0 * A_eff, -1.0 / n_eff);
     const bool use_temp = enthalpy && enthalpy->has_device_data() &&
@@ -106,7 +108,8 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
     }
   }
 
-  const double A_eff = clamp_positive(A_, 1e-20);
+  const double enhancement = clamp_positive(enhancement_, 1.0);
+  const double A_eff = clamp_positive(A_ * enhancement, 1e-20);
   const double n_eff = clamp_positive(n_, 1.0);
   const double B = std::pow(2.0 * A_eff, -1.0 / n_eff);
 

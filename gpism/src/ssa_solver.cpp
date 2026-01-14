@@ -14,6 +14,7 @@
 #include "gpism/halo_exchange.h"
 #include "gpism/linear_algebra.h"
 #include "gpism/mg_preconditioner.h"
+#include "gpism/thickness.h"
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -50,6 +51,30 @@ bool can_use_device_exchange(const FieldStag2D<T>& field,
 
 template <typename T>
 void exchange_for_device(FieldStag2D<T>& field, const Grid2D& grid,
+                         const Context& context) {
+  HaloExchange2D exchange;
+  if (can_use_device_exchange(field, context)) {
+    exchange.exchange(field, grid, context, HaloExchange2D::Mode::Device);
+    return;
+  }
+  sync_device_to_host(field);
+  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Host);
+  sync_host_to_device(field);
+}
+
+template <typename T>
+bool can_use_device_exchange(const Field2D<T>& field, const Context& context) {
+#if GPISM_HAVE_CUDA
+  return context.cuda_aware_mpi() && field.device_data() != nullptr;
+#else
+  (void)field;
+  (void)context;
+  return false;
+#endif
+}
+
+template <typename T>
+void exchange_for_device(Field2D<T>& field, const Grid2D& grid,
                          const Context& context) {
   HaloExchange2D exchange;
   if (can_use_device_exchange(field, context)) {
@@ -371,7 +396,9 @@ void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
 
 SSASolver::SSASolver(const Grid2D& grid, double rho, double g, double u_threshold,
                      const ViscosityModel& viscosity_model)
-    : grid_(grid), ssa_(rho, g, u_threshold), viscosity_(viscosity_model) {}
+    : grid_(grid), ssa_(rho, g), viscosity_(viscosity_model) {
+  (void)u_threshold;
+}
 
 SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                                  const Field2D<double>& topg,
@@ -388,6 +415,9 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   auto& usurf = workspace_.usurf;
   auto& dhdx = workspace_.dhdx;
   auto& dhdy = workspace_.dhdy;
+  auto& cell_type = workspace_.cell_type;
+  auto& u_center = workspace_.u_center;
+  auto& v_center = workspace_.v_center;
   auto& beta = workspace_.beta;
   auto& rhs = workspace_.rhs;
   auto& nuH = workspace_.nuH;
@@ -405,13 +435,22 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   }
 
   GeometryDiagnostics geometry;
-  geometry.compute_usurf(grid_, thk, topg, usurf);
-  geometry.compute_surface_slopes(grid_, usurf, dhdx, dhdy);
-
-  ssa_.compute_basal_drag(grid_, tauc, beta);
+  compute_cell_type(grid_, thk, topg, options.sea_level, options.rho_ice,
+                    options.rho_water, cell_type);
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(beta, grid_, *context);
+    exchange_for_device(cell_type, grid_, *context);
   }
+
+  compute_usurf_flotation(grid_, thk, topg, cell_type, options.sea_level,
+                          options.rho_ice, options.rho_water, usurf);
+  if (context && context->mpi_enabled() && context->size() > 1) {
+    exchange_for_device(usurf, grid_, *context);
+  }
+
+  compute_surface_slopes_pism(grid_, usurf, cell_type, dhdx, dhdy,
+                              options.surface_gradient_inward,
+                              options.surface_slope_uphill,
+                              options.use_cfbc);
 
   if (options.use_mg_precond) {
     const int min_size = std::max(2, options.mg_min_size);
@@ -424,11 +463,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       workspace_.mg = std::make_unique<MultigridHierarchy>(grid_, min_size);
       workspace_.mg_min_size = min_size;
     }
-    MultigridHierarchy& mg = *workspace_.mg;
-    copy(beta, mg.level(0).beta);
-    for (int level = 1; level < mg.num_levels(); ++level) {
-      restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
-    }
+    (void)0;
   }
 
   ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
@@ -440,6 +475,26 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   for (int iter = 0; iter < options.max_picard; ++iter) {
     copy(nuH, nuH_prev);
     copy(vel, vel_prev);
+
+    compute_cell_center_velocity(grid_, vel, u_center, v_center);
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(u_center, grid_, *context);
+      exchange_for_device(v_center, grid_, *context);
+    }
+
+    ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, cell_type, beta,
+                            options.basal_params);
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(beta, grid_, *context);
+    }
+
+    if (options.use_mg_precond) {
+      MultigridHierarchy& mg = *workspace_.mg;
+      copy(beta, mg.level(0).beta);
+      for (int level = 1; level < mg.num_levels(); ++level) {
+        restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
+      }
+    }
 
     if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(vel, grid_, *context);

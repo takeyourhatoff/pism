@@ -11,12 +11,27 @@ struct SSABoundaryCondition {
   const FieldStag2D<double>* values = nullptr;
 };
 
+enum class BasalResistanceLaw { Plastic, PseudoPlastic };
+
+struct BasalResistanceParams {
+  BasalResistanceLaw law = BasalResistanceLaw::Plastic;
+  double q = 0.25;
+  double u_threshold = 100.0;
+  double plastic_regularization = 0.01;
+  double sliding_scale_factor = -1.0;
+  double beta_ice_free_bedrock = 0.0;
+};
+
 class SSAOperator {
 public:
-  SSAOperator(double rho, double g, double u_threshold);
+  SSAOperator(double rho, double g);
 
   void compute_basal_drag(const Grid2D& grid, const Field2D<double>& tauc,
-                          FieldStag2D<double>& beta) const;
+                          const Field2D<double>& u_center,
+                          const Field2D<double>& v_center,
+                          const Field2D<int>& cell_type,
+                          FieldStag2D<double>& beta,
+                          const BasalResistanceParams& params) const;
 
   void assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
                     const Field2D<double>& dhdx, const Field2D<double>& dhdy,
@@ -37,7 +52,6 @@ public:
 private:
   double rho_;
   double g_;
-  double u_threshold_;
 };
 
 }  // namespace gpism
