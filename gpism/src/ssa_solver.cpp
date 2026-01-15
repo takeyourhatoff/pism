@@ -2,10 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "gpism/context.h"
 #include "gpism/device_policy.h"
@@ -129,6 +133,117 @@ bool is_rank0(const Context* context) {
   return context->rank() == 0;
 }
 
+std::vector<std::pair<int, int>> parse_diag_points() {
+  std::vector<std::pair<int, int>> points;
+  const char* env = std::getenv("SSA_DIAG_POINTS");
+  if (!env || !*env) {
+    return points;
+  }
+  std::string s(env);
+  std::size_t pos = 0;
+  while (pos < s.size()) {
+    while (pos < s.size() && (s[pos] == ' ' || s[pos] == ';')) {
+      ++pos;
+    }
+    if (pos >= s.size()) {
+      break;
+    }
+    char* end = nullptr;
+    long i = std::strtol(s.c_str() + pos, &end, 10);
+    if (end == s.c_str() + pos) {
+      break;
+    }
+    pos = static_cast<std::size_t>(end - s.c_str());
+    while (pos < s.size() && (s[pos] == ' ' || s[pos] == ',')) {
+      ++pos;
+    }
+    long j = std::strtol(s.c_str() + pos, &end, 10);
+    if (end == s.c_str() + pos) {
+      break;
+    }
+    pos = static_cast<std::size_t>(end - s.c_str());
+    points.emplace_back(static_cast<int>(i), static_cast<int>(j));
+    while (pos < s.size() && s[pos] != ';') {
+      ++pos;
+    }
+  }
+  return points;
+}
+
+const std::vector<std::pair<int, int>>& diag_points() {
+  static const std::vector<std::pair<int, int>> points = parse_diag_points();
+  return points;
+}
+
+void log_diag_points(const Grid2D& grid, int iter, const Field2D<int>& cell_type,
+                     const Field2D<double>& thk, const Field2D<double>& topg,
+                     const Field2D<double>& usurf, const Field2D<double>& dhdx,
+                     const Field2D<double>& dhdy,
+                     const Field2D<double>& u_center,
+                     const Field2D<double>& v_center,
+                     const FieldStag2D<double>& nuH,
+                     const FieldStag2D<double>& beta,
+                     const FieldStag2D<double>& rhs,
+                     const Context* context) {
+  const auto& points = diag_points();
+  if (points.empty() || !is_rank0(context)) {
+    return;
+  }
+  sync_device_to_host(const_cast<Field2D<double>&>(thk));
+  sync_device_to_host(const_cast<Field2D<double>&>(topg));
+  sync_device_to_host(const_cast<Field2D<double>&>(usurf));
+  sync_device_to_host(const_cast<Field2D<double>&>(dhdx));
+  sync_device_to_host(const_cast<Field2D<double>&>(dhdy));
+  sync_device_to_host(const_cast<Field2D<double>&>(u_center));
+  sync_device_to_host(const_cast<Field2D<double>&>(v_center));
+  sync_device_to_host(const_cast<Field2D<int>&>(cell_type));
+  sync_device_to_host(const_cast<FieldStag2D<double>&>(nuH));
+  sync_device_to_host(const_cast<FieldStag2D<double>&>(beta));
+  sync_device_to_host(const_cast<FieldStag2D<double>&>(rhs));
+
+  const int xs = grid.xs();
+  const int ys = grid.ys();
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  const double inv_dx2 = 1.0 / (grid.dx() * grid.dx());
+  const double inv_dy2 = 1.0 / (grid.dy() * grid.dy());
+
+  std::cout << "SSA diag points (iter " << iter << ", xs=" << xs
+            << " ys=" << ys << ")\n";
+  for (const auto& point : points) {
+    const int gi = point.first;
+    const int gj = point.second;
+    const int i = gi - xs;
+    const int j = gj - ys;
+    if (i < 0 || j < 0 || i >= mx || j >= my) {
+      std::cout << "  point (" << gi << "," << gj << ") not local\n";
+      continue;
+    }
+    const double nu_u = nuH(i, j, 0);
+    const double nu_v = nuH(i, j, 1);
+    const double beta_u = beta(i, j, 0);
+    const double beta_v = beta(i, j, 1);
+    const double c_n = nuH(i, j, 1);
+    const double c_s = nuH(i, j - 1, 1);
+    const double c_e = nuH(i, j, 0);
+    const double c_w = nuH(i - 1, j, 0);
+    const double diag_u =
+        beta_u + (c_n + c_s) * inv_dy2 + 4.0 * (c_e + c_w) * inv_dx2;
+    const double diag_v =
+        beta_v + 4.0 * (c_n + c_s) * inv_dy2 + (c_e + c_w) * inv_dx2;
+    std::cout << "  (" << gi << "," << gj << ") type=" << cell_type(i, j)
+              << " thk=" << thk(i, j) << " topg=" << topg(i, j)
+              << " usurf=" << usurf(i, j)
+              << " dhdx=" << dhdx(i, j) << " dhdy=" << dhdy(i, j)
+              << " u_center=" << u_center(i, j)
+              << " v_center=" << v_center(i, j)
+              << " nuH_u=" << nu_u << " nuH_v=" << nu_v
+              << " beta_u=" << beta_u << " beta_v=" << beta_v
+              << " rhs_u=" << rhs(i, j, 0) << " rhs_v=" << rhs(i, j, 1)
+              << " diag_u=" << diag_u << " diag_v=" << diag_v << '\n';
+  }
+}
+
 bool mg_device_ready(const MultigridHierarchy& mg,
                      const SSABoundaryCondition* bc) {
 #if GPISM_HAVE_CUDA
@@ -177,7 +292,11 @@ struct FieldStats {
   bool all_finite = true;
 };
 
-FieldStats field_stats(const FieldStag2D<double>& field) {
+FieldStats field_stats(FieldStag2D<double>& field) {
+  if (field.component(0).has_device_data() ||
+      field.component(1).has_device_data()) {
+    sync_device_to_host(field);
+  }
   FieldStats stats;
   stats.min = std::numeric_limits<double>::infinity();
   stats.max = -std::numeric_limits<double>::infinity();
@@ -203,8 +322,42 @@ FieldStats field_stats(const FieldStag2D<double>& field) {
   return stats;
 }
 
-FieldStats diag_stats(const Grid2D& grid, const FieldStag2D<double>& nuH,
-                      const FieldStag2D<double>& beta) {
+FieldStats field_stats(Field2D<double>& field) {
+  if (field.has_device_data()) {
+    sync_device_to_host(field);
+  }
+  FieldStats stats;
+  stats.min = std::numeric_limits<double>::infinity();
+  stats.max = -std::numeric_limits<double>::infinity();
+  const int mx = field.local_mx();
+  const int my = field.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      const double value = field(i, j);
+      if (!std::isfinite(value)) {
+        stats.all_finite = false;
+        continue;
+      }
+      stats.min = std::min(stats.min, value);
+      stats.max = std::max(stats.max, value);
+    }
+  }
+  if (stats.min == std::numeric_limits<double>::infinity()) {
+    stats.min = 0.0;
+    stats.max = 0.0;
+  }
+  return stats;
+}
+
+FieldStats diag_stats(const Grid2D& grid, FieldStag2D<double>& nuH,
+                      FieldStag2D<double>& beta) {
+  if (nuH.component(0).has_device_data() || nuH.component(1).has_device_data()) {
+    sync_device_to_host(nuH);
+  }
+  if (beta.component(0).has_device_data() ||
+      beta.component(1).has_device_data()) {
+    sync_device_to_host(beta);
+  }
   FieldStats stats;
   stats.min = std::numeric_limits<double>::infinity();
   stats.max = -std::numeric_limits<double>::infinity();
@@ -374,20 +527,41 @@ private:
 void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
                    const Field2D<double>* v_bc,
                    const Field2D<int>* vel_bc_mask,
+                   const Field2D<int>* cell_type,
                    FieldStag2D<int>& mask_stag,
                    FieldStag2D<double>& values_stag) {
   mask_stag.fill(0);
   values_stag.fill(0.0);
   if (!vel_bc_mask || !u_bc || !v_bc) {
+    // continue: still may enforce ice-free mask below
+  } else {
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        const int mask = (*vel_bc_mask)(i, j);
+        mask_stag(i, j, 0) = mask;
+        mask_stag(i, j, 1) = mask;
+        values_stag(i, j, 0) = (*u_bc)(i, j);
+        values_stag(i, j, 1) = (*v_bc)(i, j);
+      }
+    }
+  }
+
+  if (!cell_type) {
     return;
   }
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
-      const int mask = (*vel_bc_mask)(i, j);
-      mask_stag(i, j, 0) = mask;
-      mask_stag(i, j, 1) = mask;
-      values_stag(i, j, 0) = (*u_bc)(i, j);
-      values_stag(i, j, 1) = (*v_bc)(i, j);
+      const int type = (*cell_type)(i, j);
+      if (type == IceFreeOcean || type == IceFreeBedrock) {
+        if (mask_stag(i, j, 0) == 0) {
+          values_stag(i, j, 0) = 0.0;
+        }
+        if (mask_stag(i, j, 1) == 0) {
+          values_stag(i, j, 1) = 0.0;
+        }
+        mask_stag(i, j, 0) = 1;
+        mask_stag(i, j, 1) = 1;
+      }
     }
   }
 }
@@ -423,22 +597,30 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   auto& nuH = workspace_.nuH;
   auto& nuH_prev = workspace_.nuH_prev;
   auto& vel_prev = workspace_.vel_prev;
+  auto& speed_scale = workspace_.speed_scale;
   auto& bc_mask = workspace_.bc_mask;
   auto& bc_values = workspace_.bc_values;
   SSABoundaryCondition bc;
-  if (options.use_bc) {
-    build_bc_stag(grid_, u_bc, v_bc, vel_bc_mask, bc_mask, bc_values);
-    bc.mask = &bc_mask;
-    bc.values = &bc_values;
-    sync_host_to_device(bc_mask);
-    sync_host_to_device(bc_values);
-  }
 
   GeometryDiagnostics geometry;
   compute_cell_type(grid_, thk, topg, options.sea_level, options.rho_ice,
                     options.rho_water, cell_type);
   if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(cell_type, grid_, *context);
+  }
+
+  const bool use_bc = options.use_bc || options.enforce_ice_free_bc;
+  if (use_bc) {
+    if (cell_type.has_device_data()) {
+      sync_device_to_host(cell_type);
+    }
+    build_bc_stag(grid_, u_bc, v_bc, vel_bc_mask,
+                  options.enforce_ice_free_bc ? &cell_type : nullptr,
+                  bc_mask, bc_values);
+    bc.mask = &bc_mask;
+    bc.values = &bc_values;
+    sync_host_to_device(bc_mask);
+    sync_host_to_device(bc_values);
   }
 
   compute_usurf_flotation(grid_, thk, topg, cell_type, options.sea_level,
@@ -467,7 +649,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   }
 
   ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
-                    options.use_bc ? &bc : nullptr);
+                    use_bc ? &bc : nullptr);
   if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(rhs, grid_, *context);
   }
@@ -488,25 +670,75 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       exchange_for_device(beta, grid_, *context);
     }
 
-    if (options.use_mg_precond) {
-      MultigridHierarchy& mg = *workspace_.mg;
-      copy(beta, mg.level(0).beta);
-      for (int level = 1; level < mg.num_levels(); ++level) {
-        restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
-      }
-    }
-
     if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(vel, grid_, *context);
     }
-    viscosity_.compute_nuH(grid_, thk, vel, nuH, options.enthalpy,
-                           options.enthalpy_gamma, options.enthalpy_ref);
+    viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
+                           options.strength_extension_nu,
+                           options.strength_extension_min_thickness,
+                           options.enthalpy, options.enthalpy_gamma,
+                           options.enthalpy_ref);
     if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
         options.nuH_relax < 1.0) {
       apply_nuH_constraints(nuH, nuH_prev, options);
     }
     if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(nuH, grid_, *context);
+    }
+
+    if (options.diagnostic && iter == 0) {
+      log_diag_points(grid_, iter, cell_type, thk, topg, usurf, dhdx, dhdy,
+                      u_center, v_center, nuH, beta, rhs, context);
+    }
+
+    if (options.diagnostic && is_rank0(context)) {
+      const FieldStats nuH_stats = field_stats(nuH);
+      const FieldStats beta_stats = field_stats(beta);
+      const FieldStats rhs_stats = field_stats(rhs);
+      const FieldStats diag = diag_stats(grid_, nuH, beta);
+      const FieldStats u_stats = field_stats(u_center);
+      const FieldStats v_stats = field_stats(v_center);
+      const double nuH_min = global_min(context, nuH_stats.min);
+      const double nuH_max = global_max(context, nuH_stats.max);
+      const double beta_min = global_min(context, beta_stats.min);
+      const double beta_max = global_max(context, beta_stats.max);
+      const double rhs_min = global_min(context, rhs_stats.min);
+      const double rhs_max = global_max(context, rhs_stats.max);
+      const double diag_min = global_min(context, diag.min);
+      const double diag_max = global_max(context, diag.max);
+      const double u_min = global_min(context, u_stats.min);
+      const double u_max = global_max(context, u_stats.max);
+      const double v_min = global_min(context, v_stats.min);
+      const double v_max = global_max(context, v_stats.max);
+      std::cout << "SSA diag iter " << iter
+                << ": nuH[min,max]=[" << nuH_min << ", " << nuH_max << "] "
+                << "beta[min,max]=[" << beta_min << ", " << beta_max << "] "
+                << "diag[min,max]=[" << diag_min << ", " << diag_max << "] "
+                << "rhs[min,max]=[" << rhs_min << ", " << rhs_max << "] "
+                << "u_center[min,max]=[" << u_min << ", " << u_max << "] "
+                << "v_center[min,max]=[" << v_min << ", " << v_max << "]";
+      if (!(nuH_stats.all_finite && beta_stats.all_finite && rhs_stats.all_finite &&
+            diag.all_finite && u_stats.all_finite && v_stats.all_finite)) {
+        std::cout << " (non-finite values detected)";
+      }
+      std::cout << '\n';
+    }
+
+    if (options.replace_zero_diagonal_entries) {
+      ssa_.replace_zero_diagonal_entries(
+          grid_, nuH, beta, options.use_bc ? &bc : nullptr,
+          options.basal_params.beta_ice_free_bedrock);
+      if (context && context->mpi_enabled() && context->size() > 1) {
+        exchange_for_device(beta, grid_, *context);
+      }
+    }
+
+    if (options.use_mg_precond) {
+      MultigridHierarchy& mg = *workspace_.mg;
+      copy(beta, mg.level(0).beta);
+      for (int level = 1; level < mg.num_levels(); ++level) {
+        restrict_stag(mg.level(level - 1).beta, mg.level(level).beta);
+      }
     }
 
     const MultigridPreconditioner* precond_ptr = nullptr;
@@ -525,21 +757,27 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                       options.mg_cheby_estimate_iters,
                       options.mg_cheby_estimate_min_factor,
                       options.mg_cheby_estimate_max_factor,
-                      options.use_bc ? &bc : nullptr, context);
+                      options.use_bc ? &bc : nullptr, context,
+                      options.mg_diagnostic && iter == 0,
+                      options.basal_params.beta_ice_free_bedrock);
       precond_ptr = &(*precond);
       if (options.mg_diagnostic && iter == 0) {
         auto& fine = mg.level(0);
         sync_device_to_host(fine.nuH);
         sync_device_to_host(fine.beta);
+        sync_device_to_host(rhs);
         const FieldStats nuH_stats = field_stats(fine.nuH);
         const FieldStats beta_stats = field_stats(fine.beta);
         const FieldStats diag = diag_stats(fine.grid, fine.nuH, fine.beta);
+        const FieldStats rhs_stats = field_stats(rhs);
         const double nuH_min = global_min(context, nuH_stats.min);
         const double nuH_max = global_max(context, nuH_stats.max);
         const double beta_min = global_min(context, beta_stats.min);
         const double beta_max = global_max(context, beta_stats.max);
         const double diag_min = global_min(context, diag.min);
         const double diag_max = global_max(context, diag.max);
+        const double rhs_min = global_min(context, rhs_stats.min);
+        const double rhs_max = global_max(context, rhs_stats.max);
         if (is_rank0(context)) {
           const bool mg_cuda =
               mg_device_ready(mg, options.use_bc ? &bc : nullptr);
@@ -551,6 +789,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                     << " min_size=" << options.mg_min_size
                     << " levels=" << mg.num_levels()
                     << " device_path=" << (mg_cuda ? "cuda" : "host")
+                    << " bc=" << (use_bc ? "values" : "none")
                     << '\n';
           if (options.mg_smoother == MGSmoother::Chebyshev) {
             std::cout << "MG smoother: chebyshev"
@@ -569,8 +808,10 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
           std::cout << "MG fine-level stats: nuH[min,max]=[" << nuH_min << ", "
                     << nuH_max << "] beta[min,max]=[" << beta_min << ", "
                     << beta_max << "] diag[min,max]=[" << diag_min << ", "
-                    << diag_max << "]";
-          if (!(nuH_stats.all_finite && beta_stats.all_finite && diag.all_finite)) {
+                    << diag_max << "] rhs[min,max]=[" << rhs_min << ", "
+                    << rhs_max << "]";
+          if (!(nuH_stats.all_finite && beta_stats.all_finite &&
+                diag.all_finite && rhs_stats.all_finite)) {
             std::cout << " (non-finite values detected)";
           }
           std::cout << '\n';
@@ -582,11 +823,13 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     gmres_opts.restart = options.gmres_restart;
     gmres_opts.max_iter = options.gmres_max_iter;
     gmres_opts.tol = options.gmres_tol;
+    gmres_opts.tol_relative = options.gmres_tol_relative;
+    gmres_opts.verbose = options.gmres_verbose;
     gmres_opts.precond_diagnostic =
         options.gmres_precond_diagnostic && (iter == 0);
     gmres_opts.context = context;
 
-    SSAApplyOperator op(ssa_, grid_, nuH, beta, options.use_bc ? &bc : nullptr,
+    SSAApplyOperator op(ssa_, grid_, nuH, beta, use_bc ? &bc : nullptr,
                         context);
     GMRESResult gmres_result = gmres_solve(op, rhs, vel, gmres_opts, precond_ptr);
     result.linear_iters = gmres_result.iterations;
@@ -596,21 +839,61 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       apply_vel_relax(vel, vel_prev, options.vel_relax);
     }
 
-    const double nuH_diff_local = diff_norm1(nuH, nuH_prev);
-    const double nuH_norm_local = norm1(nuH_prev);
+    if (options.max_speed > 0.0) {
+      compute_cell_center_velocity(grid_, vel, u_center, v_center);
+      compute_speed_scale(grid_, u_center, v_center, options.max_speed,
+                          speed_scale);
+      apply_speed_scale(grid_, speed_scale, vel);
+    }
+
+    double nuH_diff_local = 0.0;
+    double nuH_norm_local = 0.0;
+    double vel_diff_local = 0.0;
+    double vel_norm_local = 0.0;
+    if (options.force_host_convergence) {
+      const bool was_device = device_enabled();
+      if (was_device) {
+        sync_device_to_host(nuH);
+        sync_device_to_host(nuH_prev);
+        sync_device_to_host(vel);
+        sync_device_to_host(vel_prev);
+        set_device_enabled(false);
+      }
+      nuH_diff_local = diff_norm1(nuH, nuH_prev);
+      nuH_norm_local = norm1(nuH_prev);
+      vel_diff_local = diff_norm1(vel, vel_prev);
+      vel_norm_local = norm1(vel_prev);
+      if (was_device) {
+        set_device_enabled(true);
+      }
+    } else {
+      nuH_diff_local = diff_norm1(nuH, nuH_prev);
+      nuH_norm_local = norm1(nuH_prev);
+      vel_diff_local = diff_norm1(vel, vel_prev);
+      vel_norm_local = norm1(vel_prev);
+    }
+
     const double nuH_diff = global_sum(context, nuH_diff_local);
     const double nuH_norm = std::max(global_sum(context, nuH_norm_local), 1e-12);
     result.nuH_change = nuH_diff / nuH_norm;
 
-    const double vel_diff_local = diff_norm1(vel, vel_prev);
-    const double vel_norm_local = norm1(vel_prev);
     const double vel_diff = global_sum(context, vel_diff_local);
     const double vel_norm = std::max(global_sum(context, vel_norm_local), 1e-12);
     result.vel_change = vel_diff / vel_norm;
 
+    const bool converged = result.nuH_change <= options.tol_nuH &&
+                           result.vel_change <= options.tol_vel;
+    if (options.diagnostic && is_rank0(context)) {
+      std::cout << "SSA Picard iter " << iter
+                << ": GMRES iters=" << gmres_result.iterations
+                << " residual=" << gmres_result.residual
+                << " nuH_change=" << result.nuH_change
+                << " vel_change=" << result.vel_change
+                << " converged=" << (converged ? "yes" : "no") << '\n';
+    }
+
     result.picard_iters = iter + 1;
-    if (result.nuH_change <= options.tol_nuH &&
-        result.vel_change <= options.tol_vel) {
+    if (converged) {
       result.converged = true;
       break;
     }

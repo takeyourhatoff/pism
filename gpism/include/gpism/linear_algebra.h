@@ -17,4 +17,7 @@ double norm1(const FieldStag2D<double>& a);
 
 double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b);
 
+void set_deterministic_reductions(bool enable);
+bool deterministic_reductions_enabled();
+
 }  // namespace gpism

@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "gpism/config.h"
+#include "gpism/field_sync.h"
 
 #if GPISM_HAVE_CUDA
 namespace gpism {
@@ -30,6 +31,7 @@ double diff_norm1_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 
 namespace gpism {
 namespace {
+bool deterministic_reductions = false;
 
 double dot_field_host(const Field2D<double>& a, const Field2D<double>& b) {
   double sum = 0.0;
@@ -110,10 +112,26 @@ void set_field_host(double value, Field2D<double>& x) {
 
 }  // namespace
 
+void set_deterministic_reductions(bool enable) {
+  deterministic_reductions = enable;
+}
+
+bool deterministic_reductions_enabled() {
+  return deterministic_reductions;
+}
+
 void axpy(double alpha, const FieldStag2D<double>& x, FieldStag2D<double>& y) {
 #if GPISM_HAVE_CUDA
   if (x.component(0).has_device_data() && x.component(1).has_device_data() &&
       y.component(0).has_device_data() && y.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(x));
+      sync_device_to_host(y);
+      axpy_field_host(alpha, x.component(0), y.component(0));
+      axpy_field_host(alpha, x.component(1), y.component(1));
+      sync_host_to_device(y);
+      return;
+    }
     axpy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
              x.component(0).stride(), y.component(0).stride(),
              x.component(0).device_data(), y.component(0).device_data(),
@@ -132,6 +150,13 @@ void axpy(double alpha, const FieldStag2D<double>& x, FieldStag2D<double>& y) {
 void scal(double alpha, FieldStag2D<double>& x) {
 #if GPISM_HAVE_CUDA
   if (x.component(0).has_device_data() && x.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(x);
+      scal_field_host(alpha, x.component(0));
+      scal_field_host(alpha, x.component(1));
+      sync_host_to_device(x);
+      return;
+    }
     scal_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
              x.component(0).stride(), x.component(0).device_data(), alpha);
     scal_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
@@ -147,6 +172,14 @@ void copy(const FieldStag2D<double>& x, FieldStag2D<double>& y) {
 #if GPISM_HAVE_CUDA
   if (x.component(0).has_device_data() && x.component(1).has_device_data() &&
       y.component(0).has_device_data() && y.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(x));
+      sync_device_to_host(y);
+      copy_field_host(x.component(0), y.component(0));
+      copy_field_host(x.component(1), y.component(1));
+      sync_host_to_device(y);
+      return;
+    }
     copy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
              x.component(0).stride(), y.component(0).stride(),
              x.component(0).device_data(), y.component(0).device_data());
@@ -163,6 +196,13 @@ void copy(const FieldStag2D<double>& x, FieldStag2D<double>& y) {
 void set(double value, FieldStag2D<double>& x) {
 #if GPISM_HAVE_CUDA
   if (x.component(0).has_device_data() && x.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(x);
+      set_field_host(value, x.component(0));
+      set_field_host(value, x.component(1));
+      sync_host_to_device(x);
+      return;
+    }
     set_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
             x.component(0).stride(), x.component(0).device_data(), value);
     set_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
@@ -178,6 +218,12 @@ double dot(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
       b.component(0).has_device_data() && b.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(a));
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(b));
+      return dot_field_host(a.component(0), b.component(0)) +
+             dot_field_host(a.component(1), b.component(1));
+    }
     return dot_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
                          a.component(0).stride(), a.component(1).stride(),
                          a.component(0).device_data(),
@@ -197,6 +243,10 @@ double norm2(const FieldStag2D<double>& a) {
 double norm1(const FieldStag2D<double>& a) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(a));
+      return norm1_field_host(a.component(0)) + norm1_field_host(a.component(1));
+    }
     return norm1_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
                            a.component(0).stride(), a.component(1).stride(),
                            a.component(0).device_data(),
@@ -210,6 +260,12 @@ double diff_norm1(const FieldStag2D<double>& a, const FieldStag2D<double>& b) {
 #if GPISM_HAVE_CUDA
   if (a.component(0).has_device_data() && a.component(1).has_device_data() &&
       b.component(0).has_device_data() && b.component(1).has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(a));
+      sync_device_to_host(const_cast<FieldStag2D<double>&>(b));
+      return diff_norm1_field_host(a.component(0), b.component(0)) +
+             diff_norm1_field_host(a.component(1), b.component(1));
+    }
     return diff_norm1_stag_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
                                 a.component(0).stride(),
                                 a.component(1).stride(),

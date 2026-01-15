@@ -22,12 +22,18 @@ struct SSASolverOptions {
 
   double vel_relax = 1.0;
   double nuH_relax = 1.0;
+  double nuH_regularization = 0.0;
   double nuH_min = 0.0;
   double nuH_max = 0.0;
+  double strength_extension_nu = 0.0;
+  double strength_extension_min_thickness = 0.0;
+  double max_speed = 0.0;
 
   int gmres_restart = 30;
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;
+  bool gmres_tol_relative = true;
+  bool gmres_verbose = false;
 
   bool use_mg_precond = false;
   int mg_pre_iters = 2;
@@ -44,6 +50,8 @@ struct SSASolverOptions {
   double mg_cheby_estimate_max_factor = 1.1;
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
+  bool diagnostic = false;
+  bool force_host_convergence = false;
 
   BasalResistanceParams basal_params;
   double sea_level = 0.0;
@@ -52,8 +60,10 @@ struct SSASolverOptions {
   bool surface_gradient_inward = false;
   bool surface_slope_uphill = true;
   bool use_cfbc = false;
+  bool replace_zero_diagonal_entries = true;
 
   bool use_bc = false;
+  bool enforce_ice_free_bc = true;
   const Field3D<double>* enthalpy = nullptr;
   double enthalpy_gamma = 0.0;
   double enthalpy_ref = 0.0;
@@ -102,6 +112,7 @@ private:
     FieldStag2D<double> nuH;
     FieldStag2D<double> nuH_prev;
     FieldStag2D<double> vel_prev;
+    Field2D<double> speed_scale;
     FieldStag2D<int> bc_mask;
     FieldStag2D<double> bc_values;
     std::unique_ptr<MultigridHierarchy> mg;
@@ -128,6 +139,7 @@ private:
         nuH.resize(mx, my, gw);
         nuH_prev.resize(mx, my, gw);
         vel_prev.resize(mx, my, gw);
+        speed_scale.resize(mx, my, gw);
         bc_mask.resize(mx, my, gw);
         bc_values.resize(mx, my, gw);
       } else if (dims_changed) {
@@ -142,6 +154,7 @@ private:
         nuH.resize(mx, my, gw);
         nuH_prev.resize(mx, my, gw);
         vel_prev.resize(mx, my, gw);
+        speed_scale.resize(mx, my, gw);
         bc_mask.resize(mx, my, gw);
         bc_values.resize(mx, my, gw);
       }

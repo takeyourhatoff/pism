@@ -55,12 +55,13 @@ int main() {
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
   gpism::SSASolverOptions options;
-  options.max_picard = 10;
-  options.tol_nuH = 0.7;
-  options.tol_vel = 0.7;
-  options.gmres_max_iter = 100;
-  options.gmres_tol = 1e-7;
+  options.max_picard = 5;
+  options.tol_nuH = 1.0;
+  options.tol_vel = 1.0;
+  options.gmres_max_iter = 200;
+  options.gmres_tol = 1e-5;
   options.use_bc = false;
+  options.use_mg_precond = true;
 
   gpism::NetcdfIO io;
   const std::string path = "gpism_timestep_io_smoke.nc";

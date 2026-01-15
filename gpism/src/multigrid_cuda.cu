@@ -123,32 +123,28 @@ __global__ void compute_diag_kernel(int mx, int my, int gw, int stride_u,
   const int idx_v = idx(i, j, gw, stride_v);
   const int mask_idx_u = idx(i, j, gw, stride_mask_u);
   const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  const int im1 = (i == 0) ? i : i - 1;
+  const int jm1 = (j == 0) ? j : j - 1;
   if (has_bc && mask_u[mask_idx_u] != 0) {
     diag_u[idx_u] = 1.0;
   } else {
-    const double dxx =
-        (nu_u[idx(i + 1, j, gw, stride_u)] +
-         nu_u[idx(i - 1, j, gw, stride_u)]) *
-        inv_dx2;
-    const double dyy =
-        (nu_u[idx(i, j + 1, gw, stride_u)] +
-         nu_u[idx(i, j - 1, gw, stride_u)]) *
-        inv_dy2;
-    diag_u[idx_u] = beta_u[idx_u] + dxx + dyy;
+    const double c_n = nu_v[idx(i, j, gw, stride_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_u)];
+    diag_u[idx_u] =
+        beta_u[idx_u] + (c_n + c_s) * inv_dy2 + 4.0 * (c_e + c_w) * inv_dx2;
   }
 
   if (has_bc && mask_v[mask_idx_v] != 0) {
     diag_v[idx_v] = 1.0;
   } else {
-    const double dxx =
-        (nu_v[idx(i + 1, j, gw, stride_v)] +
-         nu_v[idx(i - 1, j, gw, stride_v)]) *
-        inv_dx2;
-    const double dyy =
-        (nu_v[idx(i, j + 1, gw, stride_v)] +
-         nu_v[idx(i, j - 1, gw, stride_v)]) *
-        inv_dy2;
-    diag_v[idx_v] = beta_v[idx_v] + dxx + dyy;
+    const double c_n = nu_v[idx(i, j, gw, stride_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_u)];
+    diag_v[idx_v] =
+        beta_v[idx_v] + 4.0 * (c_n + c_s) * inv_dy2 + (c_e + c_w) * inv_dx2;
   }
 }
 
@@ -225,13 +221,13 @@ __global__ void jacobi_update_kernel(
 __global__ void jacobi_fused_kernel(
     int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
     int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_b_u,
-    int stride_b_v, double* x_u, double* x_v, const double* nu_u,
-    const double* nu_v, const double* beta_u, const double* beta_v,
-    const double* b_u, const double* b_v, double omega, double inv_dx2,
-    double inv_dy2, double inv_2dx, double inv_2dy, int stride_mask_u,
-    int stride_mask_v, const int* mask_u, const int* mask_v, int stride_bc_u,
-    int stride_bc_v, const double* bc_u, const double* bc_v, int has_bc,
-    int has_values) {
+    int stride_b_v, const double* x_old_u, const double* x_old_v, double* x_u,
+    double* x_v, const double* nu_u, const double* nu_v, const double* beta_u,
+    const double* beta_v, const double* b_u, const double* b_v, double omega,
+    double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
+    const double* bc_v, int has_bc, int has_values) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   const int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
@@ -241,41 +237,57 @@ __global__ void jacobi_fused_kernel(
   const int idx_v = idx(i, j, gw, stride_v);
   const int mask_idx_u = idx(i, j, gw, stride_mask_u);
   const int mask_idx_v = idx(i, j, gw, stride_mask_v);
+  const double inv_d4 = inv_2dx * inv_2dy;
+  const double inv_d2 = 2.0 * inv_d4;
+  const int im1 = (i == 0) ? i : i - 1;
+  const int ip1 = (i == mx - 1) ? i : i + 1;
+  const int jm1 = (j == 0) ? j : j - 1;
+  const int jp1 = (j == my - 1) ? j : j + 1;
 
   if (has_bc && mask_u && mask_u[mask_idx_u] != 0) {
     if (has_values && bc_u) {
       x_u[idx_u] = bc_u[idx(i, j, gw, stride_bc_u)];
     }
   } else {
-    const int e = idx(i + 1, j, gw, stride_u);
-    const int w = idx(i - 1, j, gw, stride_u);
-    const int n = idx(i, j + 1, gw, stride_u);
-    const int s = idx(i, j - 1, gw, stride_u);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_u);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_u);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_u);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_u);
+    const int u_e = idx(ip1, j, gw, stride_u);
+    const int u_w = idx(im1, j, gw, stride_u);
+    const int u_n = idx(i, jp1, gw, stride_u);
+    const int u_s = idx(i, jm1, gw, stride_u);
 
-    const double flux_x = nu_u[e_nu] * (x_u[e] - x_u[idx_u]) -
-                          nu_u[w_nu] * (x_u[idx_u] - x_u[w]);
-    const double flux_y = nu_u[n_nu] * (x_u[n] - x_u[idx_u]) -
-                          nu_u[s_nu] * (x_u[idx_u] - x_u[s]);
-    double coupling = 0.0;
-    if (j >= 1 && j <= my - 2) {
-      const double shear_p = shear(i, j + 1, gw, stride_u, stride_v, x_u, x_v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i, j - 1, gw, stride_u, stride_v, x_u, x_v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_u[idx_u] * (shear_p - shear_m) * inv_2dy;
-    }
-    const double Ax =
-        flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-        beta_u[idx(i, j, gw, stride_beta_u)] * x_u[idx_u];
+    const int v_nw = idx(im1, jp1, gw, stride_v);
+    const int v_n = idx(i, jp1, gw, stride_v);
+    const int v_ne = idx(ip1, jp1, gw, stride_v);
+    const int v_w = idx(im1, j, gw, stride_v);
+    const int v_e = idx(ip1, j, gw, stride_v);
+    const int v_sw = idx(im1, jm1, gw, stride_v);
+    const int v_s = idx(i, jm1, gw, stride_v);
+    const int v_se = idx(ip1, jm1, gw, stride_v);
+
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
+
+    double Ax =
+        (-c_n * x_old_u[u_n] - c_s * x_old_u[u_s] +
+         (c_n + c_s) * x_old_u[idx_u]) *
+            inv_dy2 +
+        (-4.0 * c_e * x_old_u[u_e] - 4.0 * c_w * x_old_u[u_w] +
+         4.0 * (c_e + c_w) * x_old_u[idx_u]) *
+            inv_dx2;
+    Ax += (c_w * inv_d2 + c_n * inv_d4) * x_old_v[v_nw];
+    Ax += (c_w - c_e) * inv_d2 * x_old_v[v_n];
+    Ax += (-c_e * inv_d2 - c_n * inv_d4) * x_old_v[v_ne];
+    Ax += (c_n - c_s) * inv_d4 * x_old_v[v_w];
+    Ax += (c_s - c_n) * inv_d4 * x_old_v[v_e];
+    Ax += (-c_w * inv_d2 - c_s * inv_d4) * x_old_v[v_sw];
+    Ax += (c_e - c_w) * inv_d2 * x_old_v[v_s];
+    Ax += (c_e * inv_d2 + c_s * inv_d4) * x_old_v[v_se];
+    Ax += beta_u[idx(i, j, gw, stride_beta_u)] * x_old_u[idx_u];
     const double r = b_u[idx(i, j, gw, stride_b_u)] - Ax;
     const double diag =
         beta_u[idx(i, j, gw, stride_beta_u)] +
-        (nu_u[e_nu] + nu_u[w_nu]) * inv_dx2 +
-        (nu_u[n_nu] + nu_u[s_nu]) * inv_dy2;
+        (c_n + c_s) * inv_dy2 + 4.0 * (c_e + c_w) * inv_dx2;
     if (diag != 0.0) {
       x_u[idx_u] += omega * r / diag;
     }
@@ -286,35 +298,45 @@ __global__ void jacobi_fused_kernel(
       x_v[idx_v] = bc_v[idx(i, j, gw, stride_bc_v)];
     }
   } else {
-    const int e = idx(i + 1, j, gw, stride_v);
-    const int w = idx(i - 1, j, gw, stride_v);
-    const int n = idx(i, j + 1, gw, stride_v);
-    const int s = idx(i, j - 1, gw, stride_v);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_v);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_v);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_v);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_v);
+    const int v_e = idx(ip1, j, gw, stride_v);
+    const int v_w = idx(im1, j, gw, stride_v);
+    const int v_n = idx(i, jp1, gw, stride_v);
+    const int v_s = idx(i, jm1, gw, stride_v);
 
-    const double flux_x = nu_v[e_nu] * (x_v[e] - x_v[idx_v]) -
-                          nu_v[w_nu] * (x_v[idx_v] - x_v[w]);
-    const double flux_y = nu_v[n_nu] * (x_v[n] - x_v[idx_v]) -
-                          nu_v[s_nu] * (x_v[idx_v] - x_v[s]);
-    double coupling = 0.0;
-    if (i >= 1 && i <= mx - 2) {
-      const double shear_p = shear(i + 1, j, gw, stride_u, stride_v, x_u, x_v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i - 1, j, gw, stride_u, stride_v, x_u, x_v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_v[idx_v] * (shear_p - shear_m) * inv_2dx;
-    }
-    const double Ax =
-        flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-        beta_v[idx(i, j, gw, stride_beta_v)] * x_v[idx_v];
+    const int u_nw = idx(im1, jp1, gw, stride_u);
+    const int u_n = idx(i, jp1, gw, stride_u);
+    const int u_ne = idx(ip1, jp1, gw, stride_u);
+    const int u_w = idx(im1, j, gw, stride_u);
+    const int u_e = idx(ip1, j, gw, stride_u);
+    const int u_sw = idx(im1, jm1, gw, stride_u);
+    const int u_s = idx(i, jm1, gw, stride_u);
+    const int u_se = idx(ip1, jm1, gw, stride_u);
+
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
+
+    double Ax =
+        (-4.0 * c_n * x_old_v[v_n] - 4.0 * c_s * x_old_v[v_s] +
+         4.0 * (c_n + c_s) * x_old_v[idx_v]) *
+            inv_dy2 +
+        (-c_e * x_old_v[v_e] - c_w * x_old_v[v_w] +
+         (c_e + c_w) * x_old_v[idx_v]) *
+            inv_dx2;
+    Ax += (c_w * inv_d4 + c_n * inv_d2) * x_old_u[u_nw];
+    Ax += (c_w - c_e) * inv_d4 * x_old_u[u_n];
+    Ax += (-c_e * inv_d4 - c_n * inv_d2) * x_old_u[u_ne];
+    Ax += (c_n - c_s) * inv_d2 * x_old_u[u_w];
+    Ax += (c_s - c_n) * inv_d2 * x_old_u[u_e];
+    Ax += (-c_w * inv_d4 - c_s * inv_d2) * x_old_u[u_sw];
+    Ax += (c_e - c_w) * inv_d4 * x_old_u[u_s];
+    Ax += (c_e * inv_d4 + c_s * inv_d2) * x_old_u[u_se];
+    Ax += beta_v[idx(i, j, gw, stride_beta_v)] * x_old_v[idx_v];
     const double r = b_v[idx(i, j, gw, stride_b_v)] - Ax;
     const double diag =
         beta_v[idx(i, j, gw, stride_beta_v)] +
-        (nu_v[e_nu] + nu_v[w_nu]) * inv_dx2 +
-        (nu_v[n_nu] + nu_v[s_nu]) * inv_dy2;
+        4.0 * (c_n + c_s) * inv_dy2 + (c_e + c_w) * inv_dx2;
     if (diag != 0.0) {
       x_v[idx_v] += omega * r / diag;
     }
@@ -521,21 +543,21 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 void mg_jacobi_fused_cuda(
     int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
     int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_b_u,
-    int stride_b_v, double* x_u, double* x_v, const double* nu_u,
-    const double* nu_v, const double* beta_u, const double* beta_v,
-    const double* b_u, const double* b_v, double omega, double inv_dx2,
-    double inv_dy2, double inv_2dx, double inv_2dy, int stride_mask_u,
-    int stride_mask_v, const int* mask_u, const int* mask_v, int stride_bc_u,
-    int stride_bc_v, const double* bc_u, const double* bc_v, int has_bc,
-    int has_values) {
+    int stride_b_v, const double* x_old_u, const double* x_old_v, double* x_u,
+    double* x_v, const double* nu_u, const double* nu_v, const double* beta_u,
+    const double* beta_v, const double* b_u, const double* b_v, double omega,
+    double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
+    const double* bc_v, int has_bc, int has_values) {
   CudaEventTimer timer("mg_jacobi_fused");
   const dim3 block(16, 16);
   const dim3 grid((mx + block.x - 1) / block.x,
                   (my + block.y - 1) / block.y);
   jacobi_fused_kernel<<<grid, block>>>(
       mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v, stride_beta_u,
-      stride_beta_v, stride_b_u, stride_b_v, x_u, x_v, nu_u, nu_v, beta_u,
-      beta_v, b_u, b_v, omega, inv_dx2, inv_dy2, inv_2dx, inv_2dy,
+      stride_beta_v, stride_b_u, stride_b_v, x_old_u, x_old_v, x_u, x_v, nu_u,
+      nu_v, beta_u, beta_v, b_u, b_v, omega, inv_dx2, inv_dy2, inv_2dx, inv_2dy,
       stride_mask_u, stride_mask_v, mask_u, mask_v, stride_bc_u, stride_bc_v,
       bc_u, bc_v, has_bc, has_values);
 }

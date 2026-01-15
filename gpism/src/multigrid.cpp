@@ -9,7 +9,38 @@
 #include "gpism/linear_algebra.h"
 #include "gpism/ssa_operator.h"
 
+#if GPISM_HAVE_MPI
+#include <mpi.h>
+#endif
+
 namespace gpism {
+
+namespace {
+
+double global_sum(const Context* context, double local_value);
+
+bool is_rank0(const Context* context) {
+  if (!context || !context->mpi_enabled()) {
+    return true;
+  }
+  return context->rank() == 0;
+}
+
+void log_mg_residual(int level, const char* phase,
+                     const FieldStag2D<double>& r, double base,
+                     const Context* context) {
+  const double norm = std::sqrt(global_sum(context, dot(r, r)));
+  if (!is_rank0(context)) {
+    return;
+  }
+  std::cout << "MG level " << level << " " << phase << " ||r||=" << norm;
+  if (base > 0.0) {
+    std::cout << " ratio=" << (norm / base);
+  }
+  std::cout << '\n';
+}
+
+}  // namespace
 
 #if GPISM_HAVE_CUDA
 void mg_restrict_stag_cuda(int fine_mx, int fine_my, int fine_gw,
@@ -47,13 +78,13 @@ void mg_jacobi_update_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 void mg_jacobi_fused_cuda(
     int mx, int my, int gw, int stride_u, int stride_v, int stride_nu_u,
     int stride_nu_v, int stride_beta_u, int stride_beta_v, int stride_b_u,
-    int stride_b_v, double* x_u, double* x_v, const double* nu_u,
-    const double* nu_v, const double* beta_u, const double* beta_v,
-    const double* b_u, const double* b_v, double omega, double inv_dx2,
-    double inv_dy2, double inv_2dx, double inv_2dy, int stride_mask_u,
-    int stride_mask_v, const int* mask_u, const int* mask_v, int stride_bc_u,
-    int stride_bc_v, const double* bc_u, const double* bc_v, int has_bc,
-    int has_values);
+    int stride_b_v, const double* x_old_u, const double* x_old_v, double* x_u,
+    double* x_v, const double* nu_u, const double* nu_v, const double* beta_u,
+    const double* beta_v, const double* b_u, const double* b_v, double omega,
+    double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
+    int stride_mask_u, int stride_mask_v, const int* mask_u,
+    const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
+    const double* bc_v, int has_bc, int has_values);
 void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                              const double* r_u, const double* r_v,
                              const double* diag_u, const double* diag_v,
@@ -151,8 +182,8 @@ void ssa_apply_host(const Grid2D& grid, const FieldStag2D<double>& nuH,
   const double dy = grid.dy();
   const double inv_dx2 = 1.0 / (dx * dx);
   const double inv_dy2 = 1.0 / (dy * dy);
-  const double inv_2dx = 1.0 / (2.0 * dx);
-  const double inv_2dy = 1.0 / (2.0 * dy);
+  const double inv_d4 = 1.0 / (4.0 * dx * dy);
+  const double inv_d2 = 2.0 * inv_d4;
 
   const Field2D<double>& u = vel.component(0);
   const Field2D<double>& v = vel.component(1);
@@ -161,52 +192,62 @@ void ssa_apply_host(const Grid2D& grid, const FieldStag2D<double>& nuH,
   const Field2D<double>& beta_u = beta.component(0);
   const Field2D<double>& beta_v = beta.component(1);
 
-  auto shear = [&](int i, int j) {
-    const double du_dy = (u(i, j + 1) - u(i, j - 1)) * inv_2dy;
-    const double dv_dx = (v(i + 1, j) - v(i - 1, j)) * inv_2dx;
-    return du_dy + dv_dx;
-  };
-
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
+      const int im1 = (i == 0) ? i : i - 1;
+      const int ip1 = (i == grid.local_mx() - 1) ? i : i + 1;
+      const int jm1 = (j == 0) ? j : j - 1;
+      const int jp1 = (j == grid.local_my() - 1) ? j : j + 1;
       if (is_dirichlet(bc, i, j, 0)) {
         out(i, j, 0) = u(i, j);
       } else {
         const double u_c = u(i, j);
-        const double flux_x =
-            nu_u(i + 1, j) * (u(i + 1, j) - u_c) -
-            nu_u(i - 1, j) * (u_c - u(i - 1, j));
-        const double flux_y =
-            nu_u(i, j + 1) * (u(i, j + 1) - u_c) -
-            nu_u(i, j - 1) * (u_c - u(i, j - 1));
-        double coupling = 0.0;
-        if (j >= 1 && j <= grid.local_my() - 2) {
-          const double shear_p = shear(i, j + 1);
-          const double shear_m = shear(i, j - 1);
-          coupling = nu_u(i, j) * (shear_p - shear_m) * inv_2dy;
-        }
-        out(i, j, 0) = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                       beta_u(i, j) * u_c;
+        const double c_n = nu_v(i, j);
+        const double c_s = nu_v(i, jm1);
+        const double c_e = nu_u(i, j);
+        const double c_w = nu_u(im1, j);
+        double sum =
+            (-c_n * u(i, jp1) - c_s * u(i, jm1) +
+             (c_n + c_s) * u_c) *
+                inv_dy2 +
+            (-4.0 * c_e * u(ip1, j) - 4.0 * c_w * u(im1, j) +
+             4.0 * (c_e + c_w) * u_c) *
+                inv_dx2;
+        sum += (c_w * inv_d2 + c_n * inv_d4) * v(im1, jp1);
+        sum += (c_w - c_e) * inv_d2 * v(i, jp1);
+        sum += (-c_e * inv_d2 - c_n * inv_d4) * v(ip1, jp1);
+        sum += (c_n - c_s) * inv_d4 * v(im1, j);
+        sum += (c_s - c_n) * inv_d4 * v(ip1, j);
+        sum += (-c_w * inv_d2 - c_s * inv_d4) * v(im1, jm1);
+        sum += (c_e - c_w) * inv_d2 * v(i, jm1);
+        sum += (c_e * inv_d2 + c_s * inv_d4) * v(ip1, jm1);
+        out(i, j, 0) = sum + beta_u(i, j) * u_c;
       }
 
       if (is_dirichlet(bc, i, j, 1)) {
         out(i, j, 1) = v(i, j);
       } else {
         const double v_c = v(i, j);
-        const double flux_x =
-            nu_v(i + 1, j) * (v(i + 1, j) - v_c) -
-            nu_v(i - 1, j) * (v_c - v(i - 1, j));
-        const double flux_y =
-            nu_v(i, j + 1) * (v(i, j + 1) - v_c) -
-            nu_v(i, j - 1) * (v_c - v(i, j - 1));
-        double coupling = 0.0;
-        if (i >= 1 && i <= grid.local_mx() - 2) {
-          const double shear_p = shear(i + 1, j);
-          const double shear_m = shear(i - 1, j);
-          coupling = nu_v(i, j) * (shear_p - shear_m) * inv_2dx;
-        }
-        out(i, j, 1) = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                       beta_v(i, j) * v_c;
+        const double c_n = nu_v(i, j);
+        const double c_s = nu_v(i, jm1);
+        const double c_e = nu_u(i, j);
+        const double c_w = nu_u(im1, j);
+        double sum =
+            (-4.0 * c_n * v(i, jp1) - 4.0 * c_s * v(i, jm1) +
+             4.0 * (c_n + c_s) * v_c) *
+                inv_dy2 +
+            (-c_e * v(ip1, j) - c_w * v(im1, j) +
+             (c_e + c_w) * v_c) *
+                inv_dx2;
+        sum += (c_w * inv_d4 + c_n * inv_d2) * u(im1, jp1);
+        sum += (c_w - c_e) * inv_d4 * u(i, jp1);
+        sum += (-c_e * inv_d4 - c_n * inv_d2) * u(ip1, jp1);
+        sum += (c_n - c_s) * inv_d2 * u(im1, j);
+        sum += (c_s - c_n) * inv_d2 * u(ip1, j);
+        sum += (-c_w * inv_d4 - c_s * inv_d2) * u(im1, jm1);
+        sum += (c_e - c_w) * inv_d4 * u(i, jm1);
+        sum += (c_e * inv_d4 + c_s * inv_d2) * u(ip1, jm1);
+        out(i, j, 1) = sum + beta_v(i, j) * v_c;
       }
     }
   }
@@ -359,15 +400,20 @@ ChebyBounds cheby_bounds_for_level(MGLevel& level, double lambda_min,
 std::vector<ChebyBounds> estimate_cheby_bounds_impl(
     MultigridHierarchy& mg, double lambda_min, double lambda_max,
     bool estimate, int estimate_iters, double min_factor, double max_factor,
-    const SSABoundaryCondition* bc, const Context* context) {
+    const SSABoundaryCondition* bc, const Context* context,
+    const std::vector<SSABoundaryCondition>* bc_levels) {
   const int levels = mg.num_levels();
   std::vector<ChebyBounds> bounds;
   bounds.reserve(levels);
   for (int level = 0; level < levels; ++level) {
+    const SSABoundaryCondition* level_bc = bc;
+    if (bc_levels && level < static_cast<int>(bc_levels->size())) {
+      level_bc = &(*bc_levels)[level];
+    }
     bounds.push_back(
         cheby_bounds_for_level(mg.level(level), lambda_min, lambda_max,
                                estimate, estimate_iters, min_factor, max_factor,
-                               bc, context));
+                               level_bc, context));
   }
   return bounds;
 }
@@ -387,20 +433,30 @@ void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
+      const int jm1 = (j == 0) ? j : j - 1;
+      const int im1 = (i == 0) ? i : i - 1;
       if (is_dirichlet(bc, i, j, 0)) {
         diag(i, j, 0) = 1.0;
       } else {
-        const double dxx = (nu_u(i + 1, j) + nu_u(i - 1, j)) * inv_dx2;
-        const double dyy = (nu_u(i, j + 1) + nu_u(i, j - 1)) * inv_dy2;
-        diag(i, j, 0) = beta_u(i, j) + dxx + dyy;
+        const double c_n = nu_v(i, j);
+        const double c_s = nu_v(i, jm1);
+        const double c_e = nu_u(i, j);
+        const double c_w = nu_u(im1, j);
+        diag(i, j, 0) =
+            beta_u(i, j) + (c_n + c_s) * inv_dy2 +
+            4.0 * (c_e + c_w) * inv_dx2;
       }
 
       if (is_dirichlet(bc, i, j, 1)) {
         diag(i, j, 1) = 1.0;
       } else {
-        const double dxx = (nu_v(i + 1, j) + nu_v(i - 1, j)) * inv_dx2;
-        const double dyy = (nu_v(i, j + 1) + nu_v(i, j - 1)) * inv_dy2;
-        diag(i, j, 1) = beta_v(i, j) + dxx + dyy;
+        const double c_n = nu_v(i, j);
+        const double c_s = nu_v(i, jm1);
+        const double c_e = nu_u(i, j);
+        const double c_w = nu_u(im1, j);
+        diag(i, j, 1) =
+            beta_v(i, j) + 4.0 * (c_n + c_s) * inv_dy2 +
+            (c_e + c_w) * inv_dx2;
       }
     }
   }
@@ -411,10 +467,11 @@ void compute_jacobi_diag(const Grid2D& grid, const FieldStag2D<double>& nuH,
 std::vector<ChebyBounds> estimate_cheby_bounds(
     MultigridHierarchy& mg, double lambda_min, double lambda_max,
     bool estimate, int estimate_iters, double min_factor, double max_factor,
-    const SSABoundaryCondition* bc, const Context* context) {
+    const SSABoundaryCondition* bc, const Context* context,
+    const std::vector<SSABoundaryCondition>* bc_levels) {
   return estimate_cheby_bounds_impl(mg, lambda_min, lambda_max, estimate,
                                     estimate_iters, min_factor, max_factor, bc,
-                                    context);
+                                    context, bc_levels);
 }
 
 MultigridHierarchy::MultigridHierarchy(const Grid2D& fine_grid, int min_size) {
@@ -863,12 +920,14 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
         !(context && context->mpi_enabled() && context->size() > 1);
     if (single_rank) {
       for (int iter = 0; iter < iterations; ++iter) {
+        copy(x, Ax);
         mg_jacobi_fused_cuda(
             grid.local_mx(), grid.local_my(), x.ghost_width(),
             x.component(0).stride(), x.component(1).stride(),
             nuH.component(0).stride(), nuH.component(1).stride(),
             beta.component(0).stride(), beta.component(1).stride(),
             b.component(0).stride(), b.component(1).stride(),
+            Ax.component(0).device_data(), Ax.component(1).device_data(),
             x.component(0).device_data(), x.component(1).device_data(),
             nuH.component(0).device_data(), nuH.component(1).device_data(),
             beta.component(0).device_data(), beta.component(1).device_data(),
@@ -1267,10 +1326,21 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              double cheby_estimate_min_factor,
              double cheby_estimate_max_factor,
              const SSABoundaryCondition* bc, const Context* context,
-             const std::vector<ChebyBounds>* cheby_bounds_in) {
+             const std::vector<ChebyBounds>* cheby_bounds_in,
+             const std::vector<SSABoundaryCondition>* bc_levels,
+             bool diagnostic) {
   const int levels = mg.num_levels();
   if (levels == 0) {
     return;
+  }
+
+  double base_norm = 0.0;
+  if (diagnostic) {
+    base_norm =
+        std::sqrt(global_sum(context, dot(mg.level(0).rhs, mg.level(0).rhs)));
+    if (is_rank0(context)) {
+      std::cout << "MG level 0 rhs ||r||=" << base_norm << '\n';
+    }
   }
 
   std::vector<ChebyBounds> cheby_bounds;
@@ -1283,7 +1353,8 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
           estimate_cheby_bounds(mg, cheby_lambda_min, cheby_lambda_max,
                                 cheby_estimate, cheby_estimate_iters,
                                 cheby_estimate_min_factor,
-                                cheby_estimate_max_factor, bc, context);
+                                cheby_estimate_max_factor, bc, context,
+                                bc_levels);
       bounds_ptr = &cheby_bounds;
     }
   }
@@ -1291,50 +1362,75 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
   for (int level = 0; level < levels - 1; ++level) {
     MGLevel& fine = mg.level(level);
     MGLevel& coarse = mg.level(level + 1);
+    const SSABoundaryCondition* level_bc = bc;
+    if (bc_levels && level < static_cast<int>(bc_levels->size())) {
+      level_bc = &(*bc_levels)[level];
+    }
 
     if (smoother == MGSmoother::Chebyshev) {
       const ChebyBounds bounds = bounds_ptr->at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
                        pre_iters, bounds.min, bounds.max,
-                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
+                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, level_bc,
                        context);
     } else {
       jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, pre_iters,
-                    omega, fine.diag, fine.Ax, bc, context);
+                    omega, fine.diag, fine.Ax, level_bc, context);
     }
     compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r,
-                     fine.Ax, bc, context);
+                     fine.Ax, level_bc, context);
+    if (diagnostic) {
+      log_mg_residual(level, "down", fine.r, base_norm, context);
+    }
     restrict_stag(fine.r, coarse.rhs);
     set(0.0, coarse.u);
   }
 
   MGLevel& coarsest = mg.level(levels - 1);
+  const SSABoundaryCondition* coarsest_bc = bc;
+  if (bc_levels && (levels - 1) < static_cast<int>(bc_levels->size())) {
+    coarsest_bc = &(*bc_levels)[levels - 1];
+  }
   if (smoother == MGSmoother::Chebyshev) {
     const ChebyBounds bounds = bounds_ptr->at(levels - 1);
     chebyshev_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
                      coarsest.u, coarse_iters, bounds.min, bounds.max,
                      coarsest.diag, coarsest.Ax, coarsest.r,
-                     coarsest.z, coarsest.corr, bc, context);
+                     coarsest.z, coarsest.corr, coarsest_bc, context);
   } else {
     jacobi_smooth(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
                   coarsest.u, coarse_iters, omega, coarsest.diag, coarsest.Ax,
-                  bc, context);
+                  coarsest_bc, context);
+  }
+  if (diagnostic) {
+    compute_residual(coarsest.grid, coarsest.nuH, coarsest.beta, coarsest.rhs,
+                     coarsest.u, coarsest.r, coarsest.Ax, coarsest_bc, context);
+    log_mg_residual(levels - 1, "coarse", coarsest.r, base_norm, context);
   }
 
   for (int level = levels - 2; level >= 0; --level) {
     MGLevel& fine = mg.level(level);
     MGLevel& coarse = mg.level(level + 1);
+    const SSABoundaryCondition* level_bc = bc;
+    if (bc_levels && level < static_cast<int>(bc_levels->size())) {
+      level_bc = &(*bc_levels)[level];
+    }
     prolong_stag(coarse.u, fine.corr);
     axpy(1.0, fine.corr, fine.u);
     if (smoother == MGSmoother::Chebyshev) {
       const ChebyBounds bounds = bounds_ptr->at(level);
       chebyshev_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u,
                        post_iters, bounds.min, bounds.max,
-                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, bc,
+                       fine.diag, fine.Ax, fine.r, fine.z, fine.corr, level_bc,
                        context);
     } else {
       jacobi_smooth(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, post_iters,
-                    omega, fine.diag, fine.Ax, bc, context);
+                    omega, fine.diag, fine.Ax, level_bc, context);
+    }
+    if (diagnostic) {
+      compute_residual(fine.grid, fine.nuH, fine.beta, fine.rhs, fine.u, fine.r,
+                       fine.Ax, level_bc, context);
+      log_mg_residual(level, "up", fine.r, base_norm, context);
     }
   }
 }
