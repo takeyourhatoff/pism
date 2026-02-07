@@ -39,6 +39,7 @@ RuntimeConfig::RuntimeConfig() { load_defaults(); }
 
 void RuntimeConfig::load_defaults() {
   values_.clear();
+  values_["device.enabled"] = "1";
   values_["grid.Mx"] = "100";
   values_["grid.My"] = "100";
   values_["grid.Mz"] = "20";

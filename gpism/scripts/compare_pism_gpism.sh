@@ -19,6 +19,7 @@ YEARS="${YEARS:-4}"
 MIN_WALL="${MIN_WALL:-10}"
 SCALE_FACTOR="${SCALE_FACTOR:-2}"
 GPISM_DT="${GPISM_DT:-60}"
+GPISM_DEVICE_ENABLED="${GPISM_DEVICE_ENABLED:-1}"
 GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-0}"
 GPISM_ENFORCE_ICE_FREE_BC="${GPISM_ENFORCE_ICE_FREE_BC:-0}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
@@ -176,6 +177,7 @@ write_gpism_cfg() {
   local years="$1"
   cat > "${GPISM_CFG}" <<EOF
 $(cat "${GPISM_PISM_CFG}")
+device.enabled=${GPISM_DEVICE_ENABLED}
 ssa.mg.enabled=${GPISM_MG_ENABLED}
 ssa.enforce_ice_free_bc=${GPISM_ENFORCE_ICE_FREE_BC}
 thermo.enabled=0

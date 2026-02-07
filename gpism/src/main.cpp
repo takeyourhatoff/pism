@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "gpism/context.h"
+#include "gpism/device_policy.h"
 #include "gpism/field_sync.h"
 #include "gpism/runtime_config.h"
 #include "gpism/time_manager.h"
@@ -165,6 +166,10 @@ int main(int argc, char** argv) {
   if (!options.run_years.empty()) {
     config.set("time.years", options.run_years);
   }
+
+  // Allow forcing the host code path even in CUDA builds. This is useful for
+  // debugging (e.g. parity checks vs CPU kernels).
+  gpism::set_device_enabled(config.get_bool("device.enabled"));
 
   if (!options.gpism_opts.empty() && context.rank() == 0) {
     std::cout << "Ignoring gpism-only options:";
