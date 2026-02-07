@@ -677,18 +677,18 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, t_index) && ok;
   if (fields.has_velocity) {
     ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
   }
   if (fields.has_ssa_velocity) {
     ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
   }
   if (fields.has_usurf) {
@@ -696,10 +696,10 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   }
   if (fields.has_vel_bc) {
     ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, t_index,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, t_index) &&
          ok;
@@ -1481,18 +1481,18 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, 0) && ok;
   if (fields.has_velocity) {
     ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
   }
   if (fields.has_ssa_velocity) {
     ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
   }
   if (fields.has_usurf) {
@@ -1500,10 +1500,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   }
   if (fields.has_vel_bc) {
     ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, 0,
-                             kSecondsPerYear) &&
+                             1.0) &&
          ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, 0) &&
          ok;
