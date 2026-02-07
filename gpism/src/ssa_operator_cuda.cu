@@ -297,6 +297,53 @@ __global__ void apply_region_kernel(
   }
 }
 
+__global__ void replace_zero_diagonal_entries_kernel(
+    int mx, int my, int gw, int stride_nu_u, int stride_nu_v,
+    int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
+    const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
+    int stride_mask_u, int stride_mask_v, const int* mask_u, const int* mask_v,
+    int has_bc, double beta_ice_free_bedrock) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+
+  const int im1 = (i == 0) ? i : i - 1;
+  const int jm1 = (j == 0) ? j : j - 1;
+
+  const int c_beta_u = idx(i, j, gw, stride_beta_u);
+  const int c_beta_v = idx(i, j, gw, stride_beta_v);
+
+  const int c_nu_u = idx(i, j, gw, stride_nu_u);
+  const int w_nu_u = idx(im1, j, gw, stride_nu_u);
+  const int c_nu_v = idx(i, j, gw, stride_nu_v);
+  const int s_nu_v = idx(i, jm1, gw, stride_nu_v);
+
+  const double c_n = nu_v[c_nu_v];
+  const double c_s = nu_v[s_nu_v];
+  const double c_e = nu_u[c_nu_u];
+  const double c_w = nu_u[w_nu_u];
+
+  const double diag_u = beta_u[c_beta_u] + (c_n + c_s) * inv_dy2 +
+                        4.0 * (c_e + c_w) * inv_dx2;
+  const double diag_v = beta_v[c_beta_v] + 4.0 * (c_n + c_s) * inv_dy2 +
+                        (c_e + c_w) * inv_dx2;
+
+  const double eps = 1e-16;
+  const bool dir_u =
+      has_bc && mask_u && (mask_u[idx(i, j, gw, stride_mask_u)] != 0);
+  const bool dir_v =
+      has_bc && mask_v && (mask_v[idx(i, j, gw, stride_mask_v)] != 0);
+
+  if (!dir_u && fabs(diag_u) < eps) {
+    beta_u[c_beta_u] = beta_ice_free_bedrock;
+  }
+  if (!dir_v && fabs(diag_v) < eps) {
+    beta_v[c_beta_v] = beta_ice_free_bedrock;
+  }
+}
+
 }  // namespace
 
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
@@ -382,6 +429,22 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
       stride_beta_v, stride_out_u, stride_out_v, u, v, nu_u, nu_v, beta_u,
       beta_v, out_u, out_v, inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
       stride_mask_u, stride_mask_v, has_bc, i_start, i_end, j_start, j_end);
+}
+
+void ssa_replace_zero_diagonal_entries_cuda(
+    int mx, int my, int gw, int stride_nu_u, int stride_nu_v,
+    int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
+    const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
+    int stride_mask_u, int stride_mask_v, const int* mask_u, const int* mask_v,
+    int has_bc, double beta_ice_free_bedrock) {
+  CudaEventTimer timer("ssa_replace_zero_diagonal_entries");
+  dim3 block(16, 16);
+  dim3 grid_dim((mx + block.x - 1) / block.x,
+                (my + block.y - 1) / block.y);
+  replace_zero_diagonal_entries_kernel<<<grid_dim, block>>>(
+      mx, my, gw, stride_nu_u, stride_nu_v, stride_beta_u, stride_beta_v, beta_u,
+      beta_v, nu_u, nu_v, inv_dx2, inv_dy2, stride_mask_u, stride_mask_v, mask_u,
+      mask_v, has_bc, beta_ice_free_bedrock);
 }
 
 }  // namespace gpism
