@@ -239,29 +239,38 @@ int main(int argc, char** argv) {
     gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(),
                                   grid.ghost_width());
 
-	    const double rho_ice = config.get_double("constants.ice.density");
-	    const double rho_water = config.get_double("constants.sea_water.density");
-	    const double gravity = config.get_double("constants.standard_gravity");
-	    const double sea_level = config.get_double("constants.sea_level");
-	    const double seconds_per_year =
-	        config.get_double("constants.seconds_per_year");
-	    const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
-	    const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
-	    const double softness =
-	        config.get_double("flow_law.isothermal_Glen.ice_softness");
-	    const double enhancement =
-	        config.get_double("stress_balance.ssa.enhancement_factor");
-	    // PISM config units: "meter / year". Convert to SI for SSA solve.
-	    const double schoof_vel_year =
-	        config.get_double("flow_law.Schoof_regularizing_velocity");
-	    const double schoof_length_km =
-	        config.get_double("flow_law.Schoof_regularizing_length");
-	    const double schoof_length = schoof_length_km * 1000.0;
-	    const double schoof_vel =
-	        schoof_vel_year / std::max(1.0, seconds_per_year);  // m/s
-	    const double eps0 =
-	        (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
-	    const double A = softness;
+    const double rho_ice = config.get_double("constants.ice.density");
+    const double rho_water = config.get_double("constants.sea_water.density");
+    const double gravity = config.get_double("constants.standard_gravity");
+    const double sea_level = config.get_double("constants.sea_level");
+    const double seconds_per_year =
+        config.get_double("constants.seconds_per_year");
+    const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
+    const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
+    const double softness =
+        config.get_double("flow_law.isothermal_Glen.ice_softness");
+    const double enhancement =
+        config.get_double("stress_balance.ssa.enhancement_factor");
+
+    const double seconds_per_year_safe = std::max(1.0, seconds_per_year);
+
+    // PISM config units: "meter / year". Convert to SI for SSA solve.
+    const double u_threshold_year =
+        config.get_double("basal_resistance.pseudo_plastic.u_threshold");
+    const double u_threshold = u_threshold_year / seconds_per_year_safe;  // m/s
+    const double plastic_reg_year =
+        config.get_double("basal_resistance.plastic.regularization");
+    const double plastic_reg = plastic_reg_year / seconds_per_year_safe;  // m/s
+    const double schoof_vel_year =
+        config.get_double("flow_law.Schoof_regularizing_velocity");
+    const double schoof_vel = schoof_vel_year / seconds_per_year_safe;  // m/s
+    const double schoof_length_km =
+        config.get_double("flow_law.Schoof_regularizing_length");
+    const double schoof_length = schoof_length_km * 1000.0;
+    const double eps0 =
+        (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
+
+    const double A = softness;
 
     if (flow_law != "isothermal_glen" && context.rank() == 0) {
       std::cout << "Warning: SSA flow law '" << flow_law
@@ -269,10 +278,7 @@ int main(int argc, char** argv) {
     }
 
     gpism::ViscosityModel viscosity(A, glen_n, eps0, enhancement);
-    gpism::SSASolver solver(
-        grid, rho_ice, gravity,
-        config.get_double("basal_resistance.pseudo_plastic.u_threshold"),
-        viscosity);
+    gpism::SSASolver solver(grid, rho_ice, gravity, u_threshold, viscosity);
 
     gpism::SSASolverOptions ssa_options;
     ssa_options.max_picard = config.get_int("ssa.max_picard");
@@ -328,10 +334,8 @@ int main(int argc, char** argv) {
     gpism::BasalResistanceParams basal_params;
     basal_params.q =
         config.get_double("basal_resistance.pseudo_plastic.q");
-    basal_params.u_threshold =
-        config.get_double("basal_resistance.pseudo_plastic.u_threshold");
-    basal_params.plastic_regularization =
-        config.get_double("basal_resistance.plastic.regularization");
+    basal_params.u_threshold = u_threshold;
+    basal_params.plastic_regularization = plastic_reg;
     basal_params.sliding_scale_factor =
         config.get_double("basal_resistance.pseudo_plastic.sliding_scale_factor");
     basal_params.beta_ice_free_bedrock =
