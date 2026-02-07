@@ -438,6 +438,15 @@ int main(int argc, char** argv) {
     if (!fields.has_ssa_velocity && !fields.has_velocity) {
       const double guess_speed = std::max(0.0, config.get_double("ssa.initial_guess_speed"));
       if (guess_speed > 0.0) {
+        // This block intentionally uses host data structures. At this point we
+        // have not synced input fields to the device yet, so CUDA kernels would
+        // read uninitialized device buffers and leave host arrays (used below)
+        // unchanged, resulting in a near-zero initial guess.
+        const bool was_device_enabled = gpism::device_enabled();
+        if (was_device_enabled) {
+          gpism::set_device_enabled(false);
+        }
+
         gpism::Field2D<int> cell_type_guess(grid.local_mx(), grid.local_my(),
                                             grid.ghost_width());
         gpism::Field2D<double> usurf_guess(grid.local_mx(), grid.local_my(),
@@ -476,6 +485,10 @@ int main(int argc, char** argv) {
 
         init_face_velocity_from_center(grid, u_guess, v_guess, vel);
         log_rank0(context, "Initialized velocity guess from driving stress.");
+
+        if (was_device_enabled) {
+          gpism::set_device_enabled(true);
+        }
       }
     }
 
