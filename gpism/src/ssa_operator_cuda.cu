@@ -131,19 +131,6 @@ __global__ void rhs_kernel(int mx, int my, int gw, int stride_thk, int stride_dh
   rhs_v[c_rhs] = rhs1;
 }
 
-__device__ inline double shear(int i, int j, int gw, int stride_u, int stride_v,
-                               const double* u, const double* v, double inv_2dx,
-                               double inv_2dy) {
-  const int c = idx(i, j, gw, stride_u);
-  const int n = idx(i, j + 1, gw, stride_u);
-  const int s = idx(i, j - 1, gw, stride_u);
-  const int e = idx(i + 1, j, gw, stride_v);
-  const int w = idx(i - 1, j, gw, stride_v);
-  const double du_dy = (u[n] - u[s]) * inv_2dy;
-  const double dv_dx = (v[e] - v[w]) * inv_2dx;
-  return du_dy + dv_dx;
-}
-
 __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
                              int stride_nu_u, int stride_nu_v, int stride_beta_u,
                              int stride_beta_v, int stride_out_u,
@@ -160,6 +147,14 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
     return;
   }
 
+  const int im1 = (i == 0) ? i : i - 1;
+  const int ip1 = (i == mx - 1) ? i : i + 1;
+  const int jm1 = (j == 0) ? j : j - 1;
+  const int jp1 = (j == my - 1) ? j : j + 1;
+
+  const double inv_d4 = inv_2dx * inv_2dy;
+  const double inv_d2 = 2.0 * inv_d4;
+
   const int c_u = idx(i, j, gw, stride_u);
   const int c_v = idx(i, j, gw, stride_v);
   const int mask_u_idx = idx(i, j, gw, stride_mask_u);
@@ -167,57 +162,60 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
   if (has_bc && mask_u && mask_u[mask_u_idx] != 0) {
     out_u[c_u] = u[c_u];
   } else {
-    const int e = idx(i + 1, j, gw, stride_u);
-    const int w = idx(i - 1, j, gw, stride_u);
-    const int n = idx(i, j + 1, gw, stride_u);
-    const int s = idx(i, j - 1, gw, stride_u);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_u);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_u);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_u);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_u);
+    const double u_c = u[c_u];
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
 
-    const double flux_x = nu_u[e_nu] * (u[e] - u[c_u]) -
-                          nu_u[w_nu] * (u[c_u] - u[w]);
-    const double flux_y = nu_u[n_nu] * (u[n] - u[c_u]) -
-                          nu_u[s_nu] * (u[c_u] - u[s]);
-    double coupling = 0.0;
-    if (j >= 1 && j <= my - 2) {
-      const double shear_p = shear(i, j + 1, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i, j - 1, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_u[c_u] * (shear_p - shear_m) * inv_2dy;
-    }
-    out_u[c_u] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                 beta_u[idx(i, j, gw, stride_beta_u)] * u[c_u];
+    double sum =
+        (-c_n * u[idx(i, jp1, gw, stride_u)] -
+         c_s * u[idx(i, jm1, gw, stride_u)] + (c_n + c_s) * u_c) *
+            inv_dy2 +
+        (-4.0 * c_e * u[idx(ip1, j, gw, stride_u)] -
+         4.0 * c_w * u[idx(im1, j, gw, stride_u)] +
+         4.0 * (c_e + c_w) * u_c) *
+            inv_dx2;
+
+    sum += (c_w * inv_d2 + c_n * inv_d4) * v[idx(im1, jp1, gw, stride_v)];
+    sum += (c_w - c_e) * inv_d2 * v[idx(i, jp1, gw, stride_v)];
+    sum += (-c_e * inv_d2 - c_n * inv_d4) * v[idx(ip1, jp1, gw, stride_v)];
+    sum += (c_n - c_s) * inv_d4 * v[idx(im1, j, gw, stride_v)];
+    sum += (c_s - c_n) * inv_d4 * v[idx(ip1, j, gw, stride_v)];
+    sum += (-c_w * inv_d2 - c_s * inv_d4) * v[idx(im1, jm1, gw, stride_v)];
+    sum += (c_e - c_w) * inv_d2 * v[idx(i, jm1, gw, stride_v)];
+    sum += (c_e * inv_d2 + c_s * inv_d4) * v[idx(ip1, jm1, gw, stride_v)];
+
+    out_u[c_u] = sum + beta_u[idx(i, j, gw, stride_beta_u)] * u_c;
   }
 
   if (has_bc && mask_v && mask_v[mask_v_idx] != 0) {
     out_v[c_v] = v[c_v];
   } else {
-    const int e = idx(i + 1, j, gw, stride_v);
-    const int w = idx(i - 1, j, gw, stride_v);
-    const int n = idx(i, j + 1, gw, stride_v);
-    const int s = idx(i, j - 1, gw, stride_v);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_v);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_v);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_v);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_v);
+    const double v_c = v[c_v];
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
 
-    const double flux_x = nu_v[e_nu] * (v[e] - v[c_v]) -
-                          nu_v[w_nu] * (v[c_v] - v[w]);
-    const double flux_y = nu_v[n_nu] * (v[n] - v[c_v]) -
-                          nu_v[s_nu] * (v[c_v] - v[s]);
-    double coupling = 0.0;
-    if (i >= 1 && i <= mx - 2) {
-      const double shear_p = shear(i + 1, j, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i - 1, j, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_v[c_v] * (shear_p - shear_m) * inv_2dx;
-    }
-    out_v[c_v] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                 beta_v[idx(i, j, gw, stride_beta_v)] * v[c_v];
+    double sum =
+        (-4.0 * c_n * v[idx(i, jp1, gw, stride_v)] -
+         4.0 * c_s * v[idx(i, jm1, gw, stride_v)] + 4.0 * (c_n + c_s) * v_c) *
+            inv_dy2 +
+        (-c_e * v[idx(ip1, j, gw, stride_v)] -
+         c_w * v[idx(im1, j, gw, stride_v)] + (c_e + c_w) * v_c) *
+            inv_dx2;
+
+    sum += (c_w * inv_d4 + c_n * inv_d2) * u[idx(im1, jp1, gw, stride_u)];
+    sum += (c_w - c_e) * inv_d4 * u[idx(i, jp1, gw, stride_u)];
+    sum += (-c_e * inv_d4 - c_n * inv_d2) * u[idx(ip1, jp1, gw, stride_u)];
+    sum += (c_n - c_s) * inv_d2 * u[idx(im1, j, gw, stride_u)];
+    sum += (c_s - c_n) * inv_d2 * u[idx(ip1, j, gw, stride_u)];
+    sum += (-c_w * inv_d4 - c_s * inv_d2) * u[idx(im1, jm1, gw, stride_u)];
+    sum += (c_e - c_w) * inv_d4 * u[idx(i, jm1, gw, stride_u)];
+    sum += (c_e * inv_d4 + c_s * inv_d2) * u[idx(ip1, jm1, gw, stride_u)];
+
+    out_v[c_v] = sum + beta_v[idx(i, j, gw, stride_beta_v)] * v_c;
   }
 }
 
@@ -243,57 +241,76 @@ __global__ void apply_region_kernel(
   if (has_bc && mask_u && mask_u[mask_u_idx] != 0) {
     out_u[c_u] = u[c_u];
   } else {
-    const int e = idx(i + 1, j, gw, stride_u);
-    const int w = idx(i - 1, j, gw, stride_u);
-    const int n = idx(i, j + 1, gw, stride_u);
-    const int s = idx(i, j - 1, gw, stride_u);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_u);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_u);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_u);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_u);
+    const int im1 = (i == 0) ? i : i - 1;
+    const int ip1 = (i == mx - 1) ? i : i + 1;
+    const int jm1 = (j == 0) ? j : j - 1;
+    const int jp1 = (j == my - 1) ? j : j + 1;
 
-    const double flux_x = nu_u[e_nu] * (u[e] - u[c_u]) -
-                          nu_u[w_nu] * (u[c_u] - u[w]);
-    const double flux_y = nu_u[n_nu] * (u[n] - u[c_u]) -
-                          nu_u[s_nu] * (u[c_u] - u[s]);
-    double coupling = 0.0;
-    if (j >= 1 && j <= my - 2) {
-      const double shear_p = shear(i, j + 1, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i, j - 1, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_u[c_u] * (shear_p - shear_m) * inv_2dy;
-    }
-    out_u[c_u] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                 beta_u[idx(i, j, gw, stride_beta_u)] * u[c_u];
+    const double inv_d4 = inv_2dx * inv_2dy;
+    const double inv_d2 = 2.0 * inv_d4;
+
+    const double u_c = u[c_u];
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
+
+    double sum =
+        (-c_n * u[idx(i, jp1, gw, stride_u)] -
+         c_s * u[idx(i, jm1, gw, stride_u)] + (c_n + c_s) * u_c) *
+            inv_dy2 +
+        (-4.0 * c_e * u[idx(ip1, j, gw, stride_u)] -
+         4.0 * c_w * u[idx(im1, j, gw, stride_u)] +
+         4.0 * (c_e + c_w) * u_c) *
+            inv_dx2;
+
+    sum += (c_w * inv_d2 + c_n * inv_d4) * v[idx(im1, jp1, gw, stride_v)];
+    sum += (c_w - c_e) * inv_d2 * v[idx(i, jp1, gw, stride_v)];
+    sum += (-c_e * inv_d2 - c_n * inv_d4) * v[idx(ip1, jp1, gw, stride_v)];
+    sum += (c_n - c_s) * inv_d4 * v[idx(im1, j, gw, stride_v)];
+    sum += (c_s - c_n) * inv_d4 * v[idx(ip1, j, gw, stride_v)];
+    sum += (-c_w * inv_d2 - c_s * inv_d4) * v[idx(im1, jm1, gw, stride_v)];
+    sum += (c_e - c_w) * inv_d2 * v[idx(i, jm1, gw, stride_v)];
+    sum += (c_e * inv_d2 + c_s * inv_d4) * v[idx(ip1, jm1, gw, stride_v)];
+
+    out_u[c_u] = sum + beta_u[idx(i, j, gw, stride_beta_u)] * u_c;
   }
 
   if (has_bc && mask_v && mask_v[mask_v_idx] != 0) {
     out_v[c_v] = v[c_v];
   } else {
-    const int e = idx(i + 1, j, gw, stride_v);
-    const int w = idx(i - 1, j, gw, stride_v);
-    const int n = idx(i, j + 1, gw, stride_v);
-    const int s = idx(i, j - 1, gw, stride_v);
-    const int e_nu = idx(i + 1, j, gw, stride_nu_v);
-    const int w_nu = idx(i - 1, j, gw, stride_nu_v);
-    const int n_nu = idx(i, j + 1, gw, stride_nu_v);
-    const int s_nu = idx(i, j - 1, gw, stride_nu_v);
+    const int im1 = (i == 0) ? i : i - 1;
+    const int ip1 = (i == mx - 1) ? i : i + 1;
+    const int jm1 = (j == 0) ? j : j - 1;
+    const int jp1 = (j == my - 1) ? j : j + 1;
 
-    const double flux_x = nu_v[e_nu] * (v[e] - v[c_v]) -
-                          nu_v[w_nu] * (v[c_v] - v[w]);
-    const double flux_y = nu_v[n_nu] * (v[n] - v[c_v]) -
-                          nu_v[s_nu] * (v[c_v] - v[s]);
-    double coupling = 0.0;
-    if (i >= 1 && i <= mx - 2) {
-      const double shear_p = shear(i + 1, j, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      const double shear_m = shear(i - 1, j, gw, stride_u, stride_v, u, v,
-                                   inv_2dx, inv_2dy);
-      coupling = nu_v[c_v] * (shear_p - shear_m) * inv_2dx;
-    }
-    out_v[c_v] = flux_x * inv_dx2 + flux_y * inv_dy2 + coupling +
-                 beta_v[idx(i, j, gw, stride_beta_v)] * v[c_v];
+    const double inv_d4 = inv_2dx * inv_2dy;
+    const double inv_d2 = 2.0 * inv_d4;
+
+    const double v_c = v[c_v];
+    const double c_n = nu_v[idx(i, j, gw, stride_nu_v)];
+    const double c_s = nu_v[idx(i, jm1, gw, stride_nu_v)];
+    const double c_e = nu_u[idx(i, j, gw, stride_nu_u)];
+    const double c_w = nu_u[idx(im1, j, gw, stride_nu_u)];
+
+    double sum =
+        (-4.0 * c_n * v[idx(i, jp1, gw, stride_v)] -
+         4.0 * c_s * v[idx(i, jm1, gw, stride_v)] + 4.0 * (c_n + c_s) * v_c) *
+            inv_dy2 +
+        (-c_e * v[idx(ip1, j, gw, stride_v)] -
+         c_w * v[idx(im1, j, gw, stride_v)] + (c_e + c_w) * v_c) *
+            inv_dx2;
+
+    sum += (c_w * inv_d4 + c_n * inv_d2) * u[idx(im1, jp1, gw, stride_u)];
+    sum += (c_w - c_e) * inv_d4 * u[idx(i, jp1, gw, stride_u)];
+    sum += (-c_e * inv_d4 - c_n * inv_d2) * u[idx(ip1, jp1, gw, stride_u)];
+    sum += (c_n - c_s) * inv_d2 * u[idx(im1, j, gw, stride_u)];
+    sum += (c_s - c_n) * inv_d2 * u[idx(ip1, j, gw, stride_u)];
+    sum += (-c_w * inv_d4 - c_s * inv_d2) * u[idx(im1, jm1, gw, stride_u)];
+    sum += (c_e - c_w) * inv_d4 * u[idx(i, jm1, gw, stride_u)];
+    sum += (c_e * inv_d4 + c_s * inv_d2) * u[idx(ip1, jm1, gw, stride_u)];
+
+    out_v[c_v] = sum + beta_v[idx(i, j, gw, stride_beta_v)] * v_c;
   }
 }
 
