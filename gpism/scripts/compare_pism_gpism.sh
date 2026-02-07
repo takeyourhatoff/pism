@@ -231,7 +231,7 @@ while true; do
       -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
       -grid.recompute_longitude_and_latitude false \
       -extra_file "${OUTDIR}/pism_60_extra.nc" \
-      -extra_vars usurf,uvel,vvel -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
+      -extra_vars usurf -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
   wall=$(cat "${PISM_WALL}")
   echo "pism wall ${wall}s (years=${YEARS_ACTUAL})"
   if python3 - <<PY
@@ -308,6 +308,8 @@ def depth_mean(var):
         return np.nanmean(data, axis=2)
     return np.squeeze(data)
 
+seconds_per_year = 31556926.0
+
 with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
     for name in ("thk", "topg", "tauc"):
         if name in dg.variables and name in dp.variables:
@@ -337,10 +339,11 @@ with nc.Dataset(gp) as dg, nc.Dataset(pextra) as dp:
         else:
             print(f"usurf: shape mismatch {g.shape} vs {p.shape}")
 
-    for name in ("uvel", "vvel"):
+with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
+    for name in ("u_ssa", "v_ssa"):
         if name in dg.variables and name in dp.variables:
-            g = last2d(dg.variables[name])
-            p = last2d(dp.variables[name])
+            g = last2d(dg.variables[name])  # gpism: m/year
+            p = last2d(dp.variables[name]) * seconds_per_year  # pism: m/s -> m/year
             if g.shape != p.shape:
                 print(f"{name}: shape mismatch {g.shape} vs {p.shape}")
                 continue
