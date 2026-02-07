@@ -108,7 +108,9 @@ def get(key, default=None):
     return getattr(var, key) if hasattr(var, key) else default
 
 params = {
-    "stress_balance.ssa.flow_law": get("stress_balance.ssa.flow_law", "isothermal_glen"),
+    # Force a flow law that gpism implements so the comparison targets numerics,
+    # not physics/model differences (PISM's std-greenland config can use GPBLD).
+    "stress_balance.ssa.flow_law": "isothermal_glen",
     "stress_balance.ssa.Glen_exponent": get("stress_balance.ssa.Glen_exponent", 3.0),
     "stress_balance.ssa.enhancement_factor": get("stress_balance.ssa.enhancement_factor", 1.0),
     "stress_balance.ssa.epsilon": get("stress_balance.ssa.epsilon", 1.0e13),
@@ -228,6 +230,7 @@ while true; do
       -bootstrap -i "${CAL_INPUT}" -o "${OUTDIR}/pism_60.nc" -y "${YEARS_ACTUAL}" \
       -config "${PISM_CONFIG}" -calendar 365_day \
       -surface given -stress_balance ssa -energy none -no_mass \
+      -stress_balance.ssa.flow_law isothermal_glen \
       -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
       -grid.recompute_longitude_and_latitude false \
       -extra_file "${OUTDIR}/pism_60_extra.nc" \

@@ -61,7 +61,10 @@ void RuntimeConfig::load_defaults() {
   values_["thermo.enthalpy_ref"] = "0.0";
   values_["thickness.evolve"] = "1";
   values_["ssa.enabled"] = "1";
-  values_["ssa.max_picard"] = "10";
+  // Default Picard cap needs to be high enough to converge on real-world
+  // Greenland-like test problems; small values can lock into a low-velocity
+  // solution and diverge massively from PISM.
+  values_["ssa.max_picard"] = "80";
   values_["ssa.gmres_max_iter"] = "200";
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
