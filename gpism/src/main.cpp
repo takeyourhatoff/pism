@@ -259,23 +259,23 @@ int main(int argc, char** argv) {
 
     const double seconds_per_year_safe = std::max(1.0, seconds_per_year);
 
-    // PISM config units: "meter / year". Convert to SI for SSA solve.
-    const double u_threshold_year =
-        config.get_double("basal_resistance.pseudo_plastic.u_threshold");
-    const double u_threshold = u_threshold_year / seconds_per_year_safe;  // m/s
-    const double plastic_reg_year =
-        config.get_double("basal_resistance.plastic.regularization");
-    const double plastic_reg = plastic_reg_year / seconds_per_year_safe;  // m/s
-    const double schoof_vel_year =
-        config.get_double("flow_law.Schoof_regularizing_velocity");
-    const double schoof_vel = schoof_vel_year / seconds_per_year_safe;  // m/s
+    // gpism uses "years" as the time unit (consistent with TimeManager and thickness
+    // evolution). Convert PISM configuration values supplied in per-second units
+    // to per-year units, while keeping "meter / year" inputs unchanged.
+    const double u_threshold =
+        config.get_double("basal_resistance.pseudo_plastic.u_threshold");  // m/year
+    const double plastic_reg =
+        config.get_double("basal_resistance.plastic.regularization");  // m/year
+    const double schoof_vel =
+        config.get_double("flow_law.Schoof_regularizing_velocity");  // m/year
     const double schoof_length_km =
         config.get_double("flow_law.Schoof_regularizing_length");
     const double schoof_length = schoof_length_km * 1000.0;
     const double eps0 =
         (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
 
-    const double A = softness;
+    // PISM provides softness A in Pa^-n s^-1; convert to Pa^-n year^-1.
+    const double A = softness * seconds_per_year_safe;
 
     if (flow_law != "isothermal_glen" && context.rank() == 0) {
       std::cout << "Warning: SSA flow law '" << flow_law
@@ -292,9 +292,9 @@ int main(int argc, char** argv) {
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
     // PISM's stress_balance.ssa.epsilon has units Pa*s*m (regularization added to nu*H).
-    // gpism uses SI (seconds) internally, so no unit conversion is needed.
+    // Convert to Pa*year*m to match gpism's year-based time unit.
     ssa_options.nuH_regularization =
-        config.get_double("stress_balance.ssa.epsilon");
+        config.get_double("stress_balance.ssa.epsilon") * seconds_per_year_safe;
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
     ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
     ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");
