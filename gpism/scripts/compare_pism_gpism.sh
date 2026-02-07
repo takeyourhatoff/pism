@@ -19,6 +19,8 @@ YEARS="${YEARS:-4}"
 MIN_WALL="${MIN_WALL:-10}"
 SCALE_FACTOR="${SCALE_FACTOR:-2}"
 GPISM_DT="${GPISM_DT:-60}"
+GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-0}"
+GPISM_ENFORCE_ICE_FREE_BC="${GPISM_ENFORCE_ICE_FREE_BC:-0}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
 COMPARE_STRICT="${COMPARE_STRICT:-0}"
 COMPARE_TOL_RMS="${COMPARE_TOL_RMS:-0.02}"
@@ -174,6 +176,8 @@ write_gpism_cfg() {
   local years="$1"
   cat > "${GPISM_CFG}" <<EOF
 $(cat "${GPISM_PISM_CFG}")
+ssa.mg.enabled=${GPISM_MG_ENABLED}
+ssa.enforce_ice_free_bc=${GPISM_ENFORCE_ICE_FREE_BC}
 thermo.enabled=0
 thickness.evolve=0
 forcing.smb_constant=0

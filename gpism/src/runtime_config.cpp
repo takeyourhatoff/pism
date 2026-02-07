@@ -69,6 +69,7 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
   values_["ssa.gmres_tol"] = "1e-8";
+  values_["ssa.enforce_ice_free_bc"] = "0";
   values_["stress_balance.ssa.flow_law"] = "isothermal_glen";
   values_["stress_balance.ssa.Glen_exponent"] = "3.0";
   values_["stress_balance.ssa.enhancement_factor"] = "1.0";

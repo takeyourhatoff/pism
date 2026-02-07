@@ -320,6 +320,7 @@ int main(int argc, char** argv) {
     ssa_options.gmres_precond_diagnostic =
         config.get_bool("ssa.gmres.precond_diagnostic");
     ssa_options.use_bc = fields.has_vel_bc;
+    ssa_options.enforce_ice_free_bc = config.get_bool("ssa.enforce_ice_free_bc");
     ssa_options.sea_level = sea_level;
     ssa_options.rho_ice = rho_ice;
     ssa_options.rho_water = rho_water;

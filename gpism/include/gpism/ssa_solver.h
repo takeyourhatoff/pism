@@ -63,7 +63,11 @@ struct SSASolverOptions {
   bool replace_zero_diagonal_entries = true;
 
   bool use_bc = false;
-  bool enforce_ice_free_bc = true;
+  // PISM only enforces "ice-free velocity = 0" Dirichlet conditions when using
+  // calving-front stress boundary conditions (CFBC). When CFBC is disabled,
+  // enforcing Dirichlet conditions in ice-free areas can clamp the solution
+  // along margins and lead to large divergences.
+  bool enforce_ice_free_bc = false;
   const Field3D<double>* enthalpy = nullptr;
   double enthalpy_gamma = 0.0;
   double enthalpy_ref = 0.0;
