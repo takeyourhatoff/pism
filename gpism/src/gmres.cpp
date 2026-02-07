@@ -306,10 +306,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
         cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
                    static_cast<std::size_t>(count) * sizeof(double),
                    cudaMemcpyDeviceToHost);
-        if (options.context && options.context->mpi_enabled()) {
+#if GPISM_HAVE_MPI
+        if (options.context && options.context->mpi_enabled() &&
+            options.context->size() > 1) {
           MPI_Allreduce(MPI_IN_PLACE, workspace.hij_host.data(), count,
                         MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         }
+#endif
         for (int i = 0; i < count; ++i) {
           H[static_cast<std::size_t>(i) +
             static_cast<std::size_t>(restart + 1) * j] =
