@@ -495,6 +495,13 @@ int main(int argc, char** argv) {
                                             fields.vvel);
         gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
                                             fields.v_ssa);
+        // NetCDF writers use host buffers; ensure derived fields computed on the
+        // device are synced before enqueueing asynchronous output.
+        gpism::sync_device_to_host(fields.usurf);
+        gpism::sync_device_to_host(fields.uvel);
+        gpism::sync_device_to_host(fields.vvel);
+        gpism::sync_device_to_host(fields.u_ssa);
+        gpism::sync_device_to_host(fields.v_ssa);
         fields.has_usurf = true;
         fields.has_velocity = true;
         fields.has_ssa_velocity = true;
@@ -547,6 +554,11 @@ int main(int argc, char** argv) {
       gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
       gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
                                           fields.v_ssa);
+      gpism::sync_device_to_host(fields.usurf);
+      gpism::sync_device_to_host(fields.uvel);
+      gpism::sync_device_to_host(fields.vvel);
+      gpism::sync_device_to_host(fields.u_ssa);
+      gpism::sync_device_to_host(fields.v_ssa);
       fields.has_usurf = true;
       fields.has_velocity = true;
       fields.has_ssa_velocity = true;
