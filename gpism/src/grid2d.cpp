@@ -29,10 +29,16 @@ void compute_local_extent(int global, int dims, int coord, int* start, int* coun
 
 Grid2D::Grid2D(int global_mx, int global_my, double dx, double dy, int ghost_width,
                int rank, int size)
+    : Grid2D(global_mx, global_my, dx, dy, 0.0, 0.0, ghost_width, rank, size) {}
+
+Grid2D::Grid2D(int global_mx, int global_my, double dx, double dy, double x0,
+               double y0, int ghost_width, int rank, int size)
     : global_mx_(global_mx),
       global_my_(global_my),
       dx_(dx),
       dy_(dy),
+      x0_(x0),
+      y0_(y0),
       ghost_width_(ghost_width),
       dims_x_(1),
       dims_y_(1),
@@ -63,6 +69,8 @@ int Grid2D::global_mx() const { return global_mx_; }
 int Grid2D::global_my() const { return global_my_; }
 double Grid2D::dx() const { return dx_; }
 double Grid2D::dy() const { return dy_; }
+double Grid2D::x0() const { return x0_; }
+double Grid2D::y0() const { return y0_; }
 int Grid2D::ghost_width() const { return ghost_width_; }
 
 int Grid2D::local_mx() const { return local_mx_; }

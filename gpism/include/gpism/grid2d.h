@@ -8,11 +8,15 @@ class Grid2D {
 public:
   Grid2D(int global_mx, int global_my, double dx, double dy, int ghost_width,
          int rank, int size);
+  Grid2D(int global_mx, int global_my, double dx, double dy, double x0, double y0,
+         int ghost_width, int rank, int size);
 
   int global_mx() const;
   int global_my() const;
   double dx() const;
   double dy() const;
+  double x0() const;
+  double y0() const;
   int ghost_width() const;
 
   int local_mx() const;
@@ -35,6 +39,8 @@ private:
   int global_my_;
   double dx_;
   double dy_;
+  double x0_;
+  double y0_;
   int ghost_width_;
 
   int dims_x_;

@@ -277,8 +277,10 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
-    ssa_options.nuH_min =
-        config.get_double("stress_balance.ssa.epsilon") / seconds_per_year;
+    // PISM's stress_balance.ssa.epsilon has units Pa*s*m (regularization added to nu*H).
+    // gpism uses "years" as the time unit in the SSA solve, so convert to Pa*year*m.
+    ssa_options.nuH_regularization =
+        config.get_double("stress_balance.ssa.epsilon") * seconds_per_year;
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
     ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
     ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");

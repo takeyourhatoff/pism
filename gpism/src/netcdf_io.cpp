@@ -56,6 +56,21 @@ bool read_coord_spacing(int ncid, const char* name, double* spacing) {
   return true;
 }
 
+bool read_coord_origin(int ncid, const char* name, double* origin) {
+  int varid = -1;
+  if (nc_inq_varid(ncid, name, &varid) != NC_NOERR) {
+    return false;
+  }
+  std::size_t start[1] = {0};
+  std::size_t count[1] = {1};
+  double value = 0.0;
+  if (nc_get_vara_double(ncid, varid, start, count, &value) != NC_NOERR) {
+    return false;
+  }
+  *origin = value;
+  return true;
+}
+
 bool read_global_attr(int ncid, const char* name, double* value) {
   return nc_get_att_double(ncid, NC_GLOBAL, name, value) == NC_NOERR;
 }
@@ -387,10 +402,10 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
     std::vector<double> xvals(static_cast<std::size_t>(mx));
     std::vector<double> yvals(static_cast<std::size_t>(my));
     for (int i = 0; i < mx; ++i) {
-      xvals[static_cast<std::size_t>(i)] = i * grid.dx();
+      xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
     }
     for (int j = 0; j < my; ++j) {
-      yvals[static_cast<std::size_t>(j)] = j * grid.dy();
+      yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
     }
     std::size_t start_x[1] = {0};
     std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
@@ -513,7 +528,12 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
     read_global_attr(ncid, "dy", &dy);
   }
 
-  grid = Grid2D(static_cast<int>(nx), static_cast<int>(ny), dx, dy, 1, rank, size);
+  double x0 = 0.0;
+  double y0 = 0.0;
+  (void)read_coord_origin(ncid, dim_x_name, &x0);
+  (void)read_coord_origin(ncid, dim_y_name, &y0);
+  grid = Grid2D(static_cast<int>(nx), static_cast<int>(ny), dx, dy, x0, y0, 1,
+                rank, size);
   fields.thk.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.topg.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
   fields.tauc.resize(grid.local_mx(), grid.local_my(), grid.ghost_width());
@@ -1185,10 +1205,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       std::vector<double> xvals(static_cast<std::size_t>(mx));
       std::vector<double> yvals(static_cast<std::size_t>(my));
       for (int i = 0; i < mx; ++i) {
-        xvals[static_cast<std::size_t>(i)] = i * grid.dx();
+        xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
       }
       for (int j = 0; j < my; ++j) {
-        yvals[static_cast<std::size_t>(j)] = j * grid.dy();
+        yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
       }
       std::size_t start_x[1] = {0};
       std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
@@ -1446,10 +1466,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   std::vector<double> xvals(static_cast<std::size_t>(mx));
   std::vector<double> yvals(static_cast<std::size_t>(my));
   for (int i = 0; i < mx; ++i) {
-    xvals[static_cast<std::size_t>(i)] = i * grid.dx();
+    xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
   }
   for (int j = 0; j < my; ++j) {
-    yvals[static_cast<std::size_t>(j)] = j * grid.dy();
+    yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
   }
   std::size_t start_x[1] = {0};
   std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
