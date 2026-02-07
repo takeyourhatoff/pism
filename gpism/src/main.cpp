@@ -327,6 +327,9 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    ssa_options.vel_relax = config.get_double("ssa.vel_relax");
+    ssa_options.nuH_relax = config.get_double("ssa.nuH_relax");
+    ssa_options.max_speed = config.get_double("ssa.max_speed");
     ssa_options.gmres_verbose = config.get_bool("ssa.gmres_verbose");
     ssa_options.diagnostic = config.get_bool("ssa.diagnostic");
     ssa_options.force_host_convergence = config.get_bool("ssa.force_host_convergence");
