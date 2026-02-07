@@ -27,6 +27,20 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
 // Keep consistent with the gpism runtime config default ("constants.seconds_per_year").
 constexpr double kSecondsPerYear = 31556926.0;
 
+// Velocity-like NetCDF variables are stored in "m/year" for compatibility with
+// PISM conventions. gpism's internal SSA solver uses SI units (m/s), so we need
+// to undo the scale factor when reading restart inputs.
+void scale_field_2d(Field2D<double>& field, double factor) {
+  const int mx = field.local_mx();
+  const int my = field.local_my();
+  const int gw = field.ghost_width();
+  for (int j = -gw; j < my + gw; ++j) {
+    for (int i = -gw; i < mx + gw; ++i) {
+      field(i, j) *= factor;
+    }
+  }
+}
+
 bool get_dim_len(int ncid, const char* name, std::size_t* len, int* dimid_out) {
   int dimid = -1;
   if (nc_inq_dimid(ncid, name, &dimid) != NC_NOERR) {
@@ -600,6 +614,27 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   fields.has_velocity = has_uvel || has_vvel;
   fields.has_ssa_velocity = has_u_ssa || has_v_ssa;
   fields.has_usurf = has_usurf;
+
+  const double inv_seconds_per_year =
+      (kSecondsPerYear > 0.0) ? (1.0 / kSecondsPerYear) : 1.0;
+  if (has_u_bc) {
+    scale_field_2d(fields.u_bc, inv_seconds_per_year);
+  }
+  if (has_v_bc) {
+    scale_field_2d(fields.v_bc, inv_seconds_per_year);
+  }
+  if (has_uvel) {
+    scale_field_2d(fields.uvel, inv_seconds_per_year);
+  }
+  if (has_vvel) {
+    scale_field_2d(fields.vvel, inv_seconds_per_year);
+  }
+  if (has_u_ssa) {
+    scale_field_2d(fields.u_ssa, inv_seconds_per_year);
+  }
+  if (has_v_ssa) {
+    scale_field_2d(fields.v_ssa, inv_seconds_per_year);
+  }
 
   nc_close(ncid);
   return ok;
