@@ -248,6 +248,7 @@ int main(int argc, char** argv) {
     const double rho_water = config.get_double("constants.sea_water.density");
     const double gravity = config.get_double("constants.standard_gravity");
     const double sea_level = config.get_double("constants.sea_level");
+    const double seconds_per_year = config.get_double("constants.seconds_per_year");
     const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
     const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
     const double softness =
@@ -255,15 +256,18 @@ int main(int argc, char** argv) {
     const double enhancement =
         config.get_double("stress_balance.ssa.enhancement_factor");
 
-    // gpism uses "years" as the time unit (consistent with TimeManager and thickness
-    // evolution). Convert PISM configuration values supplied in per-second units
-    // to per-year units, while keeping "meter / year" inputs unchanged.
-    const double u_threshold =
-        config.get_double("basal_resistance.pseudo_plastic.u_threshold");  // m/year
-    const double plastic_reg =
-        config.get_double("basal_resistance.plastic.regularization");  // m/year
-    const double schoof_vel =
-        config.get_double("flow_law.Schoof_regularizing_velocity");  // m/year
+    // PISM config uses "meter / year" for several velocity-scale parameters. gpism
+    // uses SI (seconds) for the SSA solve, so convert to m/s.
+    const double seconds_per_year_safe = std::max(1.0, seconds_per_year);
+    const double u_threshold_year =
+        config.get_double("basal_resistance.pseudo_plastic.u_threshold");
+    const double u_threshold = u_threshold_year / seconds_per_year_safe;  // m/s
+    const double plastic_reg_year =
+        config.get_double("basal_resistance.plastic.regularization");
+    const double plastic_reg = plastic_reg_year / seconds_per_year_safe;  // m/s
+    const double schoof_vel_year =
+        config.get_double("flow_law.Schoof_regularizing_velocity");
+    const double schoof_vel = schoof_vel_year / seconds_per_year_safe;  // m/s
     const double schoof_length_km =
         config.get_double("flow_law.Schoof_regularizing_length");
     const double schoof_length = schoof_length_km * 1000.0;

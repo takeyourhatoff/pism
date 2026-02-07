@@ -24,6 +24,9 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
                        const Grid2D& grid, const IOFields2D& fields,
                        double time_value);
 
+// Keep consistent with the gpism runtime config default ("constants.seconds_per_year").
+constexpr double kSecondsPerYear = 31556926.0;
+
 bool get_dim_len(int ncid, const char* name, std::size_t* len, int* dimid_out) {
   int dimid = -1;
   if (nc_inq_dimid(ncid, name, &dimid) != NC_NOERR) {
@@ -457,19 +460,19 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   ok = write_local(var_topg, fields.topg) && ok;
   ok = write_local(var_tauc, fields.tauc) && ok;
   if (fields.has_velocity) {
-    ok = write_local_scaled(var_uvel, fields.uvel, 1.0) && ok;
-    ok = write_local_scaled(var_vvel, fields.vvel, 1.0) && ok;
+    ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
+    ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
   }
   if (fields.has_ssa_velocity) {
-    ok = write_local_scaled(var_u_ssa, fields.u_ssa, 1.0) && ok;
-    ok = write_local_scaled(var_v_ssa, fields.v_ssa, 1.0) && ok;
+    ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
+    ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
   }
   if (fields.has_usurf) {
     ok = write_local(var_usurf, fields.usurf) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_local_scaled(var_u_bc, fields.u_bc, 1.0) && ok;
-    ok = write_local_scaled(var_v_bc, fields.v_bc, 1.0) && ok;
+    ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
+    ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
     ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
   }
   nc_close(ncid);
@@ -677,18 +680,18 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, t_index) && ok;
   if (fields.has_velocity) {
     ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
   }
   if (fields.has_ssa_velocity) {
     ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
   }
   if (fields.has_usurf) {
@@ -696,10 +699,10 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   }
   if (fields.has_vel_bc) {
     ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, t_index,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, t_index) &&
          ok;
@@ -863,15 +866,15 @@ bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
   ok = write_local(var_topg, fields.topg) && ok;
   ok = write_local(var_tauc, fields.tauc) && ok;
   if (fields.has_velocity) {
-    ok = write_local_scaled(var_uvel, fields.uvel, 1.0) && ok;
-    ok = write_local_scaled(var_vvel, fields.vvel, 1.0) && ok;
+    ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
+    ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
   }
   if (fields.has_usurf) {
     ok = write_local(var_usurf, fields.usurf) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_local_scaled(var_u_bc, fields.u_bc, 1.0) && ok;
-    ok = write_local_scaled(var_v_bc, fields.v_bc, 1.0) && ok;
+    ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
+    ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
     ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
   }
 
@@ -1020,19 +1023,19 @@ bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
       ok = write_local(var_topg, fields.topg) && ok;
       ok = write_local(var_tauc, fields.tauc) && ok;
       if (fields.has_velocity) {
-        ok = write_local_scaled(var_uvel, fields.uvel, 1.0) && ok;
-        ok = write_local_scaled(var_vvel, fields.vvel, 1.0) && ok;
+        ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
+        ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
       }
       if (fields.has_ssa_velocity) {
-        ok = write_local_scaled(var_u_ssa, fields.u_ssa, 1.0) && ok;
-        ok = write_local_scaled(var_v_ssa, fields.v_ssa, 1.0) && ok;
+        ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
+        ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
       }
       if (fields.has_usurf) {
         ok = write_local(var_usurf, fields.usurf) && ok;
       }
       if (fields.has_vel_bc) {
-        ok = write_local_scaled(var_u_bc, fields.u_bc, 1.0) && ok;
-        ok = write_local_scaled(var_v_bc, fields.v_bc, 1.0) && ok;
+        ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
+        ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
         ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
       }
       nc_close(ncid);
@@ -1314,19 +1317,19 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
         ok = write_local(var_topg, fields.topg) && ok;
         ok = write_local(var_tauc, fields.tauc) && ok;
         if (fields.has_velocity) {
-          ok = write_local_scaled(var_uvel, fields.uvel, 1.0) && ok;
-          ok = write_local_scaled(var_vvel, fields.vvel, 1.0) && ok;
+          ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
+          ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
         }
         if (fields.has_ssa_velocity) {
-          ok = write_local_scaled(var_u_ssa, fields.u_ssa, 1.0) && ok;
-          ok = write_local_scaled(var_v_ssa, fields.v_ssa, 1.0) && ok;
+          ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
+          ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
         }
         if (fields.has_usurf) {
           ok = write_local(var_usurf, fields.usurf) && ok;
         }
         if (fields.has_vel_bc) {
-          ok = write_local_scaled(var_u_bc, fields.u_bc, 1.0) && ok;
-          ok = write_local_scaled(var_v_bc, fields.v_bc, 1.0) && ok;
+          ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
+          ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
           ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
         }
         nc_close(ncid);
@@ -1481,18 +1484,18 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, 0) && ok;
   if (fields.has_velocity) {
     ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
   }
   if (fields.has_ssa_velocity) {
     ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
   }
   if (fields.has_usurf) {
@@ -1500,10 +1503,10 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   }
   if (fields.has_vel_bc) {
     ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, 0,
-                             1.0) &&
+                             kSecondsPerYear) &&
          ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, 0) &&
          ok;
