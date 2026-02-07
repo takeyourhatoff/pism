@@ -248,16 +248,12 @@ int main(int argc, char** argv) {
     const double rho_water = config.get_double("constants.sea_water.density");
     const double gravity = config.get_double("constants.standard_gravity");
     const double sea_level = config.get_double("constants.sea_level");
-    const double seconds_per_year =
-        config.get_double("constants.seconds_per_year");
     const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
     const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
     const double softness =
         config.get_double("flow_law.isothermal_Glen.ice_softness");
     const double enhancement =
         config.get_double("stress_balance.ssa.enhancement_factor");
-
-    const double seconds_per_year_safe = std::max(1.0, seconds_per_year);
 
     // gpism uses "years" as the time unit (consistent with TimeManager and thickness
     // evolution). Convert PISM configuration values supplied in per-second units
@@ -274,8 +270,7 @@ int main(int argc, char** argv) {
     const double eps0 =
         (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
 
-    // PISM provides softness A in Pa^-n s^-1; convert to Pa^-n year^-1.
-    const double A = softness * seconds_per_year_safe;
+    const double A = softness;
 
     if (flow_law != "isothermal_glen" && context.rank() == 0) {
       std::cout << "Warning: SSA flow law '" << flow_law
@@ -295,9 +290,7 @@ int main(int argc, char** argv) {
     ssa_options.diagnostic = config.get_bool("ssa.diagnostic");
     ssa_options.force_host_convergence = config.get_bool("ssa.force_host_convergence");
     // PISM's stress_balance.ssa.epsilon has units Pa*s*m (regularization added to nu*H).
-    // Convert to Pa*year*m to match gpism's year-based time unit.
-    ssa_options.nuH_regularization =
-        config.get_double("stress_balance.ssa.epsilon") * seconds_per_year_safe;
+    ssa_options.nuH_regularization = config.get_double("stress_balance.ssa.epsilon");
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
     ssa_options.mg_pre_iters = config.get_int("ssa.mg.pre_iters");
     ssa_options.mg_post_iters = config.get_int("ssa.mg.post_iters");
