@@ -131,6 +131,35 @@ void log_rank0(const gpism::Context& context, const std::string& message) {
   }
 }
 
+void init_face_velocity_from_center(const gpism::Grid2D& grid,
+                                    const gpism::Field2D<double>& u_center,
+                                    const gpism::Field2D<double>& v_center,
+                                    gpism::FieldStag2D<double>& vel) {
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  const int gw = grid.ghost_width();
+  auto clamp_i = [mx](int i) { return std::clamp(i, 0, mx - 1); };
+  auto clamp_j = [my](int j) { return std::clamp(j, 0, my - 1); };
+
+  for (int j = -gw; j < my + gw; ++j) {
+    const int jc = clamp_j(j);
+    for (int i = -gw; i < mx + gw; ++i) {
+      const int i0 = clamp_i(i);
+      const int i1 = clamp_i(i + 1);
+      vel(i, j, 0) = 0.5 * (u_center(i0, jc) + u_center(i1, jc));
+    }
+  }
+
+  for (int j = -gw; j < my + gw; ++j) {
+    const int j0 = clamp_j(j);
+    const int j1 = clamp_j(j + 1);
+    for (int i = -gw; i < mx + gw; ++i) {
+      const int ic = clamp_i(i);
+      vel(i, j, 1) = 0.5 * (v_center(ic, j0) + v_center(ic, j1));
+    }
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -237,7 +266,15 @@ int main(int argc, char** argv) {
 
     gpism::FieldStag2D<double> vel(grid.local_mx(), grid.local_my(),
                                    grid.ghost_width());
-    vel.fill(0.0);
+    if (fields.has_ssa_velocity) {
+      init_face_velocity_from_center(grid, fields.u_ssa, fields.v_ssa, vel);
+      log_rank0(context, "Initialized SSA velocity guess from input u_ssa/v_ssa.");
+    } else if (fields.has_velocity) {
+      init_face_velocity_from_center(grid, fields.uvel, fields.vvel, vel);
+      log_rank0(context, "Initialized velocity guess from input uvel/vvel.");
+    } else {
+      vel.fill(0.0);
+    }
 
     gpism::FieldStag2D<double> flux(grid.local_mx(), grid.local_my(),
                                     grid.ghost_width());
