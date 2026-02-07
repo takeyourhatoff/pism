@@ -12,11 +12,13 @@ void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                 int stride_u, int stride_v, int stride_nuH_u,
                                 int stride_nuH_v, const double* thk,
                                 const double* u, const double* v, double* nuH_u,
-                                double* nuH_v, const double* enthalpy, int nz,
-                                int enthalpy_gw, int enthalpy_stride,
-                                double enthalpy_gamma, double enthalpy_ref,
-                                double B, double n_eff, double eps0,
-                                double inv_dx, double inv_dy);
+                                double* nuH_v, double nuH_regularization,
+                                double strength_extension_nu,
+                                double strength_extension_min_thickness,
+                                const double* enthalpy, int nz, int enthalpy_gw,
+                                int enthalpy_stride, double enthalpy_gamma,
+                                double enthalpy_ref, double B, double n_eff,
+                                double eps0, double inv_dx, double inv_dy);
 }  // namespace gpism
 #endif
 
@@ -40,6 +42,9 @@ ViscosityModel::ViscosityModel(double A, double n, double eps0,
 void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
                                  const FieldStag2D<double>& vel,
                                  FieldStag2D<double>& nuH,
+                                 double nuH_regularization,
+                                 double strength_extension_nu,
+                                 double strength_extension_min_thickness,
                                  const Field3D<double>* enthalpy,
                                  double enthalpy_gamma,
                                  double enthalpy_ref) const {
@@ -64,18 +69,16 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
     const int nz = use_temp ? enthalpy->local_mz() : 0;
     const int enthalpy_gw = use_temp ? enthalpy->ghost_width() : 0;
     const int enthalpy_stride = use_temp ? enthalpy->stride() : 0;
-    viscosity_compute_nuH_cuda(mx, my, thk.ghost_width(), thk.stride(),
-                               vel.component(0).stride(),
-                               vel.component(1).stride(),
-                               nuH.component(0).stride(),
-                               nuH.component(1).stride(), thk.device_data(),
-                               vel.component(0).device_data(),
-                               vel.component(1).device_data(),
-                               nuH.component(0).device_data(),
-                               nuH.component(1).device_data(), enthalpy_ptr,
-                               nz, enthalpy_gw, enthalpy_stride,
-                               enthalpy_gamma, enthalpy_ref, B, n_eff, eps0_,
-                               inv_dx, inv_dy);
+    viscosity_compute_nuH_cuda(
+        mx, my, thk.ghost_width(), thk.stride(), vel.component(0).stride(),
+        vel.component(1).stride(), nuH.component(0).stride(),
+        nuH.component(1).stride(), thk.device_data(),
+        vel.component(0).device_data(), vel.component(1).device_data(),
+        nuH.component(0).device_data(), nuH.component(1).device_data(),
+        nuH_regularization, strength_extension_nu,
+        strength_extension_min_thickness, enthalpy_ptr, nz, enthalpy_gw,
+        enthalpy_stride, enthalpy_gamma, enthalpy_ref, B, n_eff, eps0_, inv_dx,
+        inv_dy);
     return;
   }
 #endif
@@ -132,8 +135,11 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
       const double eps_xx = du_dx;
       const double eps_yy = dv_dy;
       const double eps_xy = 0.5 * (du_dy + dv_dx);
-      const double eps2 =
-          0.5 * (eps_xx * eps_xx + eps_yy * eps_yy) + eps_xy * eps_xy;
+      // Second invariant of the strain rate tensor in 2D SSA:
+      // eps_II^2 = eps_xx^2 + eps_yy^2 + eps_xx*eps_yy + eps_xy^2
+      const double eps2 = std::max(
+          0.0, eps_xx * eps_xx + eps_yy * eps_yy + eps_xx * eps_yy +
+                   eps_xy * eps_xy);
       const double eps_e = std::sqrt(eps2 + eps0_ * eps0_);
 
       double nu = 0.5 * B * std::pow(eps_e, (1.0 / n_eff) - 1.0);
@@ -146,6 +152,10 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
     }
   }
 
+  const double nu_reg = std::max(0.0, nuH_regularization);
+  const double nu_ext = strength_extension_nu;
+  const double H_ext_min = std::max(0.0, strength_extension_min_thickness);
+
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       const int il = (i == 0) ? i : i - 1;
@@ -155,13 +165,25 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
       const double nu_right = nu_center[idx(i, j)];
       const double H_left = thk(il, j);
       const double H_right = thk(i, j);
-      nuH(i, j, 0) = 0.5 * (nu_left + nu_right) * 0.5 * (H_left + H_right);
+      double H_face = 0.5 * (H_left + H_right);
+      double nu_face = 0.5 * (nu_left + nu_right);
+      if (nu_ext > 0.0 && H_face < H_ext_min) {
+        H_face = std::max(H_face, H_ext_min);
+        nu_face = nu_ext;
+      }
+      nuH(i, j, 0) = nu_face * H_face + nu_reg;
 
       const double nu_down = nu_center[idx(i, jd)];
       const double nu_up = nu_center[idx(i, j)];
       const double H_down = thk(i, jd);
       const double H_up = thk(i, j);
-      nuH(i, j, 1) = 0.5 * (nu_down + nu_up) * 0.5 * (H_down + H_up);
+      H_face = 0.5 * (H_down + H_up);
+      nu_face = 0.5 * (nu_down + nu_up);
+      if (nu_ext > 0.0 && H_face < H_ext_min) {
+        H_face = std::max(H_face, H_ext_min);
+        nu_face = nu_ext;
+      }
+      nuH(i, j, 1) = nu_face * H_face + nu_reg;
     }
   }
 }

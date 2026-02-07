@@ -13,6 +13,9 @@ public:
 
   void compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
                    const FieldStag2D<double>& vel, FieldStag2D<double>& nuH,
+                   double nuH_regularization = 0.0,
+                   double strength_extension_nu = 0.0,
+                   double strength_extension_min_thickness = 0.0,
                    const Field3D<double>* enthalpy = nullptr,
                    double enthalpy_gamma = 0.0,
                    double enthalpy_ref = 0.0) const;

@@ -65,6 +65,7 @@ SolveStats run_case(int mx, int my) {
   cell_type.fill(gpism::GroundedIce);
   gpism::FieldStag2D<double> beta(mx, my, gw);
   gpism::BasalResistanceParams basal_params;
+  basal_params.plastic_regularization = 100.0;
   ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
                          basal_params);
 

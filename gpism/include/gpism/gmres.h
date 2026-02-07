@@ -32,6 +32,7 @@ struct GMRESOptions {
   int restart = 30;
   int max_iter = 200;
   double tol = 1e-8;
+  bool tol_relative = false;
   bool verbose = false;
   bool precond_diagnostic = false;
   const Context* context = nullptr;

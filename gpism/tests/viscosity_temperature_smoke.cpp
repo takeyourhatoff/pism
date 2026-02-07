@@ -28,7 +28,8 @@ int main() {
 
   gpism::set_device_enabled(false);
   viscosity.compute_nuH(grid, thk, vel, nuH_base);
-  viscosity.compute_nuH(grid, thk, vel, nuH_temp, &enthalpy, gamma, ref);
+  viscosity.compute_nuH(grid, thk, vel, nuH_temp, 0.0, 0.0, 0.0, &enthalpy,
+                        gamma, ref);
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
@@ -57,8 +58,8 @@ int main() {
   gpism::sync_host_to_device(enthalpy_gpu);
   gpism::sync_host_to_device(nuH_gpu);
 
-  viscosity.compute_nuH(grid, thk_gpu, vel_gpu, nuH_gpu, &enthalpy_gpu, gamma,
-                        ref);
+  viscosity.compute_nuH(grid, thk_gpu, vel_gpu, nuH_gpu, 0.0, 0.0, 0.0,
+                        &enthalpy_gpu, gamma, ref);
   gpism::sync_device_to_host(nuH_gpu);
 
   for (int j = 0; j < my; ++j) {

@@ -49,6 +49,14 @@ public:
                     int j_start, int j_end,
                     const SSABoundaryCondition* bc = nullptr) const;
 
+  // Guard against degenerate rows (e.g., fully ice-free with zero drag),
+  // which can lead to an operator diagonal of ~0 and break solvers.
+  void replace_zero_diagonal_entries(const Grid2D& grid,
+                                     const FieldStag2D<double>& nuH,
+                                     FieldStag2D<double>& beta,
+                                     const SSABoundaryCondition* bc = nullptr,
+                                     double beta_ice_free_bedrock = 0.0) const;
+
 private:
   double rho_;
   double g_;

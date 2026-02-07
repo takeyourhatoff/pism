@@ -91,6 +91,8 @@ if(GPISM_ENABLE_CLANG_TIDY)
   endif()
 endif()
 
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated/gpism)
+
 configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/include/gpism/version.h.in
   ${CMAKE_CURRENT_BINARY_DIR}/generated/gpism/version.h

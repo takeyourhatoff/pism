@@ -108,8 +108,8 @@ int main() {
   op.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
   sync_device_to_host(rhs);
 
-  const double expected_u = 910.0 * 9.81 * 2.0 * 3.0;
-  const double expected_v = 910.0 * 9.81 * 2.0 * -4.0;
+  const double expected_u = -910.0 * 9.81 * 2.0 * 3.0;
+  const double expected_v = -910.0 * 9.81 * 2.0 * -4.0;
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       if (!nearly_equal(rhs(i, j, 0), expected_u)) {

@@ -4,11 +4,11 @@
 
 #include "gpism/field_stag2d.h"
 #include "gpism/grid2d.h"
+#include "gpism/ssa_operator.h"
 
 namespace gpism {
 
 class Context;
-struct SSABoundaryCondition;
 
 enum class MGSmoother { Jacobi, Chebyshev };
 
@@ -23,6 +23,8 @@ struct MGLevel {
   FieldStag2D<double> diag;
   FieldStag2D<double> Ax;
   FieldStag2D<double> corr;
+  FieldStag2D<int> bc_mask;
+  FieldStag2D<double> bc_values;
 
   explicit MGLevel(const Grid2D& grid_in)
       : grid(grid_in),
@@ -34,7 +36,10 @@ struct MGLevel {
         beta(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         diag(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
         Ax(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
-        corr(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()) {}
+        corr(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        bc_mask(grid_in.local_mx(), grid_in.local_my(), grid_in.ghost_width()),
+        bc_values(grid_in.local_mx(), grid_in.local_my(),
+                  grid_in.ghost_width()) {}
 };
 
 struct ChebyBounds {
@@ -79,7 +84,8 @@ void chebyshev_jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
 std::vector<ChebyBounds> estimate_cheby_bounds(
     MultigridHierarchy& mg, double lambda_min, double lambda_max,
     bool estimate, int estimate_iters, double min_factor, double max_factor,
-    const SSABoundaryCondition* bc = nullptr, const Context* context = nullptr);
+    const SSABoundaryCondition* bc = nullptr, const Context* context = nullptr,
+    const std::vector<SSABoundaryCondition>* bc_levels = nullptr);
 void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              int coarse_iters, double omega,
              MGSmoother smoother = MGSmoother::Jacobi,
@@ -89,6 +95,8 @@ void v_cycle(MultigridHierarchy& mg, int pre_iters, int post_iters,
              double cheby_estimate_max_factor = 1.1,
              const SSABoundaryCondition* bc = nullptr,
              const Context* context = nullptr,
-             const std::vector<ChebyBounds>* cheby_bounds = nullptr);
+             const std::vector<ChebyBounds>* cheby_bounds = nullptr,
+             const std::vector<SSABoundaryCondition>* bc_levels = nullptr,
+             bool diagnostic = false);
 
 }  // namespace gpism

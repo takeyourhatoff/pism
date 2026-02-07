@@ -566,6 +566,53 @@ void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
   }
 }
 
+void compute_speed_scale(const Grid2D& grid, const Field2D<double>& u_center,
+                         const Field2D<double>& v_center, double max_speed,
+                         Field2D<double>& speed_scale) {
+  if (max_speed <= 0.0) {
+    speed_scale.fill(1.0);
+    return;
+  }
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      const double u = u_center(i, j);
+      const double v = v_center(i, j);
+      const double s = std::sqrt(u * u + v * v);
+      speed_scale(i, j) = (s > max_speed && s > 0.0) ? (max_speed / s) : 1.0;
+    }
+  }
+}
+
+void apply_speed_scale(const Grid2D& grid, const Field2D<double>& speed_scale,
+                       FieldStag2D<double>& vel) {
+#if GPISM_HAVE_CUDA
+  const bool have_device = vel.component(0).has_device_data() &&
+                           vel.component(1).has_device_data();
+  if (have_device) {
+    sync_device_to_host(vel);
+  }
+#endif
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      const int ie = (i == mx - 1) ? i : i + 1;
+      const int jn = (j == my - 1) ? j : j + 1;
+      const double su = std::min(speed_scale(i, j), speed_scale(ie, j));
+      const double sv = std::min(speed_scale(i, j), speed_scale(i, jn));
+      vel(i, j, 0) *= su;
+      vel(i, j, 1) *= sv;
+    }
+  }
+#if GPISM_HAVE_CUDA
+  if (have_device) {
+    sync_host_to_device(vel);
+  }
+#endif
+}
+
 }  // namespace
 
 SSASolver::SSASolver(const Grid2D& grid, double rho, double g, double u_threshold,

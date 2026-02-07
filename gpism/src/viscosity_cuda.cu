@@ -74,8 +74,10 @@ __global__ void nu_center_kernel(int mx, int my, int stride_center,
   const double eps_xx = du_dx;
   const double eps_yy = dv_dy;
   const double eps_xy = 0.5 * (du_dy + dv_dx);
-  const double eps2 =
-      0.5 * (eps_xx * eps_xx + eps_yy * eps_yy) + eps_xy * eps_xy;
+  // Second invariant of the strain rate tensor in 2D SSA:
+  // eps_II^2 = eps_xx^2 + eps_yy^2 + eps_xx*eps_yy + eps_xy^2
+  const double eps2 = fmax(0.0, eps_xx * eps_xx + eps_yy * eps_yy +
+                                    eps_xx * eps_yy + eps_xy * eps_xy);
   const double eps_e = sqrt(eps2 + eps0 * eps0);
 
   double nu = 0.5 * B * pow(eps_e, (1.0 / n_eff) - 1.0);
@@ -105,7 +107,10 @@ __global__ void column_avg_kernel(int mx, int my, int gw, int nz, int stride,
 __global__ void nuH_kernel(int mx, int my, int gw, int stride_thk,
                            int stride_center, int stride_u, int stride_v,
                            const double* thk, const double* nu_center,
-                           double* nuH_u, double* nuH_v) {
+                           double* nuH_u, double* nuH_v,
+                           double nuH_regularization,
+                           double strength_extension_nu,
+                           double strength_extension_min_thickness) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
@@ -114,19 +119,31 @@ __global__ void nuH_kernel(int mx, int my, int gw, int stride_thk,
   const int il = (i == 0) ? i : i - 1;
   const int jd = (j == 0) ? j : j - 1;
 
-  const double nu_left = nu_center[idx(il, j, stride_center)];
-  const double nu_right = nu_center[idx(i, j, stride_center)];
+  double nu_left = nu_center[idx(il, j, stride_center)];
+  double nu_right = nu_center[idx(i, j, stride_center)];
   const double H_left = thk[idx(il, j, gw, stride_thk)];
   const double H_right = thk[idx(i, j, gw, stride_thk)];
-  nuH_u[idx(i, j, gw, stride_u)] =
-      0.5 * (nu_left + nu_right) * 0.5 * (H_left + H_right);
+  double H_face = 0.5 * (H_left + H_right);
+  double nu_face = 0.5 * (nu_left + nu_right);
+  if (strength_extension_nu > 0.0 &&
+      H_face < strength_extension_min_thickness) {
+    H_face = fmax(H_face, strength_extension_min_thickness);
+    nu_face = strength_extension_nu;
+  }
+  nuH_u[idx(i, j, gw, stride_u)] = nu_face * H_face + nuH_regularization;
 
   const double nu_down = nu_center[idx(i, jd, stride_center)];
   const double nu_up = nu_center[idx(i, j, stride_center)];
   const double H_down = thk[idx(i, jd, gw, stride_thk)];
   const double H_up = thk[idx(i, j, gw, stride_thk)];
-  nuH_v[idx(i, j, gw, stride_v)] =
-      0.5 * (nu_down + nu_up) * 0.5 * (H_down + H_up);
+  H_face = 0.5 * (H_down + H_up);
+  nu_face = 0.5 * (nu_down + nu_up);
+  if (strength_extension_nu > 0.0 &&
+      H_face < strength_extension_min_thickness) {
+    H_face = fmax(H_face, strength_extension_min_thickness);
+    nu_face = strength_extension_nu;
+  }
+  nuH_v[idx(i, j, gw, stride_v)] = nu_face * H_face + nuH_regularization;
 }
 
 }  // namespace
@@ -135,11 +152,13 @@ void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                 int stride_u, int stride_v, int stride_nuH_u,
                                 int stride_nuH_v, const double* thk,
                                 const double* u, const double* v, double* nuH_u,
-                                double* nuH_v, const double* enthalpy, int nz,
-                                int enthalpy_gw, int enthalpy_stride,
-                                double enthalpy_gamma, double enthalpy_ref,
-                                double B, double n_eff, double eps0,
-                                double inv_dx, double inv_dy) {
+                                double* nuH_v, double nuH_regularization,
+                                double strength_extension_nu,
+                                double strength_extension_min_thickness,
+                                const double* enthalpy, int nz, int enthalpy_gw,
+                                int enthalpy_stride, double enthalpy_gamma,
+                                double enthalpy_ref, double B, double n_eff,
+                                double eps0, double inv_dx, double inv_dy) {
   CudaEventTimer timer("viscosity_nuH");
   const std::size_t count = static_cast<std::size_t>(mx) * my;
   double* u_center = nullptr;
@@ -165,7 +184,9 @@ void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                     nu_center, enthalpy_gamma, enthalpy_ref, B,
                                     n_eff, eps0, inv_dx, inv_dy);
   nuH_kernel<<<grid, block>>>(mx, my, gw, stride_thk, mx, stride_nuH_u,
-                              stride_nuH_v, thk, nu_center, nuH_u, nuH_v);
+                              stride_nuH_v, thk, nu_center, nuH_u, nuH_v,
+                              nuH_regularization, strength_extension_nu,
+                              strength_extension_min_thickness);
 
   if (temp_avg) {
     cudaFree(temp_avg);
