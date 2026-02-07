@@ -573,6 +573,16 @@ void compute_speed_scale(const Grid2D& grid, const Field2D<double>& u_center,
     speed_scale.fill(1.0);
     return;
   }
+#if GPISM_HAVE_CUDA
+  // On the CUDA path, u_center/v_center are often computed on the device.
+  // Make sure we use the up-to-date values when computing the scale factor.
+  if (u_center.has_device_data()) {
+    sync_device_to_host(const_cast<Field2D<double>&>(u_center));
+  }
+  if (v_center.has_device_data()) {
+    sync_device_to_host(const_cast<Field2D<double>&>(v_center));
+  }
+#endif
   const int mx = grid.local_mx();
   const int my = grid.local_my();
   for (int j = 0; j < my; ++j) {
