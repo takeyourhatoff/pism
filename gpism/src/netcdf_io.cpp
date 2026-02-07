@@ -41,6 +41,55 @@ void scale_field_2d(Field2D<double>& field, double factor) {
   }
 }
 
+std::string to_lower(std::string s) {
+  for (char& c : s) {
+    if (c >= 'A' && c <= 'Z') {
+      c = static_cast<char>(c - 'A' + 'a');
+    }
+  }
+  return s;
+}
+
+bool read_units_attr(int ncid, const char* var_name, std::string* units_out) {
+  units_out->clear();
+  int varid = -1;
+  if (nc_inq_varid(ncid, var_name, &varid) != NC_NOERR) {
+    return false;
+  }
+  std::size_t len = 0;
+  if (nc_inq_attlen(ncid, varid, "units", &len) != NC_NOERR || len == 0) {
+    return false;
+  }
+  std::string buf(len, '\0');
+  if (nc_get_att_text(ncid, varid, "units", buf.data()) != NC_NOERR) {
+    return false;
+  }
+  *units_out = buf;
+  return true;
+}
+
+bool velocity_units_are_per_year(int ncid, const char* var_name) {
+  // Prefer explicit units. If missing/unknown, keep the old behavior (assume
+  // "m/year") since gpism writes that convention by default.
+  std::string units;
+  if (!read_units_attr(ncid, var_name, &units)) {
+    return true;
+  }
+  const std::string u = to_lower(units);
+  // Common patterns: "m year^-1", "m/year", "m a-1".
+  if (u.find("year") != std::string::npos || u.find("/year") != std::string::npos ||
+      u.find("a-1") != std::string::npos || u.find("a^-1") != std::string::npos ||
+      u.find("yr") != std::string::npos) {
+    return true;
+  }
+  // Common PISM output: "m s^-1".
+  if (u.find("s-1") != std::string::npos || u.find("s^-1") != std::string::npos ||
+      u.find("second") != std::string::npos || u.find("/s") != std::string::npos) {
+    return false;
+  }
+  return true;
+}
+
 bool get_dim_len(int ncid, const char* name, std::size_t* len, int* dimid_out) {
   int dimid = -1;
   if (nc_inq_dimid(ncid, name, &dimid) != NC_NOERR) {
@@ -618,22 +667,34 @@ bool read_restart_impl(const std::string& path, int rank, int size, Grid2D& grid
   const double inv_seconds_per_year =
       (kSecondsPerYear > 0.0) ? (1.0 / kSecondsPerYear) : 1.0;
   if (has_u_bc) {
-    scale_field_2d(fields.u_bc, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "u_bc")) {
+      scale_field_2d(fields.u_bc, inv_seconds_per_year);
+    }
   }
   if (has_v_bc) {
-    scale_field_2d(fields.v_bc, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "v_bc")) {
+      scale_field_2d(fields.v_bc, inv_seconds_per_year);
+    }
   }
   if (has_uvel) {
-    scale_field_2d(fields.uvel, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "uvel")) {
+      scale_field_2d(fields.uvel, inv_seconds_per_year);
+    }
   }
   if (has_vvel) {
-    scale_field_2d(fields.vvel, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "vvel")) {
+      scale_field_2d(fields.vvel, inv_seconds_per_year);
+    }
   }
   if (has_u_ssa) {
-    scale_field_2d(fields.u_ssa, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "u_ssa")) {
+      scale_field_2d(fields.u_ssa, inv_seconds_per_year);
+    }
   }
   if (has_v_ssa) {
-    scale_field_2d(fields.v_ssa, inv_seconds_per_year);
+    if (velocity_units_are_per_year(ncid, "v_ssa")) {
+      scale_field_2d(fields.v_ssa, inv_seconds_per_year);
+    }
   }
 
   nc_close(ncid);

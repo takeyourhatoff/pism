@@ -595,6 +595,35 @@ void compute_speed_scale(const Grid2D& grid, const Field2D<double>& u_center,
   }
 }
 
+double max_center_speed(const Grid2D& grid, const Field2D<double>& u_center,
+                        const Field2D<double>& v_center,
+                        const Context* context) {
+#if GPISM_HAVE_CUDA
+  // u_center/v_center are often device-produced; ensure host view is current
+  // before scanning.
+  if (u_center.has_device_data()) {
+    sync_device_to_host(const_cast<Field2D<double>&>(u_center));
+  }
+  if (v_center.has_device_data()) {
+    sync_device_to_host(const_cast<Field2D<double>&>(v_center));
+  }
+#endif
+  double local_max = 0.0;
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      const double u = u_center(i, j);
+      const double v = v_center(i, j);
+      const double s = std::sqrt(u * u + v * v);
+      if (s > local_max) {
+        local_max = s;
+      }
+    }
+  }
+  return global_max(context, local_max);
+}
+
 void apply_speed_scale(const Grid2D& grid, const Field2D<double>& speed_scale,
                        FieldStag2D<double>& vel) {
 #if GPISM_HAVE_CUDA
@@ -901,6 +930,21 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       compute_speed_scale(grid_, u_center, v_center, options.max_speed,
                           speed_scale);
       apply_speed_scale(grid_, speed_scale, vel);
+
+      // The staggered representation + boundary clamping can allow small
+      // violations if scaling is imperfect. Enforce a strict cap by checking
+      // the resulting cell-center speed and applying a global rescale if needed.
+      compute_cell_center_velocity(grid_, vel, u_center, v_center);
+      const double smax = max_center_speed(grid_, u_center, v_center, context);
+      if (smax > options.max_speed * (1.0 + 1e-12) && smax > 0.0) {
+        const double factor = options.max_speed / smax;
+        scal(factor, vel);
+        if (options.diagnostic && is_rank0(context)) {
+          std::cout << "SSA: max_speed fallback rescale applied (smax=" << smax
+                    << " max_speed=" << options.max_speed
+                    << " factor=" << factor << ")\n";
+        }
+      }
     }
 
     double nuH_diff_local = 0.0;
