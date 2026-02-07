@@ -231,7 +231,7 @@ while true; do
       -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
       -grid.recompute_longitude_and_latitude false \
       -extra_file "${OUTDIR}/pism_60_extra.nc" \
-      -extra_vars usurf,u_ssa,v_ssa -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
+      -extra_vars usurf,uvel,vvel -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
   wall=$(cat "${PISM_WALL}")
   echo "pism wall ${wall}s (years=${YEARS_ACTUAL})"
   if python3 - <<PY
@@ -337,7 +337,7 @@ with nc.Dataset(gp) as dg, nc.Dataset(pextra) as dp:
         else:
             print(f"usurf: shape mismatch {g.shape} vs {p.shape}")
 
-    for name in ("u_ssa", "v_ssa"):
+    for name in ("uvel", "vvel"):
         if name in dg.variables and name in dp.variables:
             g = last2d(dg.variables[name])
             p = last2d(dp.variables[name])
