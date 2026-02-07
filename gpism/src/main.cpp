@@ -431,6 +431,54 @@ int main(int argc, char** argv) {
 
     gpism::GeometryDiagnostics geometry;
 
+    // If the input file does not provide a velocity field, use a simple heuristic
+    // initial guess aligned with the driving stress direction. This helps Picard
+    // iterations avoid locking into a near-zero-velocity solution when basal drag
+    // is (regularized) plastic.
+    if (!fields.has_ssa_velocity && !fields.has_velocity) {
+      const double guess_speed = std::max(0.0, config.get_double("ssa.initial_guess_speed"));
+      if (guess_speed > 0.0) {
+        gpism::Field2D<int> cell_type_guess(grid.local_mx(), grid.local_my(),
+                                            grid.ghost_width());
+        gpism::Field2D<double> usurf_guess(grid.local_mx(), grid.local_my(),
+                                           grid.ghost_width());
+        gpism::Field2D<double> dhdx_guess(grid.local_mx(), grid.local_my(),
+                                          grid.ghost_width());
+        gpism::Field2D<double> dhdy_guess(grid.local_mx(), grid.local_my(),
+                                          grid.ghost_width());
+        gpism::Field2D<double> u_guess(grid.local_mx(), grid.local_my(),
+                                       grid.ghost_width());
+        gpism::Field2D<double> v_guess(grid.local_mx(), grid.local_my(),
+                                       grid.ghost_width());
+
+        gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level, rho_ice,
+                                 rho_water, cell_type_guess);
+        gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
+                                       cell_type_guess, sea_level, rho_ice,
+                                       rho_water, usurf_guess);
+        gpism::compute_surface_slopes_pism(
+            grid, usurf_guess, cell_type_guess, dhdx_guess, dhdy_guess,
+            ssa_options.surface_gradient_inward, ssa_options.surface_slope_uphill,
+            ssa_options.use_cfbc);
+
+        const double scale = -rho_ice * gravity;
+        const int mx = grid.local_mx();
+        const int my = grid.local_my();
+        for (int j = 0; j < my; ++j) {
+          for (int i = 0; i < mx; ++i) {
+            const double tauc = std::max(1.0, fields.tauc(i, j));
+            const double tau_x = scale * fields.thk(i, j) * dhdx_guess(i, j);
+            const double tau_y = scale * fields.thk(i, j) * dhdy_guess(i, j);
+            u_guess(i, j) = guess_speed * (tau_x / tauc);
+            v_guess(i, j) = guess_speed * (tau_y / tauc);
+          }
+        }
+
+        init_face_velocity_from_center(grid, u_guess, v_guess, vel);
+        log_rank0(context, "Initialized velocity guess from driving stress.");
+      }
+    }
+
     gpism::sync_host_to_device(fields.thk);
     gpism::sync_host_to_device(fields.topg);
     gpism::sync_host_to_device(fields.tauc);

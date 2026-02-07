@@ -73,6 +73,7 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.vel_relax"] = "1.0";
   values_["ssa.nuH_relax"] = "1.0";
   values_["ssa.max_speed"] = "0.0";
+  values_["ssa.initial_guess_speed"] = "0.01";
   values_["ssa.diagnostic"] = "0";
   values_["ssa.gmres_verbose"] = "0";
   values_["ssa.force_host_convergence"] = "0";
