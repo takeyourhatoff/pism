@@ -291,6 +291,9 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    ssa_options.gmres_verbose = config.get_bool("ssa.gmres_verbose");
+    ssa_options.diagnostic = config.get_bool("ssa.diagnostic");
+    ssa_options.force_host_convergence = config.get_bool("ssa.force_host_convergence");
     // PISM's stress_balance.ssa.epsilon has units Pa*s*m (regularization added to nu*H).
     // Convert to Pa*year*m to match gpism's year-based time unit.
     ssa_options.nuH_regularization =

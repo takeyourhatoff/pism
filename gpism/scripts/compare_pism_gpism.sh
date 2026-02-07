@@ -22,6 +22,8 @@ GPISM_DT="${GPISM_DT:-60}"
 GPISM_DEVICE_ENABLED="${GPISM_DEVICE_ENABLED:-1}"
 GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-0}"
 GPISM_ENFORCE_ICE_FREE_BC="${GPISM_ENFORCE_ICE_FREE_BC:-0}"
+GPISM_SSA_DIAGNOSTIC="${GPISM_SSA_DIAGNOSTIC:-0}"
+GPISM_GMRES_VERBOSE="${GPISM_GMRES_VERBOSE:-0}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
 COMPARE_STRICT="${COMPARE_STRICT:-0}"
 COMPARE_TOL_RMS="${COMPARE_TOL_RMS:-0.02}"
@@ -180,6 +182,8 @@ $(cat "${GPISM_PISM_CFG}")
 device.enabled=${GPISM_DEVICE_ENABLED}
 ssa.mg.enabled=${GPISM_MG_ENABLED}
 ssa.enforce_ice_free_bc=${GPISM_ENFORCE_ICE_FREE_BC}
+ssa.diagnostic=${GPISM_SSA_DIAGNOSTIC}
+ssa.gmres_verbose=${GPISM_GMRES_VERBOSE}
 thermo.enabled=0
 thickness.evolve=0
 forcing.smb_constant=0
