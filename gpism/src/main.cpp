@@ -239,24 +239,29 @@ int main(int argc, char** argv) {
     gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(),
                                   grid.ghost_width());
 
-    const double rho_ice = config.get_double("constants.ice.density");
-    const double rho_water = config.get_double("constants.sea_water.density");
-    const double gravity = config.get_double("constants.standard_gravity");
-    const double sea_level = config.get_double("constants.sea_level");
-    const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
-    const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
-    const double softness =
-        config.get_double("flow_law.isothermal_Glen.ice_softness");
-    const double enhancement =
-        config.get_double("stress_balance.ssa.enhancement_factor");
-    const double schoof_vel =
-        config.get_double("flow_law.Schoof_regularizing_velocity");
-    const double schoof_length_km =
-        config.get_double("flow_law.Schoof_regularizing_length");
-    const double schoof_length = schoof_length_km * 1000.0;
-    const double eps0 =
-        (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
-    const double A = softness;
+	    const double rho_ice = config.get_double("constants.ice.density");
+	    const double rho_water = config.get_double("constants.sea_water.density");
+	    const double gravity = config.get_double("constants.standard_gravity");
+	    const double sea_level = config.get_double("constants.sea_level");
+	    const double seconds_per_year =
+	        config.get_double("constants.seconds_per_year");
+	    const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
+	    const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
+	    const double softness =
+	        config.get_double("flow_law.isothermal_Glen.ice_softness");
+	    const double enhancement =
+	        config.get_double("stress_balance.ssa.enhancement_factor");
+	    // PISM config units: "meter / year". Convert to SI for SSA solve.
+	    const double schoof_vel_year =
+	        config.get_double("flow_law.Schoof_regularizing_velocity");
+	    const double schoof_length_km =
+	        config.get_double("flow_law.Schoof_regularizing_length");
+	    const double schoof_length = schoof_length_km * 1000.0;
+	    const double schoof_vel =
+	        schoof_vel_year / std::max(1.0, seconds_per_year);  // m/s
+	    const double eps0 =
+	        (schoof_length > 0.0) ? (schoof_vel / schoof_length) : 0.0;
+	    const double A = softness;
 
     if (flow_law != "isothermal_glen" && context.rank() == 0) {
       std::cout << "Warning: SSA flow law '" << flow_law
