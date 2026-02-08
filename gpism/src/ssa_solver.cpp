@@ -958,6 +958,9 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                  gmres_result.residual > options.fail_fast_residual_max) {
         ok = false;
         reason = "GMRES residual exceeds ssa.fail_fast_residual_max";
+      } else if (options.fail_fast_require_converged && !gmres_result.converged) {
+        ok = false;
+        reason = "GMRES did not converge";
       } else if (!field_stats(vel).all_finite) {
         ok = false;
         reason = "SSA velocity contains non-finite values";

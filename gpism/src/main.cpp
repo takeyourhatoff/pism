@@ -367,6 +367,8 @@ int main(int argc, char** argv) {
     ssa_options.use_bc = fields.has_vel_bc;
     ssa_options.enforce_ice_free_bc = config.get_bool("ssa.enforce_ice_free_bc");
     ssa_options.fail_fast = config.get_bool("ssa.fail_fast");
+    ssa_options.fail_fast_require_converged =
+        config.get_bool("ssa.fail_fast_require_converged");
     ssa_options.fail_fast_residual_max = config.get_double("ssa.fail_fast_residual_max");
     ssa_options.fail_fast_dump_prefix = config.get_string("ssa.fail_fast_dump_prefix");
     ssa_options.config_override_path = options.config_override_path;

@@ -54,6 +54,7 @@ struct SSASolverOptions {
   bool diagnostic = false;
   bool force_host_convergence = false;
   bool fail_fast = true;
+  bool fail_fast_require_converged = false;
   double fail_fast_residual_max = 0.0;
   std::string fail_fast_dump_prefix;
   std::string config_override_path;

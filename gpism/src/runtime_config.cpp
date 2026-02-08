@@ -74,6 +74,7 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.nuH_relax"] = "1.0";
   values_["ssa.max_speed"] = "0.0";
   values_["ssa.fail_fast"] = "1";
+  values_["ssa.fail_fast_require_converged"] = "0";
   values_["ssa.fail_fast_residual_max"] = "0.0";
   values_["ssa.fail_fast_dump_prefix"] = "";
   values_["ssa.initial_guess_speed"] = "0.01";
