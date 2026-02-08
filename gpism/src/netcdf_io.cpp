@@ -1188,13 +1188,17 @@ bool write_ssa_debug_bundle_impl(const std::string& path, int rank, int size,
   // NetCDF writers use host buffers; sync device-produced fields when present.
 #if GPISM_HAVE_CUDA
   auto sync2d = [](const auto* field_ptr) {
-    auto& field = *const_cast<std::remove_const_t<decltype(*field_ptr)>*>(field_ptr);
+    using FieldT =
+        std::remove_const_t<std::remove_reference_t<decltype(*field_ptr)>>;
+    auto& field = *const_cast<FieldT*>(field_ptr);
     if (field.has_device_data()) {
       sync_device_to_host(field);
     }
   };
   auto sync_stag = [](const auto* field_ptr) {
-    auto& field = *const_cast<std::remove_const_t<decltype(*field_ptr)>*>(field_ptr);
+    using FieldT =
+        std::remove_const_t<std::remove_reference_t<decltype(*field_ptr)>>;
+    auto& field = *const_cast<FieldT*>(field_ptr);
     if (field.component(0).has_device_data() || field.component(1).has_device_data()) {
       sync_device_to_host(field);
     }
