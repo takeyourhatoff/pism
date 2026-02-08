@@ -158,13 +158,15 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
-      const int il = (i == 0) ? i : i - 1;
-      const int jd = (j == 0) ? j : j - 1;
+      const int ir = (i == mx - 1) ? i : i + 1;
+      const int ju = (j == my - 1) ? j : j + 1;
 
-      const double nu_left = nu_center[idx(il, j)];
-      const double nu_right = nu_center[idx(i, j)];
-      const double H_left = thk(il, j);
-      const double H_right = thk(i, j);
+      // nuH(i,j,0) is located on the u-staggered grid interface between
+      // cell centers (i,j) and (i+1,j).
+      const double nu_left = nu_center[idx(i, j)];
+      const double nu_right = nu_center[idx(ir, j)];
+      const double H_left = thk(i, j);
+      const double H_right = thk(ir, j);
       double H_face = 0.5 * (H_left + H_right);
       double nu_face = 0.5 * (nu_left + nu_right);
       if (nu_ext > 0.0 && H_face < H_ext_min) {
@@ -173,10 +175,12 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
       }
       nuH(i, j, 0) = nu_face * H_face + nu_reg;
 
-      const double nu_down = nu_center[idx(i, jd)];
-      const double nu_up = nu_center[idx(i, j)];
-      const double H_down = thk(i, jd);
-      const double H_up = thk(i, j);
+      // nuH(i,j,1) is located on the v-staggered grid interface between
+      // cell centers (i,j) and (i,j+1).
+      const double nu_down = nu_center[idx(i, j)];
+      const double nu_up = nu_center[idx(i, ju)];
+      const double H_down = thk(i, j);
+      const double H_up = thk(i, ju);
       H_face = 0.5 * (H_down + H_up);
       nu_face = 0.5 * (nu_down + nu_up);
       if (nu_ext > 0.0 && H_face < H_ext_min) {

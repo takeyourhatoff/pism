@@ -116,13 +116,14 @@ __global__ void nuH_kernel(int mx, int my, int gw, int stride_thk,
   if (i >= mx || j >= my) {
     return;
   }
-  const int il = (i == 0) ? i : i - 1;
-  const int jd = (j == 0) ? j : j - 1;
+  const int ir = (i == mx - 1) ? i : i + 1;
+  const int ju = (j == my - 1) ? j : j + 1;
 
-  double nu_left = nu_center[idx(il, j, stride_center)];
-  double nu_right = nu_center[idx(i, j, stride_center)];
-  const double H_left = thk[idx(il, j, gw, stride_thk)];
-  const double H_right = thk[idx(i, j, gw, stride_thk)];
+  // nuH_u(i,j) is on the u-staggered interface between (i,j) and (i+1,j).
+  double nu_left = nu_center[idx(i, j, stride_center)];
+  double nu_right = nu_center[idx(ir, j, stride_center)];
+  const double H_left = thk[idx(i, j, gw, stride_thk)];
+  const double H_right = thk[idx(ir, j, gw, stride_thk)];
   double H_face = 0.5 * (H_left + H_right);
   double nu_face = 0.5 * (nu_left + nu_right);
   if (strength_extension_nu > 0.0 &&
@@ -132,10 +133,11 @@ __global__ void nuH_kernel(int mx, int my, int gw, int stride_thk,
   }
   nuH_u[idx(i, j, gw, stride_u)] = nu_face * H_face + nuH_regularization;
 
-  const double nu_down = nu_center[idx(i, jd, stride_center)];
-  const double nu_up = nu_center[idx(i, j, stride_center)];
-  const double H_down = thk[idx(i, jd, gw, stride_thk)];
-  const double H_up = thk[idx(i, j, gw, stride_thk)];
+  // nuH_v(i,j) is on the v-staggered interface between (i,j) and (i,j+1).
+  const double nu_down = nu_center[idx(i, j, stride_center)];
+  const double nu_up = nu_center[idx(i, ju, stride_center)];
+  const double H_down = thk[idx(i, j, gw, stride_thk)];
+  const double H_up = thk[idx(i, ju, gw, stride_thk)];
   H_face = 0.5 * (H_down + H_up);
   nu_face = 0.5 * (nu_down + nu_up);
   if (strength_extension_nu > 0.0 &&
