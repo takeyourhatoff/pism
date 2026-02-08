@@ -33,6 +33,10 @@ struct GMRESOptions {
   int max_iter = 200;
   double tol = 1e-8;
   bool tol_relative = false;
+  // If true, scale the relative tolerance using max(||M^{-1}r0||, ||M^{-1}b||)
+  // instead of only ||M^{-1}r0||. This avoids over-tightening the solve when the
+  // initial guess is already close (||r0|| << ||b||), which can stall GMRES.
+  bool tol_relative_to_rhs = false;
   bool verbose = false;
   bool precond_diagnostic = false;
   const Context* context = nullptr;

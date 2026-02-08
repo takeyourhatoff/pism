@@ -937,6 +937,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     gmres_opts.max_iter = options.gmres_max_iter;
     gmres_opts.tol = options.gmres_tol;
     gmres_opts.tol_relative = options.gmres_tol_relative;
+    gmres_opts.tol_relative_to_rhs = options.gmres_tol_relative_to_rhs;
     gmres_opts.verbose = options.gmres_verbose;
     gmres_opts.precond_diagnostic =
         options.gmres_precond_diagnostic && (iter == 0);

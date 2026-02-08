@@ -327,6 +327,10 @@ int main(int argc, char** argv) {
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
     ssa_options.gmres_tol = config.get_double("ssa.gmres_tol");
+    if (config.has("ssa.gmres_tol_relative_to_rhs")) {
+      ssa_options.gmres_tol_relative_to_rhs =
+          config.get_bool("ssa.gmres_tol_relative_to_rhs");
+    }
     ssa_options.vel_relax = config.get_double("ssa.vel_relax");
     ssa_options.nuH_relax = config.get_double("ssa.nuH_relax");
     ssa_options.max_speed = config.get_double("ssa.max_speed");

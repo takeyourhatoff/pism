@@ -34,6 +34,7 @@ struct SSASolverOptions {
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;
   bool gmres_tol_relative = true;
+  bool gmres_tol_relative_to_rhs = false;
   bool gmres_verbose = false;
 
   bool use_mg_precond = false;

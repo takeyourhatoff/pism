@@ -215,6 +215,12 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   FieldStag2D<double>& z = workspace.z;
   FieldStag2D<double>& w = workspace.w;
 
+  double beta_rhs = 0.0;
+  if (options.tol_relative && options.tol_relative_to_rhs) {
+    M->apply(b, w);
+    beta_rhs = std::sqrt(global_sum(options.context, dot(w, w)));
+  }
+
   op.apply(x, Ax);
   copy(b, r);
   axpy(-1.0, Ax, r);
@@ -247,8 +253,10 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   }
 
   double beta = std::sqrt(global_sum(options.context, dot(z, z)));
-  const double tol_abs =
-      options.tol_relative ? (options.tol * beta) : options.tol;
+  double tol_abs = options.tol_relative ? (options.tol * beta) : options.tol;
+  if (options.tol_relative && options.tol_relative_to_rhs) {
+    tol_abs = options.tol * std::max(beta, beta_rhs);
+  }
   result.residual = beta;
   result.residuals.push_back(result.residual);
   if (beta <= tol_abs) {
