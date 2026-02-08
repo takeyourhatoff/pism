@@ -90,6 +90,11 @@ void RuntimeConfig::load_defaults() {
   values_["stress_balance.ssa.compute_surface_gradient_inward"] = "0";
   values_["stress_balance.ssa.fd.upstream_surface_slope_approximation"] = "1";
   values_["stress_balance.calving_front_stress_bc"] = "0";
+  // Strength extension parameters (PISM defaults). These control a "notional"
+  // constant viscosity used to keep SSA elliptic when ice is thin.
+  values_["stress_balance.ssa.strength_extension.constant_nu"] =
+      "9.48680701906572e14";
+  values_["stress_balance.ssa.strength_extension.min_thickness"] = "50.0";
   values_["flow_law.isothermal_Glen.ice_softness"] = "3.1689e-24";
   values_["flow_law.Schoof_regularizing_velocity"] = "1.0";
   values_["flow_law.Schoof_regularizing_length"] = "1000.0";

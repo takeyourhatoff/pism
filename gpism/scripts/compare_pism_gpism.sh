@@ -136,6 +136,12 @@ params = {
     "stress_balance.ssa.fd.upstream_surface_slope_approximation": get(
         "stress_balance.ssa.fd.upstream_surface_slope_approximation", "yes"
     ),
+    "stress_balance.ssa.strength_extension.constant_nu": get(
+        "stress_balance.ssa.strength_extension.constant_nu", 9.48680701906572e14
+    ),
+    "stress_balance.ssa.strength_extension.min_thickness": get(
+        "stress_balance.ssa.strength_extension.min_thickness", 50.0
+    ),
     "basal_resistance.pseudo_plastic.enabled": get(
         "basal_resistance.pseudo_plastic.enabled", "no"
     ),

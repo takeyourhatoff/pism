@@ -385,6 +385,15 @@ int main(int argc, char** argv) {
         config.get_bool("stress_balance.ssa.fd.upstream_surface_slope_approximation");
     ssa_options.use_cfbc =
         config.get_bool("stress_balance.calving_front_stress_bc");
+    // PISM's SSA strength extension (keeps SSA elliptic in thin-ice regions).
+    if (config.has("stress_balance.ssa.strength_extension.constant_nu")) {
+      ssa_options.strength_extension_nu =
+          config.get_double("stress_balance.ssa.strength_extension.constant_nu");
+    }
+    if (config.has("stress_balance.ssa.strength_extension.min_thickness")) {
+      ssa_options.strength_extension_min_thickness = config.get_double(
+          "stress_balance.ssa.strength_extension.min_thickness");
+    }
     ssa_options.context = &context;
 
     gpism::BasalResistanceParams basal_params;
