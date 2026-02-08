@@ -257,6 +257,20 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   if (options.tol_relative && options.tol_relative_to_rhs) {
     tol_abs = options.tol * std::max(beta, beta_rhs);
   }
+  if (options.verbose && is_rank0(options.context)) {
+    std::cout << "GMRES init: beta0=" << beta;
+    if (options.tol_relative_to_rhs) {
+      std::cout << " beta_rhs=" << beta_rhs;
+    }
+    std::cout << " tol=" << options.tol
+              << " tol_relative=" << (options.tol_relative ? "yes" : "no")
+              << " tol_relative_to_rhs="
+              << (options.tol_relative_to_rhs ? "yes" : "no")
+              << " tol_abs=" << tol_abs
+              << " restart=" << restart
+              << " max_iter=" << max_iter
+              << '\n';
+  }
   result.residual = beta;
   result.residuals.push_back(result.residual);
   if (beta <= tol_abs) {
@@ -421,6 +435,12 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
   result.iterations = total_iter;
   result.converged = (result.residual <= tol_abs);
+  if (options.verbose && is_rank0(options.context)) {
+    std::cout << "GMRES done: iters=" << result.iterations
+              << " residual=" << result.residual
+              << " converged=" << (result.converged ? "yes" : "no")
+              << '\n';
+  }
   return result;
 }
 
