@@ -43,13 +43,58 @@ __device__ inline double beta_center(int i, int j, int gw, int stride_tauc,
   return tauc[c] / sqrt(mag2);
 }
 
+__device__ inline bool is_ice_free(int mask) {
+  return mask == IceFreeBedrock || mask == IceFreeOcean;
+}
+
+__device__ inline double beta_center_component(
+    int i, int j, int mx, int my, int gw, int stride_tauc, int stride_u,
+    int stride_v, int stride_topg, int stride_usurf, int stride_mask,
+    const double* tauc, const double* u_center, const double* v_center,
+    const double* topg, const double* usurf, const int* cell_type, double q,
+    double u_threshold, double reg, double sliding_scale_factor,
+    double beta_ice_free_bedrock, double beta_lateral_margin, int pseudo_plastic,
+    int comp) {
+  const double base = beta_center(i, j, gw, stride_tauc, stride_u, stride_v,
+                                  stride_mask, tauc, u_center, v_center,
+                                  cell_type, q, u_threshold, reg,
+                                  sliding_scale_factor, beta_ice_free_bedrock,
+                                  pseudo_plastic);
+  if (beta_lateral_margin <= 0.0) {
+    return base;
+  }
+  const int c = idx(i, j, gw, stride_usurf);
+  const double h = usurf[c];
+  if (comp == 0) {
+    const int jn = (j == my - 1) ? j : (j + 1);
+    const int js = (j == 0) ? j : (j - 1);
+    const int n = idx(i, jn, gw, stride_mask);
+    const int s = idx(i, js, gw, stride_mask);
+    const bool wall_n = is_ice_free(cell_type[n]) &&
+                        (topg[idx(i, jn, gw, stride_topg)] > h);
+    const bool wall_s = is_ice_free(cell_type[s]) &&
+                        (topg[idx(i, js, gw, stride_topg)] > h);
+    return base + ((wall_n || wall_s) ? beta_lateral_margin : 0.0);
+  }
+  const int ie = (i == mx - 1) ? i : (i + 1);
+  const int iw = (i == 0) ? i : (i - 1);
+  const int e = idx(ie, j, gw, stride_mask);
+  const int w = idx(iw, j, gw, stride_mask);
+  const bool wall_e = is_ice_free(cell_type[e]) &&
+                      (topg[idx(ie, j, gw, stride_topg)] > h);
+  const bool wall_w = is_ice_free(cell_type[w]) &&
+                      (topg[idx(iw, j, gw, stride_topg)] > h);
+  return base + ((wall_e || wall_w) ? beta_lateral_margin : 0.0);
+}
+
 __global__ void basal_drag_kernel(
     int mx, int my, int gw, int stride_tauc, int stride_u, int stride_v,
-    int stride_mask, const double* tauc, const double* u_center,
-    const double* v_center, const int* cell_type, double* beta_u,
-    double* beta_v, double q, double u_threshold, double reg,
+    int stride_topg, int stride_usurf, int stride_mask, const double* tauc,
+    const double* u_center, const double* v_center, const double* topg,
+    const double* usurf, const int* cell_type, double* beta_u, double* beta_v,
+    double q, double u_threshold, double reg,
     double sliding_scale_factor, double beta_ice_free_bedrock,
-    int pseudo_plastic) {
+    double beta_lateral_margin, int pseudo_plastic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
@@ -65,32 +110,37 @@ __global__ void basal_drag_kernel(
   const int mask_e = cell_type[e];
   const int mask_n = cell_type[n];
 
-  const double beta_c = beta_center(i, j, gw, stride_tauc, stride_u, stride_v,
-                                    stride_mask, tauc, u_center, v_center,
-                                    cell_type, q, u_threshold, reg,
-                                    sliding_scale_factor,
-                                    beta_ice_free_bedrock, pseudo_plastic);
-  const double beta_e = beta_center(ie, j, gw, stride_tauc, stride_u, stride_v,
-                                    stride_mask, tauc, u_center, v_center,
-                                    cell_type, q, u_threshold, reg,
-                                    sliding_scale_factor,
-                                    beta_ice_free_bedrock, pseudo_plastic);
-  const double beta_n = beta_center(i, jn, gw, stride_tauc, stride_u, stride_v,
-                                    stride_mask, tauc, u_center, v_center,
-                                    cell_type, q, u_threshold, reg,
-                                    sliding_scale_factor,
-                                    beta_ice_free_bedrock, pseudo_plastic);
+  const double beta_u_c = beta_center_component(
+      i, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
+      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
+      cell_type, q, u_threshold, reg, sliding_scale_factor,
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 0);
+  const double beta_u_e = beta_center_component(
+      ie, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
+      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
+      cell_type, q, u_threshold, reg, sliding_scale_factor,
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 0);
+  const double beta_v_c = beta_center_component(
+      i, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
+      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
+      cell_type, q, u_threshold, reg, sliding_scale_factor,
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 1);
+  const double beta_v_n = beta_center_component(
+      i, jn, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
+      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
+      cell_type, q, u_threshold, reg, sliding_scale_factor,
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 1);
 
   if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
     beta_u[c] = beta_ice_free_bedrock;
   } else {
-    beta_u[c] = 0.5 * (beta_c + beta_e);
+    beta_u[c] = 0.5 * (beta_u_c + beta_u_e);
   }
 
   if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
     beta_v[c] = beta_ice_free_bedrock;
   } else {
-    beta_v[c] = 0.5 * (beta_c + beta_n);
+    beta_v[c] = 0.5 * (beta_v_c + beta_v_n);
   }
 }
 
@@ -365,25 +415,29 @@ __global__ void replace_zero_diagonal_entries_kernel(
 
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
                                  int stride_u, int stride_v,
+                                 int stride_topg, int stride_usurf,
                                  int stride_mask, const double* tauc,
                                  const double* u_center,
                                  const double* v_center,
+                                 const double* topg,
+                                 const double* usurf,
                                  const int* cell_type, double* beta_u,
                                  double* beta_v, double q,
                                  double u_threshold,
                                  double plastic_regularization,
                                  double sliding_scale_factor,
                                  double beta_ice_free_bedrock,
+                                 double beta_lateral_margin,
                                  int pseudo_plastic) {
   CudaEventTimer timer("ssa_basal_drag");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
   basal_drag_kernel<<<grid_dim, block>>>(
-      mx, my, gw, stride_tauc, stride_u, stride_v, stride_mask, tauc, u_center,
-      v_center, cell_type, beta_u, beta_v, q, u_threshold,
-      plastic_regularization, sliding_scale_factor, beta_ice_free_bedrock,
-      pseudo_plastic);
+      mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg, stride_usurf,
+      stride_mask, tauc, u_center, v_center, topg, usurf, cell_type, beta_u,
+      beta_v, q, u_threshold, plastic_regularization, sliding_scale_factor,
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic);
 }
 
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,

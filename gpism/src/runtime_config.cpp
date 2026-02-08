@@ -73,6 +73,9 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.vel_relax"] = "1.0";
   values_["ssa.nuH_relax"] = "1.0";
   values_["ssa.max_speed"] = "0.0";
+  values_["ssa.fail_fast"] = "1";
+  values_["ssa.fail_fast_residual_max"] = "0.0";
+  values_["ssa.fail_fast_dump_prefix"] = "";
   values_["ssa.initial_guess_speed"] = "0.01";
   values_["ssa.diagnostic"] = "0";
   values_["ssa.gmres_verbose"] = "0";
@@ -109,6 +112,7 @@ void RuntimeConfig::load_defaults() {
   values_["basal_resistance.pseudo_plastic.sliding_scale_factor"] = "-1.0";
   values_["basal_resistance.plastic.regularization"] = "0.01";
   values_["basal_resistance.beta_ice_free_bedrock"] = "1.8e9";
+  values_["basal_resistance.beta_lateral_margin"] = "1e19";
   values_["ssa.mg.diagnostic"] = "0";
   values_["ssa.gmres.precond_diagnostic"] = "0";
   values_["io.format"] = "netcdf";

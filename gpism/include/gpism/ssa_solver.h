@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "gpism/field2d.h"
 #include "gpism/field3d.h"
@@ -52,6 +53,10 @@ struct SSASolverOptions {
   bool gmres_precond_diagnostic = false;
   bool diagnostic = false;
   bool force_host_convergence = false;
+  bool fail_fast = true;
+  double fail_fast_residual_max = 0.0;
+  std::string fail_fast_dump_prefix;
+  std::string config_override_path;
 
   BasalResistanceParams basal_params;
   double sea_level = 0.0;

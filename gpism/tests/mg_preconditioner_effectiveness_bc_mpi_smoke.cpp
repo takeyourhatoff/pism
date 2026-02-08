@@ -125,9 +125,13 @@ Effectiveness measure_effectiveness(const gpism::Context& context,
   tauc.fill(5.0);
   gpism::Field2D<double> u_center(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> v_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> topg(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> usurf(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
   u_center.fill(0.0);
   v_center.fill(0.0);
+  topg.fill(0.0);
+  usurf.fill(0.0);
   cell_type.fill(gpism::GroundedIce);
   gpism::FieldStag2D<double> beta(grid.local_mx(), grid.local_my(), gw);
 
@@ -156,6 +160,8 @@ Effectiveness measure_effectiveness(const gpism::Context& context,
     gpism::sync_host_to_device(tauc);
     gpism::sync_host_to_device(u_center);
     gpism::sync_host_to_device(v_center);
+    gpism::sync_host_to_device(topg);
+    gpism::sync_host_to_device(usurf);
     gpism::sync_host_to_device(cell_type);
     gpism::sync_host_to_device(nuH);
     gpism::sync_host_to_device(x_true);
@@ -164,8 +170,8 @@ Effectiveness measure_effectiveness(const gpism::Context& context,
   }
 
   gpism::BasalResistanceParams basal_params;
-  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
-                         basal_params);
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, topg, usurf, cell_type,
+                         beta, basal_params);
   if (context.mpi_enabled()) {
     exchange_for_device(beta, grid, context);
   }

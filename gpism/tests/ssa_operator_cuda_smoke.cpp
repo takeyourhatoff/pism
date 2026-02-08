@@ -226,12 +226,16 @@ int main() {
   gpism::Field2D<double> dhdy(mx, my, gw);
   gpism::Field2D<double> u_center(mx, my, gw);
   gpism::Field2D<double> v_center(mx, my, gw);
+  gpism::Field2D<double> topg(mx, my, gw);
+  gpism::Field2D<double> usurf(mx, my, gw);
   gpism::Field2D<int> cell_type(mx, my, gw);
   thk.fill(2.0);
   dhdx.fill(0.5);
   dhdy.fill(-0.25);
   u_center.fill(0.0);
   v_center.fill(0.0);
+  topg.fill(0.0);
+  usurf.fill(0.0);
   cell_type.fill(gpism::GroundedIce);
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
@@ -282,14 +286,16 @@ int main() {
   sync_host_to_device(dhdy);
   sync_host_to_device(u_center);
   sync_host_to_device(v_center);
+  sync_host_to_device(topg);
+  sync_host_to_device(usurf);
   sync_host_to_device(cell_type);
   sync_host_to_device(bc_mask);
   sync_host_to_device(bc_values);
 
   gpism::BasalResistanceParams basal_params;
   basal_params.plastic_regularization = plastic_reg;
-  op.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta_gpu,
-                        basal_params);
+  op.compute_basal_drag(grid, tauc, u_center, v_center, topg, usurf, cell_type,
+                        beta_gpu, basal_params);
   sync_device_to_host(beta_gpu);
   if (!compare_stag(beta_gpu, beta_ref, "basal_drag")) {
     return 1;

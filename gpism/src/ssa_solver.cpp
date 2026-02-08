@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -19,6 +21,10 @@
 #include "gpism/linear_algebra.h"
 #include "gpism/mg_preconditioner.h"
 #include "gpism/thickness.h"
+
+#if GPISM_HAVE_NETCDF
+#include "gpism/netcdf_io.h"
+#endif
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
@@ -173,6 +179,27 @@ std::vector<std::pair<int, int>> parse_diag_points() {
 const std::vector<std::pair<int, int>>& diag_points() {
   static const std::vector<std::pair<int, int>> points = parse_diag_points();
   return points;
+}
+
+bool file_exists(const std::string& path) {
+  std::ifstream input(path);
+  return input.good();
+}
+
+bool copy_file_best_effort(const std::string& src, const std::string& dst) {
+  if (src.empty() || dst.empty() || !file_exists(src)) {
+    return false;
+  }
+  std::ifstream in(src, std::ios::binary);
+  if (!in) {
+    return false;
+  }
+  std::ofstream out(dst, std::ios::binary);
+  if (!out) {
+    return false;
+  }
+  out << in.rdbuf();
+  return out.good();
 }
 
 void log_diag_points(const Grid2D& grid, int iter, const Field2D<int>& cell_type,
@@ -750,8 +777,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       exchange_for_device(v_center, grid_, *context);
     }
 
-    ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, cell_type, beta,
-                            options.basal_params);
+    ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, topg, usurf,
+                            cell_type, beta, options.basal_params);
     if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(beta, grid_, *context);
     }
@@ -920,6 +947,74 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     GMRESResult gmres_result = gmres_solve(op, rhs, vel, gmres_opts, precond_ptr);
     result.linear_iters = gmres_result.iterations;
     result.linear_residual = gmres_result.residual;
+
+    if (options.fail_fast) {
+      bool ok = true;
+      std::string reason;
+      if (!std::isfinite(gmres_result.residual)) {
+        ok = false;
+        reason = "GMRES residual is non-finite";
+      } else if (options.fail_fast_residual_max > 0.0 &&
+                 gmres_result.residual > options.fail_fast_residual_max) {
+        ok = false;
+        reason = "GMRES residual exceeds ssa.fail_fast_residual_max";
+      } else if (!field_stats(vel).all_finite) {
+        ok = false;
+        reason = "SSA velocity contains non-finite values";
+      }
+
+      if (!ok) {
+        if (is_rank0(context)) {
+          std::cerr << "SSA fail-fast at Picard iter " << iter << ": " << reason
+                    << " (iters=" << gmres_result.iterations
+                    << " residual=" << gmres_result.residual << ")\n";
+        }
+
+#if GPISM_HAVE_NETCDF
+        if (!options.fail_fast_dump_prefix.empty()) {
+          try {
+            std::filesystem::path base(options.fail_fast_dump_prefix);
+            std::filesystem::path dir =
+                base / ("ssa_fail_iter" + std::to_string(iter));
+            std::filesystem::create_directories(dir);
+
+            // Copy config override file for exact reproduction.
+            if (!options.config_override_path.empty()) {
+              (void)copy_file_best_effort(
+                  options.config_override_path,
+                  (dir / "config_override.cfg").string());
+            }
+
+            SSADebugBundle2D bundle;
+            bundle.thk = &thk;
+            bundle.topg = &topg;
+            bundle.usurf = &usurf;
+            bundle.dhdx = &dhdx;
+            bundle.dhdy = &dhdy;
+            bundle.cell_type = &cell_type;
+            bundle.beta = &beta;
+            bundle.rhs = &rhs;
+            bundle.nuH = &nuH;
+            bundle.vel_prev = &vel_prev;
+            bundle.vel = &vel;
+
+            NetcdfIO io;
+            const std::string dump_path = (dir / "ssa_bundle.nc").string();
+            if (context) {
+              (void)io.write_ssa_debug_bundle(dump_path, *context, grid_, bundle, 0.0);
+            } else {
+              (void)io.write_ssa_debug_bundle(dump_path, grid_, bundle, 0.0);
+            }
+          } catch (const std::exception& exc) {
+            if (is_rank0(context)) {
+              std::cerr << "SSA fail-fast: debug dump failed: " << exc.what() << "\n";
+            }
+          }
+        }
+#endif
+        throw std::runtime_error("SSA fail-fast: " + reason);
+      }
+    }
 
     if (options.vel_relax < 1.0) {
       apply_vel_relax(vel, vel_prev, options.vel_relax);

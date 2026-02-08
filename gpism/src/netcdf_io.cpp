@@ -7,9 +7,11 @@
 
 #include <cstring>
 #include <fstream>
+#include <type_traits>
 #include <vector>
 
 #include "gpism/config.h"
+#include "gpism/field_sync.h"
 #include "gpism/geometry.h"
 #include "gpism/version.h"
 
@@ -1173,6 +1175,582 @@ bool write_output_append_impl(const std::string& path, int rank, int size,
   return write_output_append_serial(path, grid, fields, time_value);
 }
 
+bool write_ssa_debug_bundle_impl(const std::string& path, int rank, int size,
+                                 bool mpi_enabled, const Grid2D& grid,
+                                 const SSADebugBundle2D& bundle,
+                                 double time_value) {
+  if (!bundle.thk || !bundle.topg || !bundle.usurf || !bundle.dhdx ||
+      !bundle.dhdy || !bundle.cell_type || !bundle.beta || !bundle.rhs ||
+      !bundle.nuH || !bundle.vel_prev || !bundle.vel) {
+    return false;
+  }
+
+  // NetCDF writers use host buffers; sync device-produced fields when present.
+#if GPISM_HAVE_CUDA
+  auto sync2d = [](const auto* field_ptr) {
+    auto& field = *const_cast<std::remove_const_t<decltype(*field_ptr)>*>(field_ptr);
+    if (field.has_device_data()) {
+      sync_device_to_host(field);
+    }
+  };
+  auto sync_stag = [](const auto* field_ptr) {
+    auto& field = *const_cast<std::remove_const_t<decltype(*field_ptr)>*>(field_ptr);
+    if (field.component(0).has_device_data() || field.component(1).has_device_data()) {
+      sync_device_to_host(field);
+    }
+  };
+  sync2d(bundle.thk);
+  sync2d(bundle.topg);
+  sync2d(bundle.usurf);
+  sync2d(bundle.dhdx);
+  sync2d(bundle.dhdy);
+  sync2d(bundle.cell_type);
+  sync_stag(bundle.beta);
+  sync_stag(bundle.rhs);
+  sync_stag(bundle.nuH);
+  sync_stag(bundle.vel_prev);
+  sync_stag(bundle.vel);
+#endif
+
+#if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
+  if (mpi_enabled && size > 1) {
+    int ncid = -1;
+    if (nc_create_par(path.c_str(), NC_NETCDF4 | NC_MPIIO, MPI_COMM_WORLD,
+                      MPI_INFO_NULL, &ncid) != NC_NOERR) {
+      return false;
+    }
+
+    const int mx = grid.global_mx();
+    const int my = grid.global_my();
+    int dim_x = -1;
+    int dim_y = -1;
+    int dim_time = -1;
+    if (nc_def_dim(ncid, "time", NC_UNLIMITED, &dim_time) != NC_NOERR ||
+        nc_def_dim(ncid, "x", mx, &dim_x) != NC_NOERR ||
+        nc_def_dim(ncid, "y", my, &dim_y) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+
+    int dims_tyx[3] = {dim_time, dim_y, dim_x};
+    int var_time = -1;
+    int var_x = -1;
+    int var_y = -1;
+    int var_thk = -1;
+    int var_topg = -1;
+    int var_usurf = -1;
+    int var_dhdx = -1;
+    int var_dhdy = -1;
+    int var_cell_type = -1;
+    int var_beta_u = -1;
+    int var_beta_v = -1;
+    int var_rhs_u = -1;
+    int var_rhs_v = -1;
+    int var_nuH_u = -1;
+    int var_nuH_v = -1;
+    int var_vel_u = -1;
+    int var_vel_v = -1;
+    int var_vel_prev_u = -1;
+    int var_vel_prev_v = -1;
+
+    if (nc_def_var(ncid, "time", NC_DOUBLE, 1, &dim_time, &var_time) != NC_NOERR ||
+        nc_def_var(ncid, "x", NC_DOUBLE, 1, &dim_x, &var_x) != NC_NOERR ||
+        nc_def_var(ncid, "y", NC_DOUBLE, 1, &dim_y, &var_y) != NC_NOERR ||
+        nc_def_var(ncid, "thk", NC_DOUBLE, 3, dims_tyx, &var_thk) != NC_NOERR ||
+        nc_def_var(ncid, "topg", NC_DOUBLE, 3, dims_tyx, &var_topg) != NC_NOERR ||
+        nc_def_var(ncid, "usurf", NC_DOUBLE, 3, dims_tyx, &var_usurf) != NC_NOERR ||
+        nc_def_var(ncid, "dhdx", NC_DOUBLE, 3, dims_tyx, &var_dhdx) != NC_NOERR ||
+        nc_def_var(ncid, "dhdy", NC_DOUBLE, 3, dims_tyx, &var_dhdy) != NC_NOERR ||
+        nc_def_var(ncid, "cell_type", NC_INT, 3, dims_tyx, &var_cell_type) != NC_NOERR ||
+        nc_def_var(ncid, "beta_u", NC_DOUBLE, 3, dims_tyx, &var_beta_u) != NC_NOERR ||
+        nc_def_var(ncid, "beta_v", NC_DOUBLE, 3, dims_tyx, &var_beta_v) != NC_NOERR ||
+        nc_def_var(ncid, "rhs_u", NC_DOUBLE, 3, dims_tyx, &var_rhs_u) != NC_NOERR ||
+        nc_def_var(ncid, "rhs_v", NC_DOUBLE, 3, dims_tyx, &var_rhs_v) != NC_NOERR ||
+        nc_def_var(ncid, "nuH_u", NC_DOUBLE, 3, dims_tyx, &var_nuH_u) != NC_NOERR ||
+        nc_def_var(ncid, "nuH_v", NC_DOUBLE, 3, dims_tyx, &var_nuH_v) != NC_NOERR ||
+        nc_def_var(ncid, "vel_u", NC_DOUBLE, 3, dims_tyx, &var_vel_u) != NC_NOERR ||
+        nc_def_var(ncid, "vel_v", NC_DOUBLE, 3, dims_tyx, &var_vel_v) != NC_NOERR ||
+        nc_def_var(ncid, "vel_prev_u", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_u) != NC_NOERR ||
+        nc_def_var(ncid, "vel_prev_v", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_v) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+
+    const char* units_m = "m";
+    const char* units_1 = "1";
+    const char* units_years = "years";
+    const char* units_vel = "m s^-1";
+    const char* units_beta = "Pa s m^-1";
+    const char* units_rhs = "Pa";
+    const char* units_nuH = "Pa s m";
+    nc_put_att_text(ncid, var_time, "units", 5, units_years);
+    nc_put_att_text(ncid, var_x, "units", 1, units_m);
+    nc_put_att_text(ncid, var_y, "units", 1, units_m);
+    nc_put_att_text(ncid, var_thk, "units", 1, units_m);
+    nc_put_att_text(ncid, var_topg, "units", 1, units_m);
+    nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
+    nc_put_att_text(ncid, var_dhdx, "units", 1, units_1);
+    nc_put_att_text(ncid, var_dhdy, "units", 1, units_1);
+    nc_put_att_text(ncid, var_beta_u, "units", 9, units_beta);
+    nc_put_att_text(ncid, var_beta_v, "units", 9, units_beta);
+    nc_put_att_text(ncid, var_rhs_u, "units", 2, units_rhs);
+    nc_put_att_text(ncid, var_rhs_v, "units", 2, units_rhs);
+    nc_put_att_text(ncid, var_nuH_u, "units", 6, units_nuH);
+    nc_put_att_text(ncid, var_nuH_v, "units", 6, units_nuH);
+    nc_put_att_text(ncid, var_vel_u, "units", 6, units_vel);
+    nc_put_att_text(ncid, var_vel_v, "units", 6, units_vel);
+    nc_put_att_text(ncid, var_vel_prev_u, "units", 6, units_vel);
+    nc_put_att_text(ncid, var_vel_prev_v, "units", 6, units_vel);
+
+    if (nc_enddef(ncid) != NC_NOERR) {
+      nc_close(ncid);
+      return false;
+    }
+
+    auto par_ind = [&](int varid) {
+      return nc_var_par_access(ncid, varid, NC_INDEPENDENT) == NC_NOERR;
+    };
+    if (!par_ind(var_time) || !par_ind(var_x) || !par_ind(var_y) ||
+        !par_ind(var_thk) || !par_ind(var_topg) || !par_ind(var_usurf) ||
+        !par_ind(var_dhdx) || !par_ind(var_dhdy) || !par_ind(var_cell_type) ||
+        !par_ind(var_beta_u) || !par_ind(var_beta_v) || !par_ind(var_rhs_u) ||
+        !par_ind(var_rhs_v) || !par_ind(var_nuH_u) || !par_ind(var_nuH_v) ||
+        !par_ind(var_vel_u) || !par_ind(var_vel_v) || !par_ind(var_vel_prev_u) ||
+        !par_ind(var_vel_prev_v)) {
+      nc_close(ncid);
+      return false;
+    }
+
+    if (rank == 0) {
+      std::size_t start_time[1] = {0};
+      std::size_t count_time[1] = {1};
+      nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+
+      std::vector<double> xvals(static_cast<std::size_t>(mx));
+      std::vector<double> yvals(static_cast<std::size_t>(my));
+      for (int i = 0; i < mx; ++i) {
+        xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
+      }
+      for (int j = 0; j < my; ++j) {
+        yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
+      }
+      std::size_t start_x[1] = {0};
+      std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
+      std::size_t start_y[1] = {0};
+      std::size_t count_y[1] = {static_cast<std::size_t>(my)};
+      nc_put_vara_double(ncid, var_x, start_x, count_x, xvals.data());
+      nc_put_vara_double(ncid, var_y, start_y, count_y, yvals.data());
+    }
+
+    std::size_t start[3] = {0, static_cast<std::size_t>(grid.ys()),
+                            static_cast<std::size_t>(grid.xs())};
+    std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                            static_cast<std::size_t>(grid.local_mx())};
+    std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                               grid.local_my());
+    auto write_local = [&](int varid, const Field2D<double>& field) {
+      int idx = 0;
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+        }
+      }
+      return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+             NC_NOERR;
+    };
+    std::vector<int> mask_buffer(static_cast<std::size_t>(grid.local_mx()) *
+                                 grid.local_my());
+    auto write_local_mask = [&](int varid, const Field2D<int>& field) {
+      int idx = 0;
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          mask_buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+        }
+      }
+      return nc_put_vara_int(ncid, varid, start, count, mask_buffer.data()) ==
+             NC_NOERR;
+    };
+
+    bool ok = true;
+    ok = write_local(var_thk, *bundle.thk) && ok;
+    ok = write_local(var_topg, *bundle.topg) && ok;
+    ok = write_local(var_usurf, *bundle.usurf) && ok;
+    ok = write_local(var_dhdx, *bundle.dhdx) && ok;
+    ok = write_local(var_dhdy, *bundle.dhdy) && ok;
+    ok = write_local_mask(var_cell_type, *bundle.cell_type) && ok;
+    ok = write_local(var_beta_u, bundle.beta->component(0)) && ok;
+    ok = write_local(var_beta_v, bundle.beta->component(1)) && ok;
+    ok = write_local(var_rhs_u, bundle.rhs->component(0)) && ok;
+    ok = write_local(var_rhs_v, bundle.rhs->component(1)) && ok;
+    ok = write_local(var_nuH_u, bundle.nuH->component(0)) && ok;
+    ok = write_local(var_nuH_v, bundle.nuH->component(1)) && ok;
+    ok = write_local(var_vel_prev_u, bundle.vel_prev->component(0)) && ok;
+    ok = write_local(var_vel_prev_v, bundle.vel_prev->component(1)) && ok;
+    ok = write_local(var_vel_u, bundle.vel->component(0)) && ok;
+    ok = write_local(var_vel_v, bundle.vel->component(1)) && ok;
+
+    nc_close(ncid);
+    return ok;
+  }
+#endif
+
+  if (mpi_enabled && size > 1) {
+    if (rank == 0) {
+      int ncid = -1;
+      if (nc_create(path.c_str(), NC_CLOBBER, &ncid) != NC_NOERR) {
+        return false;
+      }
+      const int mx = grid.global_mx();
+      const int my = grid.global_my();
+      int dim_x = -1;
+      int dim_y = -1;
+      int dim_time = -1;
+      if (nc_def_dim(ncid, "time", NC_UNLIMITED, &dim_time) != NC_NOERR ||
+          nc_def_dim(ncid, "x", mx, &dim_x) != NC_NOERR ||
+          nc_def_dim(ncid, "y", my, &dim_y) != NC_NOERR) {
+        nc_close(ncid);
+        return false;
+      }
+      int dims_tyx[3] = {dim_time, dim_y, dim_x};
+      int var_time = -1;
+      int var_x = -1;
+      int var_y = -1;
+      int var_thk = -1;
+      int var_topg = -1;
+      int var_usurf = -1;
+      int var_dhdx = -1;
+      int var_dhdy = -1;
+      int var_cell_type = -1;
+      int var_beta_u = -1;
+      int var_beta_v = -1;
+      int var_rhs_u = -1;
+      int var_rhs_v = -1;
+      int var_nuH_u = -1;
+      int var_nuH_v = -1;
+      int var_vel_u = -1;
+      int var_vel_v = -1;
+      int var_vel_prev_u = -1;
+      int var_vel_prev_v = -1;
+      if (nc_def_var(ncid, "time", NC_DOUBLE, 1, &dim_time, &var_time) != NC_NOERR ||
+          nc_def_var(ncid, "x", NC_DOUBLE, 1, &dim_x, &var_x) != NC_NOERR ||
+          nc_def_var(ncid, "y", NC_DOUBLE, 1, &dim_y, &var_y) != NC_NOERR ||
+          nc_def_var(ncid, "thk", NC_DOUBLE, 3, dims_tyx, &var_thk) != NC_NOERR ||
+          nc_def_var(ncid, "topg", NC_DOUBLE, 3, dims_tyx, &var_topg) != NC_NOERR ||
+          nc_def_var(ncid, "usurf", NC_DOUBLE, 3, dims_tyx, &var_usurf) != NC_NOERR ||
+          nc_def_var(ncid, "dhdx", NC_DOUBLE, 3, dims_tyx, &var_dhdx) != NC_NOERR ||
+          nc_def_var(ncid, "dhdy", NC_DOUBLE, 3, dims_tyx, &var_dhdy) != NC_NOERR ||
+          nc_def_var(ncid, "cell_type", NC_INT, 3, dims_tyx, &var_cell_type) != NC_NOERR ||
+          nc_def_var(ncid, "beta_u", NC_DOUBLE, 3, dims_tyx, &var_beta_u) != NC_NOERR ||
+          nc_def_var(ncid, "beta_v", NC_DOUBLE, 3, dims_tyx, &var_beta_v) != NC_NOERR ||
+          nc_def_var(ncid, "rhs_u", NC_DOUBLE, 3, dims_tyx, &var_rhs_u) != NC_NOERR ||
+          nc_def_var(ncid, "rhs_v", NC_DOUBLE, 3, dims_tyx, &var_rhs_v) != NC_NOERR ||
+          nc_def_var(ncid, "nuH_u", NC_DOUBLE, 3, dims_tyx, &var_nuH_u) != NC_NOERR ||
+          nc_def_var(ncid, "nuH_v", NC_DOUBLE, 3, dims_tyx, &var_nuH_v) != NC_NOERR ||
+          nc_def_var(ncid, "vel_u", NC_DOUBLE, 3, dims_tyx, &var_vel_u) != NC_NOERR ||
+          nc_def_var(ncid, "vel_v", NC_DOUBLE, 3, dims_tyx, &var_vel_v) != NC_NOERR ||
+          nc_def_var(ncid, "vel_prev_u", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_u) != NC_NOERR ||
+          nc_def_var(ncid, "vel_prev_v", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_v) != NC_NOERR) {
+        nc_close(ncid);
+        return false;
+      }
+      const char* units_m = "m";
+      const char* units_1 = "1";
+      const char* units_years = "years";
+      const char* units_vel = "m s^-1";
+      const char* units_beta = "Pa s m^-1";
+      const char* units_rhs = "Pa";
+      const char* units_nuH = "Pa s m";
+      nc_put_att_text(ncid, var_time, "units", 5, units_years);
+      nc_put_att_text(ncid, var_x, "units", 1, units_m);
+      nc_put_att_text(ncid, var_y, "units", 1, units_m);
+      nc_put_att_text(ncid, var_thk, "units", 1, units_m);
+      nc_put_att_text(ncid, var_topg, "units", 1, units_m);
+      nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
+      nc_put_att_text(ncid, var_dhdx, "units", 1, units_1);
+      nc_put_att_text(ncid, var_dhdy, "units", 1, units_1);
+      nc_put_att_text(ncid, var_beta_u, "units", 9, units_beta);
+      nc_put_att_text(ncid, var_beta_v, "units", 9, units_beta);
+      nc_put_att_text(ncid, var_rhs_u, "units", 2, units_rhs);
+      nc_put_att_text(ncid, var_rhs_v, "units", 2, units_rhs);
+      nc_put_att_text(ncid, var_nuH_u, "units", 6, units_nuH);
+      nc_put_att_text(ncid, var_nuH_v, "units", 6, units_nuH);
+      nc_put_att_text(ncid, var_vel_u, "units", 6, units_vel);
+      nc_put_att_text(ncid, var_vel_v, "units", 6, units_vel);
+      nc_put_att_text(ncid, var_vel_prev_u, "units", 6, units_vel);
+      nc_put_att_text(ncid, var_vel_prev_v, "units", 6, units_vel);
+      if (nc_enddef(ncid) != NC_NOERR) {
+        nc_close(ncid);
+        return false;
+      }
+      std::size_t start_time[1] = {0};
+      std::size_t count_time[1] = {1};
+      nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+      std::vector<double> xvals(static_cast<std::size_t>(mx));
+      std::vector<double> yvals(static_cast<std::size_t>(my));
+      for (int i = 0; i < mx; ++i) {
+        xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
+      }
+      for (int j = 0; j < my; ++j) {
+        yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
+      }
+      std::size_t start_x[1] = {0};
+      std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
+      std::size_t start_y[1] = {0};
+      std::size_t count_y[1] = {static_cast<std::size_t>(my)};
+      nc_put_vara_double(ncid, var_x, start_x, count_x, xvals.data());
+      nc_put_vara_double(ncid, var_y, start_y, count_y, yvals.data());
+      nc_close(ncid);
+    }
+
+#if GPISM_HAVE_MPI
+    MPI_Barrier(MPI_COMM_WORLD);
+    {
+      int ncid = -1;
+      if (nc_open(path.c_str(), NC_WRITE, &ncid) != NC_NOERR) {
+        return false;
+      }
+      int var_thk = -1, var_topg = -1, var_usurf = -1, var_dhdx = -1, var_dhdy = -1;
+      int var_cell_type = -1, var_beta_u = -1, var_beta_v = -1;
+      int var_rhs_u = -1, var_rhs_v = -1, var_nuH_u = -1, var_nuH_v = -1;
+      int var_vel_u = -1, var_vel_v = -1, var_vel_prev_u = -1, var_vel_prev_v = -1;
+      if (nc_inq_varid(ncid, "thk", &var_thk) != NC_NOERR ||
+          nc_inq_varid(ncid, "topg", &var_topg) != NC_NOERR ||
+          nc_inq_varid(ncid, "usurf", &var_usurf) != NC_NOERR ||
+          nc_inq_varid(ncid, "dhdx", &var_dhdx) != NC_NOERR ||
+          nc_inq_varid(ncid, "dhdy", &var_dhdy) != NC_NOERR ||
+          nc_inq_varid(ncid, "cell_type", &var_cell_type) != NC_NOERR ||
+          nc_inq_varid(ncid, "beta_u", &var_beta_u) != NC_NOERR ||
+          nc_inq_varid(ncid, "beta_v", &var_beta_v) != NC_NOERR ||
+          nc_inq_varid(ncid, "rhs_u", &var_rhs_u) != NC_NOERR ||
+          nc_inq_varid(ncid, "rhs_v", &var_rhs_v) != NC_NOERR ||
+          nc_inq_varid(ncid, "nuH_u", &var_nuH_u) != NC_NOERR ||
+          nc_inq_varid(ncid, "nuH_v", &var_nuH_v) != NC_NOERR ||
+          nc_inq_varid(ncid, "vel_u", &var_vel_u) != NC_NOERR ||
+          nc_inq_varid(ncid, "vel_v", &var_vel_v) != NC_NOERR ||
+          nc_inq_varid(ncid, "vel_prev_u", &var_vel_prev_u) != NC_NOERR ||
+          nc_inq_varid(ncid, "vel_prev_v", &var_vel_prev_v) != NC_NOERR) {
+        nc_close(ncid);
+        return false;
+      }
+
+      std::size_t start[3] = {0, static_cast<std::size_t>(grid.ys()),
+                              static_cast<std::size_t>(grid.xs())};
+      std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                              static_cast<std::size_t>(grid.local_mx())};
+      std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                                 grid.local_my());
+      auto write_local = [&](int varid, const Field2D<double>& field) {
+        int idx = 0;
+        for (int j = 0; j < grid.local_my(); ++j) {
+          for (int i = 0; i < grid.local_mx(); ++i) {
+            buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+          }
+        }
+        return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+               NC_NOERR;
+      };
+      std::vector<int> mask_buffer(static_cast<std::size_t>(grid.local_mx()) *
+                                   grid.local_my());
+      auto write_local_mask = [&](int varid, const Field2D<int>& field) {
+        int idx = 0;
+        for (int j = 0; j < grid.local_my(); ++j) {
+          for (int i = 0; i < grid.local_mx(); ++i) {
+            mask_buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+          }
+        }
+        return nc_put_vara_int(ncid, varid, start, count, mask_buffer.data()) ==
+               NC_NOERR;
+      };
+
+      bool ok = true;
+      ok = write_local(var_thk, *bundle.thk) && ok;
+      ok = write_local(var_topg, *bundle.topg) && ok;
+      ok = write_local(var_usurf, *bundle.usurf) && ok;
+      ok = write_local(var_dhdx, *bundle.dhdx) && ok;
+      ok = write_local(var_dhdy, *bundle.dhdy) && ok;
+      ok = write_local_mask(var_cell_type, *bundle.cell_type) && ok;
+      ok = write_local(var_beta_u, bundle.beta->component(0)) && ok;
+      ok = write_local(var_beta_v, bundle.beta->component(1)) && ok;
+      ok = write_local(var_rhs_u, bundle.rhs->component(0)) && ok;
+      ok = write_local(var_rhs_v, bundle.rhs->component(1)) && ok;
+      ok = write_local(var_nuH_u, bundle.nuH->component(0)) && ok;
+      ok = write_local(var_nuH_v, bundle.nuH->component(1)) && ok;
+      ok = write_local(var_vel_prev_u, bundle.vel_prev->component(0)) && ok;
+      ok = write_local(var_vel_prev_v, bundle.vel_prev->component(1)) && ok;
+      ok = write_local(var_vel_u, bundle.vel->component(0)) && ok;
+      ok = write_local(var_vel_v, bundle.vel->component(1)) && ok;
+      nc_close(ncid);
+      if (!ok) {
+        return false;
+      }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    return true;
+#else
+    (void)rank;
+    return false;
+#endif
+  }
+
+  // Single-rank serial write.
+  int ncid = -1;
+  if (nc_create(path.c_str(), NC_CLOBBER, &ncid) != NC_NOERR) {
+    return false;
+  }
+  const int mx = grid.global_mx();
+  const int my = grid.global_my();
+  int dim_x = -1;
+  int dim_y = -1;
+  int dim_time = -1;
+  if (nc_def_dim(ncid, "time", NC_UNLIMITED, &dim_time) != NC_NOERR ||
+      nc_def_dim(ncid, "x", mx, &dim_x) != NC_NOERR ||
+      nc_def_dim(ncid, "y", my, &dim_y) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+  int dims_tyx[3] = {dim_time, dim_y, dim_x};
+  int var_time = -1;
+  int var_x = -1;
+  int var_y = -1;
+  int var_thk = -1;
+  int var_topg = -1;
+  int var_usurf = -1;
+  int var_dhdx = -1;
+  int var_dhdy = -1;
+  int var_cell_type = -1;
+  int var_beta_u = -1;
+  int var_beta_v = -1;
+  int var_rhs_u = -1;
+  int var_rhs_v = -1;
+  int var_nuH_u = -1;
+  int var_nuH_v = -1;
+  int var_vel_u = -1;
+  int var_vel_v = -1;
+  int var_vel_prev_u = -1;
+  int var_vel_prev_v = -1;
+  if (nc_def_var(ncid, "time", NC_DOUBLE, 1, &dim_time, &var_time) != NC_NOERR ||
+      nc_def_var(ncid, "x", NC_DOUBLE, 1, &dim_x, &var_x) != NC_NOERR ||
+      nc_def_var(ncid, "y", NC_DOUBLE, 1, &dim_y, &var_y) != NC_NOERR ||
+      nc_def_var(ncid, "thk", NC_DOUBLE, 3, dims_tyx, &var_thk) != NC_NOERR ||
+      nc_def_var(ncid, "topg", NC_DOUBLE, 3, dims_tyx, &var_topg) != NC_NOERR ||
+      nc_def_var(ncid, "usurf", NC_DOUBLE, 3, dims_tyx, &var_usurf) != NC_NOERR ||
+      nc_def_var(ncid, "dhdx", NC_DOUBLE, 3, dims_tyx, &var_dhdx) != NC_NOERR ||
+      nc_def_var(ncid, "dhdy", NC_DOUBLE, 3, dims_tyx, &var_dhdy) != NC_NOERR ||
+      nc_def_var(ncid, "cell_type", NC_INT, 3, dims_tyx, &var_cell_type) != NC_NOERR ||
+      nc_def_var(ncid, "beta_u", NC_DOUBLE, 3, dims_tyx, &var_beta_u) != NC_NOERR ||
+      nc_def_var(ncid, "beta_v", NC_DOUBLE, 3, dims_tyx, &var_beta_v) != NC_NOERR ||
+      nc_def_var(ncid, "rhs_u", NC_DOUBLE, 3, dims_tyx, &var_rhs_u) != NC_NOERR ||
+      nc_def_var(ncid, "rhs_v", NC_DOUBLE, 3, dims_tyx, &var_rhs_v) != NC_NOERR ||
+      nc_def_var(ncid, "nuH_u", NC_DOUBLE, 3, dims_tyx, &var_nuH_u) != NC_NOERR ||
+      nc_def_var(ncid, "nuH_v", NC_DOUBLE, 3, dims_tyx, &var_nuH_v) != NC_NOERR ||
+      nc_def_var(ncid, "vel_u", NC_DOUBLE, 3, dims_tyx, &var_vel_u) != NC_NOERR ||
+      nc_def_var(ncid, "vel_v", NC_DOUBLE, 3, dims_tyx, &var_vel_v) != NC_NOERR ||
+      nc_def_var(ncid, "vel_prev_u", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_u) != NC_NOERR ||
+      nc_def_var(ncid, "vel_prev_v", NC_DOUBLE, 3, dims_tyx, &var_vel_prev_v) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  const char* units_m = "m";
+  const char* units_1 = "1";
+  const char* units_years = "years";
+  const char* units_vel = "m s^-1";
+  const char* units_beta = "Pa s m^-1";
+  const char* units_rhs = "Pa";
+  const char* units_nuH = "Pa s m";
+  nc_put_att_text(ncid, var_time, "units", 5, units_years);
+  nc_put_att_text(ncid, var_x, "units", 1, units_m);
+  nc_put_att_text(ncid, var_y, "units", 1, units_m);
+  nc_put_att_text(ncid, var_thk, "units", 1, units_m);
+  nc_put_att_text(ncid, var_topg, "units", 1, units_m);
+  nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
+  nc_put_att_text(ncid, var_dhdx, "units", 1, units_1);
+  nc_put_att_text(ncid, var_dhdy, "units", 1, units_1);
+  nc_put_att_text(ncid, var_beta_u, "units", 9, units_beta);
+  nc_put_att_text(ncid, var_beta_v, "units", 9, units_beta);
+  nc_put_att_text(ncid, var_rhs_u, "units", 2, units_rhs);
+  nc_put_att_text(ncid, var_rhs_v, "units", 2, units_rhs);
+  nc_put_att_text(ncid, var_nuH_u, "units", 6, units_nuH);
+  nc_put_att_text(ncid, var_nuH_v, "units", 6, units_nuH);
+  nc_put_att_text(ncid, var_vel_u, "units", 6, units_vel);
+  nc_put_att_text(ncid, var_vel_v, "units", 6, units_vel);
+  nc_put_att_text(ncid, var_vel_prev_u, "units", 6, units_vel);
+  nc_put_att_text(ncid, var_vel_prev_v, "units", 6, units_vel);
+
+  if (nc_enddef(ncid) != NC_NOERR) {
+    nc_close(ncid);
+    return false;
+  }
+
+  std::size_t start_time[1] = {0};
+  std::size_t count_time[1] = {1};
+  nc_put_vara_double(ncid, var_time, start_time, count_time, &time_value);
+  std::vector<double> xvals(static_cast<std::size_t>(mx));
+  std::vector<double> yvals(static_cast<std::size_t>(my));
+  for (int i = 0; i < mx; ++i) {
+    xvals[static_cast<std::size_t>(i)] = grid.x0() + i * grid.dx();
+  }
+  for (int j = 0; j < my; ++j) {
+    yvals[static_cast<std::size_t>(j)] = grid.y0() + j * grid.dy();
+  }
+  std::size_t start_x[1] = {0};
+  std::size_t count_x[1] = {static_cast<std::size_t>(mx)};
+  std::size_t start_y[1] = {0};
+  std::size_t count_y[1] = {static_cast<std::size_t>(my)};
+  nc_put_vara_double(ncid, var_x, start_x, count_x, xvals.data());
+  nc_put_vara_double(ncid, var_y, start_y, count_y, yvals.data());
+
+  std::size_t start[3] = {0, static_cast<std::size_t>(grid.ys()),
+                          static_cast<std::size_t>(grid.xs())};
+  std::size_t count[3] = {1, static_cast<std::size_t>(grid.local_my()),
+                          static_cast<std::size_t>(grid.local_mx())};
+  std::vector<double> buffer(static_cast<std::size_t>(grid.local_mx()) *
+                             grid.local_my());
+  auto write_local = [&](int varid, const Field2D<double>& field) {
+    int idx = 0;
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+      }
+    }
+    return nc_put_vara_double(ncid, varid, start, count, buffer.data()) ==
+           NC_NOERR;
+  };
+  std::vector<int> mask_buffer(static_cast<std::size_t>(grid.local_mx()) *
+                               grid.local_my());
+  auto write_local_mask = [&](int varid, const Field2D<int>& field) {
+    int idx = 0;
+    for (int j = 0; j < grid.local_my(); ++j) {
+      for (int i = 0; i < grid.local_mx(); ++i) {
+        mask_buffer[static_cast<std::size_t>(idx++)] = field(i, j);
+      }
+    }
+    return nc_put_vara_int(ncid, varid, start, count, mask_buffer.data()) ==
+           NC_NOERR;
+  };
+
+  bool ok = true;
+  ok = write_local(var_thk, *bundle.thk) && ok;
+  ok = write_local(var_topg, *bundle.topg) && ok;
+  ok = write_local(var_usurf, *bundle.usurf) && ok;
+  ok = write_local(var_dhdx, *bundle.dhdx) && ok;
+  ok = write_local(var_dhdy, *bundle.dhdy) && ok;
+  ok = write_local_mask(var_cell_type, *bundle.cell_type) && ok;
+  ok = write_local(var_beta_u, bundle.beta->component(0)) && ok;
+  ok = write_local(var_beta_v, bundle.beta->component(1)) && ok;
+  ok = write_local(var_rhs_u, bundle.rhs->component(0)) && ok;
+  ok = write_local(var_rhs_v, bundle.rhs->component(1)) && ok;
+  ok = write_local(var_nuH_u, bundle.nuH->component(0)) && ok;
+  ok = write_local(var_nuH_v, bundle.nuH->component(1)) && ok;
+  ok = write_local(var_vel_prev_u, bundle.vel_prev->component(0)) && ok;
+  ok = write_local(var_vel_prev_v, bundle.vel_prev->component(1)) && ok;
+  ok = write_local(var_vel_u, bundle.vel->component(0)) && ok;
+  ok = write_local(var_vel_v, bundle.vel->component(1)) && ok;
+
+  nc_close(ncid);
+  return ok;
+}
+
 bool write_output_impl(const std::string& path, int rank, int size, bool mpi_enabled,
                        const Grid2D& grid, const IOFields2D& fields,
                        double time_value) {
@@ -1650,6 +2228,21 @@ bool NetcdfIO::write_output_append(const std::string& path,
   return write_output_append_impl(path, context.rank(), context.size(),
                                   context.mpi_enabled(), grid, fields,
                                   time_value);
+}
+
+bool NetcdfIO::write_ssa_debug_bundle(const std::string& path, const Grid2D& grid,
+                                      const SSADebugBundle2D& bundle,
+                                      double time_value) {
+  return write_ssa_debug_bundle_impl(path, 0, 1, false, grid, bundle, time_value);
+}
+
+bool NetcdfIO::write_ssa_debug_bundle(const std::string& path, const Context& context,
+                                      const Grid2D& grid,
+                                      const SSADebugBundle2D& bundle,
+                                      double time_value) {
+  return write_ssa_debug_bundle_impl(path, context.rank(), context.size(),
+                                     context.mpi_enabled(), grid, bundle,
+                                     time_value);
 }
 
 }  // namespace gpism

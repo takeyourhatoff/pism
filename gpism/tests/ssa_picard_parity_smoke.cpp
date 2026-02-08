@@ -180,7 +180,8 @@ int main() {
                                       v_center_cpu);
   gpism::SSAOperator ssa_cpu(910.0, 9.81);
   ssa_cpu.compute_basal_drag(grid_cpu, tauc_cpu, u_center_cpu, v_center_cpu,
-                             cell_cpu, beta_cpu, options.basal_params);
+                             topg_cpu, usurf_cpu, cell_cpu, beta_cpu,
+                             options.basal_params);
   viscosity_cpu.compute_nuH(grid_cpu, thk_cpu, vel_cpu, nuH_cpu,
                             options.nuH_regularization,
                             options.strength_extension_nu,
@@ -245,7 +246,8 @@ int main() {
                                       v_center_gpu);
   gpism::SSAOperator ssa_gpu(910.0, 9.81);
   ssa_gpu.compute_basal_drag(grid_gpu, tauc_gpu, u_center_gpu, v_center_gpu,
-                             cell_gpu, beta_gpu, options.basal_params);
+                             topg_gpu, usurf_gpu, cell_gpu, beta_gpu,
+                             options.basal_params);
   viscosity_gpu.compute_nuH(grid_gpu, thk_gpu, vel_gpu, nuH_gpu,
                             options.nuH_regularization,
                             options.strength_extension_nu,
@@ -425,8 +427,8 @@ int main() {
   gpism::compute_cell_center_velocity(grid_cpu, vel_lin_cpu, u_center_lin_cpu,
                                       v_center_lin_cpu);
   ssa_cpu.compute_basal_drag(grid_cpu, tauc_cpu, u_center_lin_cpu,
-                             v_center_lin_cpu, cell_cpu, beta_lin_cpu,
-                             options.basal_params);
+                             v_center_lin_cpu, topg_cpu, usurf_cpu, cell_cpu,
+                             beta_lin_cpu, options.basal_params);
   viscosity_cpu.compute_nuH(grid_cpu, thk_cpu, vel_lin_cpu, nuH_lin_cpu,
                             options.nuH_regularization,
                             options.strength_extension_nu,
@@ -438,8 +440,8 @@ int main() {
   gpism::compute_cell_center_velocity(grid_gpu, vel_lin_gpu, u_center_lin_gpu,
                                       v_center_lin_gpu);
   ssa_gpu.compute_basal_drag(grid_gpu, tauc_gpu, u_center_lin_gpu,
-                             v_center_lin_gpu, cell_gpu, beta_lin_gpu,
-                             options.basal_params);
+                             v_center_lin_gpu, topg_gpu, usurf_gpu, cell_gpu,
+                             beta_lin_gpu, options.basal_params);
   viscosity_gpu.compute_nuH(grid_gpu, thk_gpu, vel_lin_gpu, nuH_lin_gpu,
                             options.nuH_regularization,
                             options.strength_extension_nu,

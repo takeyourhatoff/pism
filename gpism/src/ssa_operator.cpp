@@ -13,15 +13,19 @@
 namespace gpism {
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
                                  int stride_u, int stride_v,
+                                 int stride_topg, int stride_usurf,
                                  int stride_mask, const double* tauc,
                                  const double* u_center,
                                  const double* v_center,
+                                 const double* topg,
+                                 const double* usurf,
                                  const int* cell_type, double* beta_u,
                                  double* beta_v, double q,
                                  double u_threshold,
                                  double plastic_regularization,
                                  double sliding_scale_factor,
                                  double beta_ice_free_bedrock,
+                                 double beta_lateral_margin,
                                  int pseudo_plastic);
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
                            int stride_dhdx, int stride_dhdy, int stride_rhs,
@@ -78,22 +82,28 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
                                      const Field2D<double>& tauc,
                                      const Field2D<double>& u_center,
                                      const Field2D<double>& v_center,
+                                     const Field2D<double>& topg,
+                                     const Field2D<double>& usurf,
                                      const Field2D<int>& cell_type,
                                      FieldStag2D<double>& beta,
                                      const BasalResistanceParams& params) const {
 #if GPISM_HAVE_CUDA
   if (tauc.has_device_data() && u_center.has_device_data() &&
-      v_center.has_device_data() && cell_type.has_device_data() &&
+      v_center.has_device_data() && topg.has_device_data() &&
+      usurf.has_device_data() && cell_type.has_device_data() &&
       beta.component(0).has_device_data() &&
       beta.component(1).has_device_data()) {
     ssa_compute_basal_drag_cuda(
         grid.local_mx(), grid.local_my(), tauc.ghost_width(), tauc.stride(),
-        u_center.stride(), v_center.stride(), cell_type.stride(),
+        u_center.stride(), v_center.stride(), topg.stride(), usurf.stride(),
+        cell_type.stride(),
         tauc.device_data(), u_center.device_data(), v_center.device_data(),
+        topg.device_data(), usurf.device_data(),
         cell_type.device_data(), beta.component(0).device_data(),
         beta.component(1).device_data(), params.q, params.u_threshold,
         params.plastic_regularization, params.sliding_scale_factor,
         params.beta_ice_free_bedrock,
+        params.beta_lateral_margin,
         params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0);
     return;
   }
@@ -107,8 +117,13 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
       (params.sliding_scale_factor > 0.0)
           ? std::pow(params.sliding_scale_factor, q)
           : 1.0;
+  const double beta_lateral_margin = std::max(0.0, params.beta_lateral_margin);
 
-  auto beta_center = [&](int i, int j) {
+  auto is_ice_free = [](int mask) {
+    return mask == IceFreeBedrock || mask == IceFreeOcean;
+  };
+
+  auto beta_center_base = [&](int i, int j) {
     const int mask = cell_type(i, j);
     if (mask == IceFreeBedrock) {
       return params.beta_ice_free_bedrock;
@@ -126,6 +141,36 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
     return tauc(i, j) / std::sqrt(mag2);
   };
 
+  auto beta_center_u = [&](int i, int j) {
+    const double base = beta_center_base(i, j);
+    if (beta_lateral_margin <= 0.0) {
+      return base;
+    }
+    const int mx = grid.local_mx();
+    const int my = grid.local_my();
+    const int jn = (j == my - 1) ? j : j + 1;
+    const int js = (j == 0) ? j : j - 1;
+    const double h = usurf(i, j);
+    const bool wall_n = is_ice_free(cell_type(i, jn)) && (topg(i, jn) > h);
+    const bool wall_s = is_ice_free(cell_type(i, js)) && (topg(i, js) > h);
+    return base + ((wall_n || wall_s) ? beta_lateral_margin : 0.0);
+  };
+
+  auto beta_center_v = [&](int i, int j) {
+    const double base = beta_center_base(i, j);
+    if (beta_lateral_margin <= 0.0) {
+      return base;
+    }
+    const int mx = grid.local_mx();
+    const int my = grid.local_my();
+    const int ie = (i == mx - 1) ? i : i + 1;
+    const int iw = (i == 0) ? i : i - 1;
+    const double h = usurf(i, j);
+    const bool wall_e = is_ice_free(cell_type(ie, j)) && (topg(ie, j) > h);
+    const bool wall_w = is_ice_free(cell_type(iw, j)) && (topg(iw, j) > h);
+    return base + ((wall_e || wall_w) ? beta_lateral_margin : 0.0);
+  };
+
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
       const int ie = (i == grid.local_mx() - 1) ? i : i + 1;
@@ -135,20 +180,21 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
       const int mask_e = cell_type(ie, j);
       const int mask_n = cell_type(i, jn);
 
-      const double beta_c = beta_center(i, j);
-      const double beta_e = beta_center(ie, j);
-      const double beta_n = beta_center(i, jn);
+      const double beta_u_c = beta_center_u(i, j);
+      const double beta_u_e = beta_center_u(ie, j);
+      const double beta_v_c = beta_center_v(i, j);
+      const double beta_v_n = beta_center_v(i, jn);
 
       if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
         beta(i, j, 0) = params.beta_ice_free_bedrock;
       } else {
-        beta(i, j, 0) = 0.5 * (beta_c + beta_e);
+        beta(i, j, 0) = 0.5 * (beta_u_c + beta_u_e);
       }
 
       if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
         beta(i, j, 1) = params.beta_ice_free_bedrock;
       } else {
-        beta(i, j, 1) = 0.5 * (beta_c + beta_n);
+        beta(i, j, 1) = 0.5 * (beta_v_c + beta_v_n);
       }
     }
   }

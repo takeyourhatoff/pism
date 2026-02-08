@@ -27,6 +27,8 @@ GPISM_GMRES_VERBOSE="${GPISM_GMRES_VERBOSE:-0}"
 GPISM_SSA_MAX_PICARD="${GPISM_SSA_MAX_PICARD:-80}"
 GPISM_GMRES_MAX_ITER="${GPISM_GMRES_MAX_ITER:-200}"
 GPISM_GMRES_TOL="${GPISM_GMRES_TOL:-1e-8}"
+GPISM_SSA_FAIL_FAST="${GPISM_SSA_FAIL_FAST:-1}"
+GPISM_SSA_FAIL_FAST_RESIDUAL_MAX="${GPISM_SSA_FAIL_FAST_RESIDUAL_MAX:-0}"
 GPISM_SSA_VEL_RELAX="${GPISM_SSA_VEL_RELAX:-0.5}"
 GPISM_SSA_NUH_RELAX="${GPISM_SSA_NUH_RELAX:-0.5}"
 GPISM_SSA_MAX_SPEED="${GPISM_SSA_MAX_SPEED:-0.5}"
@@ -148,6 +150,9 @@ params = {
     "basal_resistance.beta_ice_free_bedrock": get(
         "basal_resistance.beta_ice_free_bedrock", 1.8e9
     ),
+    "basal_resistance.beta_lateral_margin": get(
+        "basal_resistance.beta_lateral_margin", 1.0e19
+    ),
     "flow_law.isothermal_Glen.ice_softness": get(
         "flow_law.isothermal_Glen.ice_softness", 3.1689e-24
     ),
@@ -194,6 +199,9 @@ ssa.gmres_verbose=${GPISM_GMRES_VERBOSE}
 ssa.max_picard=${GPISM_SSA_MAX_PICARD}
 ssa.gmres_max_iter=${GPISM_GMRES_MAX_ITER}
 ssa.gmres_tol=${GPISM_GMRES_TOL}
+ssa.fail_fast=${GPISM_SSA_FAIL_FAST}
+ssa.fail_fast_residual_max=${GPISM_SSA_FAIL_FAST_RESIDUAL_MAX}
+ssa.fail_fast_dump_prefix=${OUTDIR}
 ssa.vel_relax=${GPISM_SSA_VEL_RELAX}
 ssa.nuH_relax=${GPISM_SSA_NUH_RELAX}
 ssa.max_speed=${GPISM_SSA_MAX_SPEED}

@@ -190,6 +190,8 @@ int main() {
   gpism::Field2D<double> thk(mx, my, gw);
   gpism::Field2D<double> dhdx(mx, my, gw);
   gpism::Field2D<double> dhdy(mx, my, gw);
+  gpism::Field2D<double> topg(mx, my, gw);
+  gpism::Field2D<double> usurf(mx, my, gw);
   gpism::Field2D<double> u_center(mx, my, gw);
   gpism::Field2D<double> v_center(mx, my, gw);
   gpism::Field2D<int> cell_type(mx, my, gw);
@@ -199,6 +201,8 @@ int main() {
       thk(i, j) = 2.0 + 0.1 * i;
       dhdx(i, j) = 0.05 + 0.01 * j;
       dhdy(i, j) = -0.02 + 0.005 * i;
+      topg(i, j) = 0.0;
+      usurf(i, j) = 0.0;
       u_center(i, j) = 0.0;
       v_center(i, j) = 0.0;
       cell_type(i, j) = gpism::GroundedIce;
@@ -214,14 +218,16 @@ int main() {
   sync_host_to_device(thk);
   sync_host_to_device(dhdx);
   sync_host_to_device(dhdy);
+  sync_host_to_device(topg);
+  sync_host_to_device(usurf);
   sync_host_to_device(u_center);
   sync_host_to_device(v_center);
   sync_host_to_device(cell_type);
 
   gpism::set(0.0, nuH);
   gpism::BasalResistanceParams basal_params;
-  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
-                         basal_params);
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, topg, usurf, cell_type,
+                         beta, basal_params);
   sync_device_to_host(beta);
   ssa.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
 
@@ -276,8 +282,8 @@ int main() {
   sync_host_to_device(x_true);
 
   gpism::set(0.5, nuH2);
-  ssa.compute_basal_drag(grid, tauc2, u_center, v_center, cell_type, beta2,
-                         basal_params);
+  ssa.compute_basal_drag(grid, tauc2, u_center, v_center, topg, usurf, cell_type,
+                         beta2, basal_params);
 
   SSAOperatorWrapper ssa_op2(ssa, grid, nuH2, beta2, nullptr);
   ssa_op2.apply(x_true, b_op);

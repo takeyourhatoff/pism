@@ -115,6 +115,8 @@ int main(int argc, char** argv) {
   gpism::Field2D<double> dhdy(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> u_center(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<double> v_center(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> topg(grid.local_mx(), grid.local_my(), gw);
+  gpism::Field2D<double> usurf(grid.local_mx(), grid.local_my(), gw);
   gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
 
   tauc.fill(100.0);
@@ -123,6 +125,8 @@ int main(int argc, char** argv) {
   dhdy.fill(-0.02);
   u_center.fill(0.0);
   v_center.fill(0.0);
+  topg.fill(0.0);
+  usurf.fill(0.0);
   cell_type.fill(gpism::GroundedIce);
 
   sync_host_to_device(tauc);
@@ -131,6 +135,8 @@ int main(int argc, char** argv) {
   sync_host_to_device(dhdy);
   sync_host_to_device(u_center);
   sync_host_to_device(v_center);
+  sync_host_to_device(topg);
+  sync_host_to_device(usurf);
   sync_host_to_device(cell_type);
 
   gpism::FieldStag2D<double> beta(grid.local_mx(), grid.local_my(), gw);
@@ -141,8 +147,8 @@ int main(int argc, char** argv) {
   gpism::FieldStag2D<double> r(grid.local_mx(), grid.local_my(), gw);
 
   gpism::BasalResistanceParams basal_params;
-  ssa.compute_basal_drag(grid, tauc, u_center, v_center, cell_type, beta,
-                         basal_params);
+  ssa.compute_basal_drag(grid, tauc, u_center, v_center, topg, usurf, cell_type,
+                         beta, basal_params);
   ssa.assemble_rhs(grid, thk, dhdx, dhdy, rhs);
 
   sync_device_to_host(beta);

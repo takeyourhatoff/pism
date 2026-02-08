@@ -20,6 +20,9 @@ struct BasalResistanceParams {
   double plastic_regularization = 0.01;
   double sliding_scale_factor = -1.0;
   double beta_ice_free_bedrock = 0.0;
+  // Large drag applied along "fjord walls" (ice-free neighbors with bed above
+  // local ice surface elevation) to suppress flow along margins.
+  double beta_lateral_margin = 0.0;
 };
 
 class SSAOperator {
@@ -29,6 +32,8 @@ public:
   void compute_basal_drag(const Grid2D& grid, const Field2D<double>& tauc,
                           const Field2D<double>& u_center,
                           const Field2D<double>& v_center,
+                          const Field2D<double>& topg,
+                          const Field2D<double>& usurf,
                           const Field2D<int>& cell_type,
                           FieldStag2D<double>& beta,
                           const BasalResistanceParams& params) const;

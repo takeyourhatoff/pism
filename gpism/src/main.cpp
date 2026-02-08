@@ -366,6 +366,10 @@ int main(int argc, char** argv) {
         config.get_bool("ssa.gmres.precond_diagnostic");
     ssa_options.use_bc = fields.has_vel_bc;
     ssa_options.enforce_ice_free_bc = config.get_bool("ssa.enforce_ice_free_bc");
+    ssa_options.fail_fast = config.get_bool("ssa.fail_fast");
+    ssa_options.fail_fast_residual_max = config.get_double("ssa.fail_fast_residual_max");
+    ssa_options.fail_fast_dump_prefix = config.get_string("ssa.fail_fast_dump_prefix");
+    ssa_options.config_override_path = options.config_override_path;
     ssa_options.sea_level = sea_level;
     ssa_options.rho_ice = rho_ice;
     ssa_options.rho_water = rho_water;
@@ -386,6 +390,8 @@ int main(int argc, char** argv) {
         config.get_double("basal_resistance.pseudo_plastic.sliding_scale_factor");
     basal_params.beta_ice_free_bedrock =
         config.get_double("basal_resistance.beta_ice_free_bedrock");
+    basal_params.beta_lateral_margin =
+        config.get_double("basal_resistance.beta_lateral_margin");
     basal_params.law =
         config.get_bool("basal_resistance.pseudo_plastic.enabled")
             ? gpism::BasalResistanceLaw::PseudoPlastic
@@ -578,11 +584,16 @@ int main(int argc, char** argv) {
       }
 
       if (run_ssa) {
-        solver.solve(fields.thk, fields.topg, fields.tauc,
-                     fields.has_vel_bc ? &fields.u_bc : nullptr,
-                     fields.has_vel_bc ? &fields.v_bc : nullptr,
-                     fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
-                     vel, ssa_options);
+        try {
+          solver.solve(fields.thk, fields.topg, fields.tauc,
+                       fields.has_vel_bc ? &fields.u_bc : nullptr,
+                       fields.has_vel_bc ? &fields.v_bc : nullptr,
+                       fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
+                       vel, ssa_options);
+        } catch (const std::exception& exc) {
+          std::cerr << "SSA failure: " << exc.what() << '\n';
+          return 2;
+        }
       }
 
       if (thermo_enabled) {
