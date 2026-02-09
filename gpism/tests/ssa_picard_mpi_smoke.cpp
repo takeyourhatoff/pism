@@ -161,7 +161,8 @@ int main(int argc, char** argv) {
     gpism::Field2D<int> cell_type(grid.local_mx(), grid.local_my(), gw);
     gpism::FieldStag2D<double> rhs(grid.local_mx(), grid.local_my(), gw);
     gpism::compute_cell_type(grid, thk, topg, options.sea_level,
-                             options.rho_ice, options.rho_water, cell_type);
+                             options.rho_ice, options.rho_water,
+                             options.ice_free_thickness_standard, cell_type);
     gpism::compute_usurf_flotation(grid, thk, topg, cell_type, options.sea_level,
                                    options.rho_ice, options.rho_water, usurf);
     gpism::compute_surface_slopes_pism(grid, usurf, cell_type, dhdx, dhdy,
@@ -201,7 +202,8 @@ int main(int argc, char** argv) {
     gpism::Field2D<double> dhdx_cpu(grid.local_mx(), grid.local_my(), gw);
     gpism::Field2D<double> dhdy_cpu(grid.local_mx(), grid.local_my(), gw);
     gpism::compute_cell_type(grid, thk, topg, options.sea_level,
-                             options.rho_ice, options.rho_water, cell_type_cpu);
+                             options.rho_ice, options.rho_water,
+                             options.ice_free_thickness_standard, cell_type_cpu);
     gpism::compute_usurf_flotation(grid, thk, topg, cell_type_cpu,
                                    options.sea_level, options.rho_ice,
                                    options.rho_water, usurf_cpu);

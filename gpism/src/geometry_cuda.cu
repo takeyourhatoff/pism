@@ -65,7 +65,8 @@ __device__ inline double diff_centered(double left, double /*center*/,
 __global__ void cell_type_kernel(int mx, int my, int gw, int stride,
                                  const double* thk, const double* topg,
                                  int* cell_type, double sea_level,
-                                 double rho_ice, double rho_water) {
+                                 double rho_ice, double rho_water,
+                                 double ice_free_thickness_threshold) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
@@ -74,17 +75,17 @@ __global__ void cell_type_kernel(int mx, int my, int gw, int stride,
   const int c = idx(i, j, gw, stride);
   const double H = thk[c];
   const double bed = topg[c];
+  const double H_thr = fmax(0.0, ice_free_thickness_threshold);
+  const double alpha = 1.0 - (rho_ice / rho_water);
+  const double hgrounded = bed + H;
+  const double hfloating = sea_level + alpha * H;
+  const bool is_floating = (hfloating > hgrounded);
+  const bool ice_free = (H <= H_thr);
   int mask = IceFreeBedrock;
-  if (H > 0.0) {
-    const double floatation_thk =
-        (sea_level - bed) * (rho_water / rho_ice);
-    if (floatation_thk > 0.0 && H <= floatation_thk) {
-      mask = FloatingIce;
-    } else {
-      mask = GroundedIce;
-    }
+  if (is_floating) {
+    mask = ice_free ? IceFreeOcean : FloatingIce;
   } else {
-    mask = (bed < sea_level) ? IceFreeOcean : IceFreeBedrock;
+    mask = ice_free ? IceFreeBedrock : GroundedIce;
   }
   cell_type[c] = mask;
 }
@@ -102,10 +103,8 @@ __global__ void usurf_kernel(int mx, int my, int gw, int stride,
   const double H = thk[c];
   const double bed = topg[c];
   const int mask = cell_type ? cell_type[c] : GroundedIce;
-  if (mask == FloatingIce) {
+  if (mask == FloatingIce || mask == IceFreeOcean) {
     usurf[c] = sea_level + (1.0 - (rho_ice / rho_water)) * H;
-  } else if (mask == IceFreeOcean) {
-    usurf[c] = sea_level;
   } else {
     usurf[c] = bed + H;
   }
@@ -115,16 +114,23 @@ __global__ void slope_kernel(int mx, int my, int gw, int stride,
                              const double* usurf, double* dhdx, double* dhdy,
                              const int* cell_type, int stride_mask,
                              int surface_gradient_inward, int uphill,
-                             int use_cfbc, double inv_dx, double inv_dy) {
+                             int use_cfbc, int periodic, double inv_dx,
+                             double inv_dy) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
     return;
   }
-  const int il = (i == 0) ? 0 : (i - 1);
-  const int ir = (i == mx - 1) ? (mx - 1) : (i + 1);
-  const int jd = (j == 0) ? 0 : (j - 1);
-  const int ju = (j == my - 1) ? (my - 1) : (j + 1);
+  const int il =
+      periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? 0 : (i - 1));
+  const int ir =
+      periodic ? ((i == mx - 1) ? 0 : (i + 1))
+               : ((i == mx - 1) ? (mx - 1) : (i + 1));
+  const int jd =
+      periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? 0 : (j - 1));
+  const int ju =
+      periodic ? ((j == my - 1) ? 0 : (j + 1))
+               : ((j == my - 1) ? (my - 1) : (j + 1));
   const int c = idx(i, j, gw, stride);
   const int idx_left = idx(il, j, gw, stride);
   const int idx_right = idx(ir, j, gw, stride);
@@ -138,12 +144,8 @@ __global__ void slope_kernel(int mx, int my, int gw, int stride,
   const double h_n = usurf[idx_up];
 
   if (surface_gradient_inward) {
-    const double left = (i == 0) ? h_c : h_w;
-    const double right = (i == mx - 1) ? h_c : h_e;
-    const double down = (j == 0) ? h_c : h_s;
-    const double up = (j == my - 1) ? h_c : h_n;
-    dhdx[c] = 0.5 * (right - left) * inv_dx;
-    dhdy[c] = 0.5 * (up - down) * inv_dy;
+    dhdx[c] = 0.5 * (h_e - h_w) * inv_dx;
+    dhdy[c] = 0.5 * (h_n - h_s) * inv_dy;
     return;
   }
 
@@ -200,13 +202,15 @@ __global__ void slope_kernel(int mx, int my, int gw, int stride,
 void compute_cell_type_cuda(int mx, int my, int gw, int stride,
                             const double* thk, const double* topg,
                             int* cell_type, double sea_level, double rho_ice,
-                            double rho_water) {
+                            double rho_water,
+                            double ice_free_thickness_threshold) {
   CudaEventTimer timer("geometry_cell_type");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
   cell_type_kernel<<<grid_dim, block>>>(mx, my, gw, stride, thk, topg, cell_type,
-                                        sea_level, rho_ice, rho_water);
+                                        sea_level, rho_ice, rho_water,
+                                        ice_free_thickness_threshold);
 }
 
 void compute_usurf_flotation_cuda(int mx, int my, int gw, int stride,
@@ -225,15 +229,15 @@ void compute_usurf_flotation_cuda(int mx, int my, int gw, int stride,
 void compute_surface_slopes_pism_cuda(
     int mx, int my, int gw, int stride, const double* usurf,
     double* dhdx, double* dhdy, const int* cell_type, int stride_mask,
-    int surface_gradient_inward, int uphill, int use_cfbc, double inv_dx,
-    double inv_dy) {
+    int surface_gradient_inward, int uphill, int use_cfbc, int periodic,
+    double inv_dx, double inv_dy) {
   CudaEventTimer timer("geometry_slopes");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
                 (my + block.y - 1) / block.y);
   slope_kernel<<<grid_dim, block>>>(
       mx, my, gw, stride, usurf, dhdx, dhdy, cell_type, stride_mask,
-      surface_gradient_inward, uphill, use_cfbc, inv_dx, inv_dy);
+      surface_gradient_inward, uphill, use_cfbc, periodic, inv_dx, inv_dy);
 }
 
 void GeometryDiagnostics::compute_usurf(const Grid2D& grid, const Field2D<double>& thk,
@@ -263,10 +267,12 @@ void GeometryDiagnostics::compute_surface_slopes(const Grid2D& grid,
     dim3 block(16, 16);
     dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
                   (grid.local_my() + block.y - 1) / block.y);
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     slope_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
                                       usurf.ghost_width(), usurf.stride(),
                                       usurf.device_data(), dhdx.device_data(),
                                       dhdy.device_data(), nullptr, 0, 0, 0, 0,
+                                      periodic,
                                       1.0 / grid.dx(), 1.0 / grid.dy());
     return;
   }

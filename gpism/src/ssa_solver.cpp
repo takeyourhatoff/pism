@@ -22,6 +22,10 @@
 #include "gpism/mg_preconditioner.h"
 #include "gpism/thickness.h"
 
+#if GPISM_HAVE_CUDA
+#include <cuda_runtime.h>
+#endif
+
 #if GPISM_HAVE_NETCDF
 #include "gpism/netcdf_io.h"
 #endif
@@ -39,6 +43,10 @@ void ssa_relax_nuH_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 void ssa_relax_vel_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                         const double* vel_prev_u, const double* vel_prev_v,
                         double* vel_u, double* vel_v, double vel_relax);
+void ssa_extrapolate_velocity_cuda(int mx, int my, int gw, int stride_cell_type,
+                                   int stride_u, int stride_v,
+                                   const int* cell_type,
+                                   double* u, double* v);
 }  // namespace gpism
 #endif
 
@@ -433,8 +441,8 @@ double clamp_value(double value, double min_value, double max_value) {
 }
 
 void apply_nuH_constraints(FieldStag2D<double>& nuH,
-                           const FieldStag2D<double>& nuH_prev,
-                           const SSASolverOptions& options) {
+                           const FieldStag2D<double>& nuH_prev, double nuH_min,
+                           double nuH_max, double nuH_relax) {
 #if GPISM_HAVE_CUDA
   if (nuH.component(0).has_device_data() && nuH.component(1).has_device_data() &&
       nuH_prev.component(0).has_device_data() &&
@@ -444,8 +452,8 @@ void apply_nuH_constraints(FieldStag2D<double>& nuH,
                        nuH_prev.component(0).device_data(),
                        nuH_prev.component(1).device_data(),
                        nuH.component(0).device_data(),
-                       nuH.component(1).device_data(), options.nuH_min,
-                       options.nuH_max, options.nuH_relax);
+                       nuH.component(1).device_data(), nuH_min, nuH_max,
+                       nuH_relax);
     return;
   }
 #endif
@@ -453,10 +461,10 @@ void apply_nuH_constraints(FieldStag2D<double>& nuH,
     for (int i = 0; i < nuH.local_mx(); ++i) {
       for (int comp = 0; comp < 2; ++comp) {
         double value = nuH(i, j, comp);
-        value = clamp_value(value, options.nuH_min, options.nuH_max);
-        if (options.nuH_relax < 1.0) {
-          value = options.nuH_relax * value +
-                  (1.0 - options.nuH_relax) * nuH_prev(i, j, comp);
+        value = clamp_value(value, nuH_min, nuH_max);
+        if (nuH_relax < 1.0) {
+          value =
+              nuH_relax * value + (1.0 - nuH_relax) * nuH_prev(i, j, comp);
         }
         nuH(i, j, comp) = value;
       }
@@ -486,6 +494,63 @@ void apply_vel_relax(FieldStag2D<double>& vel,
                      (1.0 - vel_relax) * vel_prev(i, j, 0);
       vel(i, j, 1) = vel_relax * vel(i, j, 1) +
                      (1.0 - vel_relax) * vel_prev(i, j, 1);
+    }
+  }
+}
+
+bool is_ice_free_cell(int mask) {
+  return mask == IceFreeBedrock || mask == IceFreeOcean;
+}
+
+bool is_icy_cell(int mask) { return mask == GroundedIce || mask == FloatingIce; }
+
+void extrapolate_velocity_to_margins(const Grid2D& grid,
+                                     const Field2D<int>& cell_type,
+                                     FieldStag2D<double>& vel) {
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  Field2D<double>& u = vel.component(0);
+  Field2D<double>& v = vel.component(1);
+
+  for (int j = 0; j < my; ++j) {
+    for (int i = 0; i < mx; ++i) {
+      if (!is_ice_free_cell(cell_type(i, j))) {
+        continue;
+      }
+      double sum_u = 0.0;
+      double sum_v = 0.0;
+      int n = 0;
+
+      // North
+      if (j + 1 < my && is_icy_cell(cell_type(i, j + 1))) {
+        sum_u += u(i, j + 1);
+        sum_v += v(i, j + 1);
+        ++n;
+      }
+      // East
+      if (i + 1 < mx && is_icy_cell(cell_type(i + 1, j))) {
+        sum_u += u(i + 1, j);
+        sum_v += v(i + 1, j);
+        ++n;
+      }
+      // South
+      if (j > 0 && is_icy_cell(cell_type(i, j - 1))) {
+        sum_u += u(i, j - 1);
+        sum_v += v(i, j - 1);
+        ++n;
+      }
+      // West
+      if (i > 0 && is_icy_cell(cell_type(i - 1, j))) {
+        sum_u += u(i - 1, j);
+        sum_v += v(i - 1, j);
+        ++n;
+      }
+
+      if (n > 0) {
+        const double inv = 1.0 / static_cast<double>(n);
+        u(i, j) = sum_u * inv;
+        v(i, j) = sum_v * inv;
+      }
     }
   }
 }
@@ -664,12 +729,9 @@ void apply_speed_scale(const Grid2D& grid, const Field2D<double>& speed_scale,
   const int my = grid.local_my();
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
-      const int ie = (i == mx - 1) ? i : i + 1;
-      const int jn = (j == my - 1) ? j : j + 1;
-      const double su = std::min(speed_scale(i, j), speed_scale(ie, j));
-      const double sv = std::min(speed_scale(i, j), speed_scale(i, jn));
-      vel(i, j, 0) *= su;
-      vel(i, j, 1) *= sv;
+      const double s = speed_scale(i, j);
+      vel(i, j, 0) *= s;
+      vel(i, j, 1) *= s;
     }
   }
 #if GPISM_HAVE_CUDA
@@ -703,8 +765,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   auto& dhdx = workspace_.dhdx;
   auto& dhdy = workspace_.dhdy;
   auto& cell_type = workspace_.cell_type;
-  auto& u_center = workspace_.u_center;
-  auto& v_center = workspace_.v_center;
   auto& beta = workspace_.beta;
   auto& rhs = workspace_.rhs;
   auto& nuH = workspace_.nuH;
@@ -715,9 +775,13 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   auto& bc_values = workspace_.bc_values;
   SSABoundaryCondition bc;
 
+  Field2D<double>& u_center = vel.component(0);
+  Field2D<double>& v_center = vel.component(1);
+
   GeometryDiagnostics geometry;
   compute_cell_type(grid_, thk, topg, options.sea_level, options.rho_ice,
-                    options.rho_water, cell_type);
+                    options.rho_water, options.ice_free_thickness_standard,
+                    cell_type);
   if (context && context->mpi_enabled() && context->size() > 1) {
     exchange_for_device(cell_type, grid_, *context);
   }
@@ -767,36 +831,36 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     exchange_for_device(rhs, grid_, *context);
   }
 
+  // Initialize nuH from the initial velocity guess so that nuH relaxation (if
+  // enabled) starts from a physically meaningful field. Starting from all-zeros
+  // can slow Picard convergence dramatically and lead to large divergences
+  // from PISM on real-world problems.
+  if (context && context->mpi_enabled() && context->size() > 1) {
+    exchange_for_device(vel, grid_, *context);
+  }
+  viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
+                         options.strength_extension_nu,
+                         options.strength_extension_min_thickness,
+                         options.enthalpy, options.enthalpy_gamma,
+                         options.enthalpy_ref);
+  copy(nuH, nuH_prev);
+  if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
+      options.nuH_relax < 1.0) {
+    apply_nuH_constraints(nuH, nuH_prev, options.nuH_min, options.nuH_max,
+                          options.nuH_relax);
+  }
+  if (context && context->mpi_enabled() && context->size() > 1) {
+    exchange_for_device(nuH, grid_, *context);
+  }
+
   for (int iter = 0; iter < options.max_picard; ++iter) {
     copy(nuH, nuH_prev);
     copy(vel, vel_prev);
-
-    compute_cell_center_velocity(grid_, vel, u_center, v_center);
-    if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(u_center, grid_, *context);
-      exchange_for_device(v_center, grid_, *context);
-    }
 
     ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, topg, usurf,
                             cell_type, beta, options.basal_params);
     if (context && context->mpi_enabled() && context->size() > 1) {
       exchange_for_device(beta, grid_, *context);
-    }
-
-    if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(vel, grid_, *context);
-    }
-    viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
-                           options.strength_extension_nu,
-                           options.strength_extension_min_thickness,
-                           options.enthalpy, options.enthalpy_gamma,
-                           options.enthalpy_ref);
-    if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
-        options.nuH_relax < 1.0) {
-      apply_nuH_constraints(nuH, nuH_prev, options);
-    }
-    if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(nuH, grid_, *context);
     }
 
     if (options.diagnostic && iter == 0) {
@@ -962,7 +1026,7 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       } else if (options.fail_fast_require_converged && !gmres_result.converged) {
         ok = false;
         reason = "GMRES did not converge";
-      } else if (!field_stats(vel).all_finite) {
+      } else if (!std::isfinite(norm1(vel))) {
         ok = false;
         reason = "SSA velocity contains non-finite values";
       }
@@ -1025,15 +1089,12 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     }
 
     if (options.max_speed > 0.0) {
-      compute_cell_center_velocity(grid_, vel, u_center, v_center);
       compute_speed_scale(grid_, u_center, v_center, options.max_speed,
                           speed_scale);
       apply_speed_scale(grid_, speed_scale, vel);
 
-      // The staggered representation + boundary clamping can allow small
-      // violations if scaling is imperfect. Enforce a strict cap by checking
-      // the resulting cell-center speed and applying a global rescale if needed.
-      compute_cell_center_velocity(grid_, vel, u_center, v_center);
+      // Enforce a strict cap by checking the resulting cell-center speed and
+      // applying a global rescale if needed.
       const double smax = max_center_speed(grid_, u_center, v_center, context);
       if (smax > options.max_speed * (1.0 + 1e-12) && smax > 0.0) {
         const double factor = options.max_speed / smax;
@@ -1046,10 +1107,37 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       }
     }
 
-    double nuH_diff_local = 0.0;
-    double nuH_norm_local = 0.0;
-    double vel_diff_local = 0.0;
-    double vel_norm_local = 0.0;
+    // Update viscosity using the new velocity iterate and check nonlinear
+    // convergence based on nuH changes (PISM SSAFD semantics).
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(vel, grid_, *context);
+    }
+    viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
+                           options.strength_extension_nu,
+                           options.strength_extension_min_thickness,
+                           options.enthalpy, options.enthalpy_gamma,
+                           options.enthalpy_ref);
+    if (options.nuH_min > 0.0 || options.nuH_max > 0.0 ||
+        options.nuH_relax < 1.0) {
+      // Apply nuH damping only after the first Picard iteration. Workspace
+      // storage starts at zero, so damping on iter=0 would artificially halve
+      // nuH (including the epsilon regularization) and can destabilize the
+      // solve.
+      const double nuH_relax = (iter == 0) ? 1.0 : options.nuH_relax;
+      apply_nuH_constraints(nuH, nuH_prev, options.nuH_min, options.nuH_max,
+                            nuH_relax);
+    }
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(nuH, grid_, *context);
+    }
+
+    // PISM SSAFD convergence uses an L1-based norm for nuH.
+    double nuH_norm1_u_local = 0.0;
+    double nuH_norm1_v_local = 0.0;
+    double nuH_diff_norm1_u_local = 0.0;
+    double nuH_diff_norm1_v_local = 0.0;
+    double vel_diff_norm2_sq_local = 0.0;
+    double vel_norm2_sq_local = 0.0;
     if (options.force_host_convergence) {
       const bool was_device = device_enabled();
       if (was_device) {
@@ -1059,36 +1147,71 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
         sync_device_to_host(vel_prev);
         set_device_enabled(false);
       }
-      nuH_diff_local = diff_norm1(nuH, nuH_prev);
-      nuH_norm_local = norm1(nuH_prev);
-      vel_diff_local = diff_norm1(vel, vel_prev);
-      vel_norm_local = norm1(vel_prev);
+      nuH_norm1_u_local = norm1(nuH.component(0));
+      nuH_norm1_v_local = norm1(nuH.component(1));
+      nuH_diff_norm1_u_local =
+          diff_norm1(nuH.component(0), nuH_prev.component(0));
+      nuH_diff_norm1_v_local =
+          diff_norm1(nuH.component(1), nuH_prev.component(1));
+
+      const double vel_prev_norm2_sq = dot(vel_prev, vel_prev);
+      const double vel_norm2_sq = dot(vel, vel);
+      const double vel_cross = dot(vel, vel_prev);
+      vel_diff_norm2_sq_local =
+          vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
+      vel_norm2_sq_local = vel_norm2_sq;
       if (was_device) {
         set_device_enabled(true);
       }
     } else {
-      nuH_diff_local = diff_norm1(nuH, nuH_prev);
-      nuH_norm_local = norm1(nuH_prev);
-      vel_diff_local = diff_norm1(vel, vel_prev);
-      vel_norm_local = norm1(vel_prev);
+      nuH_norm1_u_local = norm1(nuH.component(0));
+      nuH_norm1_v_local = norm1(nuH.component(1));
+      nuH_diff_norm1_u_local =
+          diff_norm1(nuH.component(0), nuH_prev.component(0));
+      nuH_diff_norm1_v_local =
+          diff_norm1(nuH.component(1), nuH_prev.component(1));
+
+      const double vel_prev_norm2_sq = dot(vel_prev, vel_prev);
+      const double vel_norm2_sq = dot(vel, vel);
+      const double vel_cross = dot(vel, vel_prev);
+      vel_diff_norm2_sq_local =
+          vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
+      vel_norm2_sq_local = vel_norm2_sq;
     }
 
-    const double nuH_diff = global_sum(context, nuH_diff_local);
-    const double nuH_norm = std::max(global_sum(context, nuH_norm_local), 1e-12);
-    result.nuH_change = nuH_diff / nuH_norm;
+    const double nuH_norm1_u =
+        std::max(0.0, global_sum(context, nuH_norm1_u_local));
+    const double nuH_norm1_v =
+        std::max(0.0, global_sum(context, nuH_norm1_v_local));
+    const double nuH_diff_norm1_u =
+        std::max(0.0, global_sum(context, nuH_diff_norm1_u_local));
+    const double nuH_diff_norm1_v =
+        std::max(0.0, global_sum(context, nuH_diff_norm1_v_local));
 
-    const double vel_diff = global_sum(context, vel_diff_local);
-    const double vel_norm = std::max(global_sum(context, vel_norm_local), 1e-12);
-    result.vel_change = vel_diff / vel_norm;
+    const double nuH_norm =
+        std::sqrt(nuH_norm1_u * nuH_norm1_u + nuH_norm1_v * nuH_norm1_v);
+    const double nuH_norm_change =
+        std::sqrt(nuH_diff_norm1_u * nuH_diff_norm1_u +
+                  nuH_diff_norm1_v * nuH_diff_norm1_v);
+    result.nuH_change = nuH_norm_change / std::max(nuH_norm, 1e-24);
 
+    const double vel_diff_norm2_sq =
+        std::max(0.0, global_sum(context, vel_diff_norm2_sq_local));
+    const double vel_norm2_sq =
+        std::max(global_sum(context, vel_norm2_sq_local), 1e-24);
+    result.vel_change = std::sqrt(vel_diff_norm2_sq / vel_norm2_sq);
+
+    const bool vel_convergence_enabled = options.tol_vel > 0.0;
     const bool converged = result.nuH_change <= options.tol_nuH &&
-                           result.vel_change <= options.tol_vel;
+                           (!vel_convergence_enabled ||
+                            result.vel_change <= options.tol_vel);
     if (options.diagnostic && is_rank0(context)) {
       std::cout << "SSA Picard iter " << iter
                 << ": GMRES iters=" << gmres_result.iterations
                 << " residual=" << gmres_result.residual
                 << " nuH_change=" << result.nuH_change
                 << " vel_change=" << result.vel_change
+                << " vel_check=" << (vel_convergence_enabled ? "on" : "off")
                 << " converged=" << (converged ? "yes" : "no") << '\n';
     }
 
@@ -1096,6 +1219,58 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     if (converged) {
       result.converged = true;
       break;
+    }
+  }
+
+  // Log final, converged field values at diagnostic points. At this point `nuH`
+  // corresponds to the latest velocity iterate, but `beta` was computed using
+  // the velocity at the start of the last Picard iteration. Recompute `beta`
+  // using the final velocity so diagnostics are comparable to PISM.
+  if (options.diagnostic && result.converged) {
+    ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, topg, usurf,
+                            cell_type, beta, options.basal_params);
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(beta, grid_, *context);
+    }
+    log_diag_points(grid_, result.picard_iters, cell_type, thk, topg, usurf,
+                    dhdx, dhdy, u_center, v_center, nuH, beta, rhs, context);
+  }
+
+  if (options.extrapolate_at_margins && result.converged) {
+#if GPISM_HAVE_CUDA
+    if (cell_type.has_device_data() && u_center.has_device_data() &&
+        v_center.has_device_data()) {
+      ssa_extrapolate_velocity_cuda(
+          grid_.local_mx(), grid_.local_my(), grid_.ghost_width(),
+          cell_type.stride(), u_center.stride(), v_center.stride(),
+          cell_type.device_data(), u_center.device_data(),
+          v_center.device_data());
+      cudaError_t err = cudaGetLastError();
+      if (err != cudaSuccess && is_rank0(context)) {
+        std::cerr << "ssa_extrapolate_velocity_cuda launch failed: "
+                  << cudaGetErrorString(err) << "\n";
+      }
+    } else
+#endif
+    {
+      const bool have_device =
+          vel.component(0).has_device_data() && vel.component(1).has_device_data();
+      if (have_device) {
+        sync_device_to_host(vel);
+      }
+      if (cell_type.has_device_data()) {
+        sync_device_to_host(cell_type);
+      }
+      extrapolate_velocity_to_margins(grid_, cell_type, vel);
+#if GPISM_HAVE_CUDA
+      if (have_device) {
+        sync_host_to_device(vel);
+      }
+#endif
+    }
+
+    if (context && context->mpi_enabled() && context->size() > 1) {
+      exchange_for_device(vel, grid_, *context);
     }
   }
 

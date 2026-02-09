@@ -87,8 +87,12 @@ void RuntimeConfig::load_defaults() {
   values_["stress_balance.ssa.Glen_exponent"] = "3.0";
   values_["stress_balance.ssa.enhancement_factor"] = "1.0";
   values_["stress_balance.ssa.epsilon"] = "1.0e13";
+  // PISM default: cells thinner than this are treated as ice-free for stress
+  // balance computations (e.g. SSA cell type and surface elevation).
+  values_["stress_balance.ice_free_thickness_standard"] = "10.0";
   values_["stress_balance.ssa.compute_surface_gradient_inward"] = "0";
   values_["stress_balance.ssa.fd.upstream_surface_slope_approximation"] = "1";
+  values_["stress_balance.ssa.fd.extrapolate_at_margins"] = "1";
   values_["stress_balance.calving_front_stress_bc"] = "0";
   // Strength extension parameters (PISM defaults). These control a "notional"
   // constant viscosity used to keep SSA elliptic when ice is thin.

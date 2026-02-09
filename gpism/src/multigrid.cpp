@@ -85,7 +85,7 @@ void mg_jacobi_fused_cuda(
     double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
     const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
-    const double* bc_v, int has_bc, int has_values);
+    const double* bc_v, int has_bc, int has_values, int periodic);
 void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                              const double* r_u, const double* r_v,
                              const double* diag_u, const double* diag_v,
@@ -119,7 +119,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const double* beta_v, double* out_u, double* out_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, int stride_mask_u, int stride_mask_v,
-                    const int* mask_u, const int* mask_v, int has_bc);
+                    const int* mask_u, const int* mask_v, int has_bc,
+                    int periodic);
 void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            int stride_nu_u, int stride_nu_v, int stride_beta_u,
                            int stride_beta_v, int stride_out_u, int stride_out_v,
@@ -129,7 +130,8 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            double inv_dx2, double inv_dy2, double inv_2dx,
                            double inv_2dy, int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
-                           int i_start, int i_end, int j_start, int j_end);
+                           int i_start, int i_end, int j_start, int j_end,
+                           int periodic);
 #endif
 
 void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -522,17 +524,23 @@ void restrict_stag(const FieldStag2D<double>& fine, FieldStag2D<double>& coarse)
     return;
   }
 #endif
+  const int fine_mx = fine.local_mx();
+  const int fine_my = fine.local_my();
   const int coarse_mx = coarse.local_mx();
   const int coarse_my = coarse.local_my();
   for (int j = 0; j < coarse_my; ++j) {
+    const int fj0 = std::min(2 * j, fine_my - 1);
+    const int fj1 = std::min(fj0 + 1, fine_my - 1);
     for (int i = 0; i < coarse_mx; ++i) {
-      const int fi = 2 * i;
-      const int fj = 2 * j;
+      const int fi0 = std::min(2 * i, fine_mx - 1);
+      const int fi1 = std::min(fi0 + 1, fine_mx - 1);
       for (int comp = 0; comp < 2; ++comp) {
-        const double v00 = fine(fi, fj, comp);
-        const double v10 = fine(fi + 1, fj, comp);
-        const double v01 = fine(fi, fj + 1, comp);
-        const double v11 = fine(fi + 1, fj + 1, comp);
+        // Clamp fine indices so odd-sized fine grids restrict correctly without
+        // pulling in (potentially stale) ghost values.
+        const double v00 = fine(fi0, fj0, comp);
+        const double v10 = fine(fi1, fj0, comp);
+        const double v01 = fine(fi0, fj1, comp);
+        const double v11 = fine(fi1, fj1, comp);
         coarse(i, j, comp) = 0.25 * (v00 + v10 + v01 + v11);
       }
     }
@@ -645,6 +653,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
     const double inv_dy2 = 1.0 / (dy * dy);
     const double inv_2dx = 1.0 / (2.0 * dx);
     const double inv_2dy = 1.0 / (2.0 * dy);
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     const int mask_stride_u =
         has_bc ? bc->mask->component(0).stride() : 0;
     const int mask_stride_v =
@@ -667,7 +676,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
             inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
             has_bc ? bc->mask->component(0).device_data() : nullptr,
             has_bc ? bc->mask->component(1).device_data() : nullptr,
-            has_bc ? 1 : 0, i0, i1, j0, j1);
+            has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
       }
 #if GPISM_HAVE_MPI
       exchange.finish_exchange(handle);
@@ -686,7 +695,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
               inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
               has_bc ? bc->mask->component(0).device_data() : nullptr,
               has_bc ? bc->mask->component(1).device_data() : nullptr,
-              has_bc ? 1 : 0, is, ie, js, je);
+              has_bc ? 1 : 0, is, ie, js, je, periodic);
         }
       };
       apply_band(0, gw, 0, my);
@@ -706,7 +715,7 @@ void compute_residual(const Grid2D& grid, const FieldStag2D<double>& nuH,
           inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
           has_bc ? bc->mask->component(0).device_data() : nullptr,
           has_bc ? bc->mask->component(1).device_data() : nullptr,
-          has_bc ? 1 : 0);
+          has_bc ? 1 : 0, periodic);
     }
     mg_residual_cuda(
         mx, my, r.ghost_width(),
@@ -787,6 +796,7 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
     const double inv_dy2 = 1.0 / (dy * dy);
     const double inv_2dx = 1.0 / (2.0 * dx);
     const double inv_2dy = 1.0 / (2.0 * dy);
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     const int mask_stride_u =
         has_bc ? bc->mask->component(0).stride() : 0;
     const int mask_stride_v =
@@ -809,7 +819,7 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
             inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
             has_bc ? bc->mask->component(0).device_data() : nullptr,
             has_bc ? bc->mask->component(1).device_data() : nullptr,
-            has_bc ? 1 : 0, i0, i1, j0, j1);
+            has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
       }
 #if GPISM_HAVE_MPI
       exchange.finish_exchange(handle);
@@ -828,7 +838,7 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
               inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
               has_bc ? bc->mask->component(0).device_data() : nullptr,
               has_bc ? bc->mask->component(1).device_data() : nullptr,
-              has_bc ? 1 : 0, is, ie, js, je);
+              has_bc ? 1 : 0, is, ie, js, je, periodic);
         }
       };
       apply_band(0, gw, 0, my);
@@ -848,7 +858,7 @@ void apply_operator(const Grid2D& grid, const FieldStag2D<double>& nuH,
           inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
           has_bc ? bc->mask->component(0).device_data() : nullptr,
           has_bc ? bc->mask->component(1).device_data() : nullptr,
-          has_bc ? 1 : 0);
+          has_bc ? 1 : 0, periodic);
     }
     return;
   }
@@ -909,6 +919,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
     const double inv_dy2 = 1.0 / (dy * dy);
     const double inv_2dx = 1.0 / (2.0 * dx);
     const double inv_2dy = 1.0 / (2.0 * dy);
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     const int mask_stride_u =
         has_bc ? bc->mask->component(0).stride() : 0;
     const int mask_stride_v =
@@ -939,7 +950,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
             bc_stride_u, bc_stride_v,
             has_values ? bc->values->component(0).device_data() : nullptr,
             has_values ? bc->values->component(1).device_data() : nullptr,
-            has_bc ? 1 : 0, has_values ? 1 : 0);
+            has_bc ? 1 : 0, has_values ? 1 : 0, periodic);
       }
       return;
     }
@@ -989,7 +1000,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
               inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
               has_bc ? bc->mask->component(0).device_data() : nullptr,
               has_bc ? bc->mask->component(1).device_data() : nullptr,
-              has_bc ? 1 : 0, i0, i1, j0, j1);
+              has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
         }
 #if GPISM_HAVE_MPI
         exchange.finish_exchange(handle);
@@ -1009,7 +1020,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
                 inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
                 has_bc ? bc->mask->component(0).device_data() : nullptr,
                 has_bc ? bc->mask->component(1).device_data() : nullptr,
-                has_bc ? 1 : 0, is, ie, js, je);
+                has_bc ? 1 : 0, is, ie, js, je, periodic);
           }
         };
         apply_band(0, gw, 0, my);
@@ -1029,7 +1040,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
             inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_stride_u, mask_stride_v,
             has_bc ? bc->mask->component(0).device_data() : nullptr,
             has_bc ? bc->mask->component(1).device_data() : nullptr,
-            has_bc ? 1 : 0);
+            has_bc ? 1 : 0, periodic);
       }
       mg_jacobi_update_cuda(
           grid.local_mx(), grid.local_my(), x.ghost_width(),

@@ -20,21 +20,25 @@ MIN_WALL="${MIN_WALL:-10}"
 SCALE_FACTOR="${SCALE_FACTOR:-2}"
 GPISM_DT="${GPISM_DT:-60}"
 GPISM_DEVICE_ENABLED="${GPISM_DEVICE_ENABLED:-1}"
-GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-0}"
+GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-1}"
 GPISM_ENFORCE_ICE_FREE_BC="${GPISM_ENFORCE_ICE_FREE_BC:-0}"
 GPISM_SSA_DIAGNOSTIC="${GPISM_SSA_DIAGNOSTIC:-0}"
 GPISM_GMRES_VERBOSE="${GPISM_GMRES_VERBOSE:-0}"
-GPISM_SSA_MAX_PICARD="${GPISM_SSA_MAX_PICARD:-80}"
-GPISM_GMRES_MAX_ITER="${GPISM_GMRES_MAX_ITER:-200}"
+GPISM_SSA_MAX_PICARD="${GPISM_SSA_MAX_PICARD:-300}"
+GPISM_SSA_TOL_NUH="${GPISM_SSA_TOL_NUH:-1e-4}"
+# PISM SSAFD checks convergence using nuH only. Set to <=0 to disable
+# the velocity-change criterion.
+GPISM_SSA_TOL_VEL="${GPISM_SSA_TOL_VEL:-0}"
+GPISM_GMRES_MAX_ITER="${GPISM_GMRES_MAX_ITER:-400}"
 GPISM_GMRES_TOL="${GPISM_GMRES_TOL:-1e-8}"
 GPISM_GMRES_TOL_RELATIVE_TO_RHS="${GPISM_GMRES_TOL_RELATIVE_TO_RHS:-0}"
 GPISM_SSA_FAIL_FAST="${GPISM_SSA_FAIL_FAST:-1}"
 GPISM_SSA_FAIL_FAST_REQUIRE_CONVERGED="${GPISM_SSA_FAIL_FAST_REQUIRE_CONVERGED:-1}"
 GPISM_SSA_FAIL_FAST_RESIDUAL_MAX="${GPISM_SSA_FAIL_FAST_RESIDUAL_MAX:-0}"
-GPISM_SSA_VEL_RELAX="${GPISM_SSA_VEL_RELAX:-0.5}"
-GPISM_SSA_NUH_RELAX="${GPISM_SSA_NUH_RELAX:-0.5}"
+GPISM_SSA_VEL_RELAX="${GPISM_SSA_VEL_RELAX:-1.0}"
+GPISM_SSA_NUH_RELAX="${GPISM_SSA_NUH_RELAX:-1.0}"
 GPISM_SSA_MAX_SPEED="${GPISM_SSA_MAX_SPEED:-0.5}"
-GPISM_SSA_INITIAL_GUESS_SPEED="${GPISM_SSA_INITIAL_GUESS_SPEED:-0.01}"
+GPISM_SSA_INITIAL_GUESS_SPEED="${GPISM_SSA_INITIAL_GUESS_SPEED:-0}"
 OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
 COMPARE_STRICT="${COMPARE_STRICT:-0}"
 COMPARE_TOL_RMS="${COMPARE_TOL_RMS:-0.02}"
@@ -130,11 +134,17 @@ params = {
     "stress_balance.ssa.Glen_exponent": get("stress_balance.ssa.Glen_exponent", 3.0),
     "stress_balance.ssa.enhancement_factor": get("stress_balance.ssa.enhancement_factor", 1.0),
     "stress_balance.ssa.epsilon": get("stress_balance.ssa.epsilon", 1.0e13),
+    "stress_balance.ice_free_thickness_standard": get(
+        "stress_balance.ice_free_thickness_standard", 10.0
+    ),
     "stress_balance.ssa.compute_surface_gradient_inward": get(
         "stress_balance.ssa.compute_surface_gradient_inward", "no"
     ),
     "stress_balance.ssa.fd.upstream_surface_slope_approximation": get(
         "stress_balance.ssa.fd.upstream_surface_slope_approximation", "yes"
+    ),
+    "stress_balance.ssa.fd.extrapolate_at_margins": get(
+        "stress_balance.ssa.fd.extrapolate_at_margins", "true"
     ),
     "stress_balance.ssa.strength_extension.constant_nu": get(
         "stress_balance.ssa.strength_extension.constant_nu", 9.48680701906572e14
@@ -205,6 +215,8 @@ ssa.enforce_ice_free_bc=${GPISM_ENFORCE_ICE_FREE_BC}
 ssa.diagnostic=${GPISM_SSA_DIAGNOSTIC}
 ssa.gmres_verbose=${GPISM_GMRES_VERBOSE}
 ssa.max_picard=${GPISM_SSA_MAX_PICARD}
+ssa.tol_nuH=${GPISM_SSA_TOL_NUH}
+ssa.tol_vel=${GPISM_SSA_TOL_VEL}
 ssa.gmres_max_iter=${GPISM_GMRES_MAX_ITER}
 ssa.gmres_tol=${GPISM_GMRES_TOL}
 ssa.gmres_tol_relative_to_rhs=${GPISM_GMRES_TOL_RELATIVE_TO_RHS}
@@ -353,8 +365,6 @@ def depth_mean(var):
         return np.nanmean(data, axis=2)
     return np.squeeze(data)
 
-seconds_per_year = 31556926.0
-
 with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
     for name in ("thk", "topg", "tauc"):
         if name in dg.variables and name in dp.variables:
@@ -387,8 +397,8 @@ with nc.Dataset(gp) as dg, nc.Dataset(pextra) as dp:
 with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
     for name in ("u_ssa", "v_ssa"):
         if name in dg.variables and name in dp.variables:
-            g = last2d(dg.variables[name])  # gpism: m/year
-            p = last2d(dp.variables[name]) * seconds_per_year  # pism: m/s -> m/year
+            g = last2d(dg.variables[name])  # gpism: m/s
+            p = last2d(dp.variables[name])  # pism: m/s
             if g.shape != p.shape:
                 print(f"{name}: shape mismatch {g.shape} vs {p.shape}")
                 continue

@@ -22,6 +22,12 @@ void update_thickness(const Grid2D& grid, const FieldStag2D<double>& flux,
 void update_mask(const Grid2D& grid, const Field2D<double>& thk,
                  Field2D<int>& mask);
 
+// Convert cell-centered velocity (SSA unknowns) to a face-staggered
+// representation used by thickness transport.
+void compute_face_velocity_from_center(const Grid2D& grid,
+                                       const FieldStag2D<double>& vel_center,
+                                       FieldStag2D<double>& vel_face);
+
 void compute_cell_center_velocity(const Grid2D& grid,
                                   const FieldStag2D<double>& vel,
                                   Field2D<double>& uvel,

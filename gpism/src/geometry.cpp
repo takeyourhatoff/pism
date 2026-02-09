@@ -1,6 +1,7 @@
 #include "gpism/geometry.h"
 
 #include "gpism/config.h"
+#include <algorithm>
 #include <iostream>
 #if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
@@ -62,7 +63,7 @@ double diff_centered(double left, double /*center*/, double right) {
 void compute_cell_type_cuda(int mx, int my, int gw, int stride,
                             const double* thk, const double* topg,
                             int* cell_type, double sea_level, double rho_ice,
-                            double rho_water);
+                            double rho_water, double ice_free_thickness_threshold);
 void compute_usurf_flotation_cuda(int mx, int my, int gw, int stride,
                                   const double* thk, const double* topg,
                                   const int* cell_type, double sea_level,
@@ -71,13 +72,14 @@ void compute_usurf_flotation_cuda(int mx, int my, int gw, int stride,
 void compute_surface_slopes_pism_cuda(
     int mx, int my, int gw, int stride, const double* usurf,
     double* dhdx, double* dhdy, const int* cell_type, int stride_mask,
-    int surface_gradient_inward, int uphill, int use_cfbc, double inv_dx,
-    double inv_dy);
+    int surface_gradient_inward, int uphill, int use_cfbc, int periodic,
+    double inv_dx, double inv_dy);
 #endif
 
 void compute_cell_type(const Grid2D& grid, const Field2D<double>& thk,
                        const Field2D<double>& topg, double sea_level,
                        double rho_ice, double rho_water,
+                       double ice_free_thickness_threshold,
                        Field2D<int>& cell_type) {
 #if GPISM_HAVE_CUDA
   if (thk.has_device_data() && topg.has_device_data() &&
@@ -85,7 +87,8 @@ void compute_cell_type(const Grid2D& grid, const Field2D<double>& thk,
     compute_cell_type_cuda(grid.local_mx(), grid.local_my(), thk.ghost_width(),
                            thk.stride(), thk.device_data(),
                            topg.device_data(), cell_type.device_data(),
-                           sea_level, rho_ice, rho_water);
+                           sea_level, rho_ice, rho_water,
+                           ice_free_thickness_threshold);
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
       std::cerr << "compute_cell_type_cuda launch failed: "
@@ -96,21 +99,22 @@ void compute_cell_type(const Grid2D& grid, const Field2D<double>& thk,
 #endif
   const int mx = grid.local_mx();
   const int my = grid.local_my();
+  const double H_thr = std::max(0.0, ice_free_thickness_threshold);
+  const double alpha = 1.0 - (rho_ice / rho_water);
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       const double H = thk(i, j);
       const double bed = topg(i, j);
+      const double hgrounded = bed + H;
+      const double hfloating = sea_level + alpha * H;
+      const bool is_floating = (hfloating > hgrounded);
+      const bool ice_free = (H <= H_thr);
+
       int mask = IceFreeBedrock;
-      if (H > 0.0) {
-        const double floatation_thk =
-            (sea_level - bed) * (rho_water / rho_ice);
-        if (floatation_thk > 0.0 && H <= floatation_thk) {
-          mask = FloatingIce;
-        } else {
-          mask = GroundedIce;
-        }
+      if (is_floating) {
+        mask = ice_free ? IceFreeOcean : FloatingIce;
       } else {
-        mask = (bed < sea_level) ? IceFreeOcean : IceFreeBedrock;
+        mask = ice_free ? IceFreeBedrock : GroundedIce;
       }
       cell_type(i, j) = mask;
     }
@@ -145,10 +149,8 @@ void compute_usurf_flotation(const Grid2D& grid, const Field2D<double>& thk,
       const int mask = cell_type(i, j);
       const double H = thk(i, j);
       const double bed = topg(i, j);
-      if (mask == FloatingIce) {
+      if (mask == FloatingIce || mask == IceFreeOcean) {
         usurf(i, j) = sea_level + flotation_scale * H;
-      } else if (mask == IceFreeOcean) {
-        usurf(i, j) = sea_level;
       } else {
         usurf(i, j) = bed + H;
       }
@@ -167,11 +169,13 @@ void compute_surface_slopes_pism(const Grid2D& grid,
 #if GPISM_HAVE_CUDA
   if (usurf.has_device_data() && dhdx.has_device_data() &&
       dhdy.has_device_data() && cell_type.has_device_data()) {
+    const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
     compute_surface_slopes_pism_cuda(
         grid.local_mx(), grid.local_my(), usurf.ghost_width(), usurf.stride(),
         usurf.device_data(), dhdx.device_data(), dhdy.device_data(),
         cell_type.device_data(), cell_type.stride(),
         surface_gradient_inward ? 1 : 0, uphill ? 1 : 0, use_cfbc ? 1 : 0,
+        periodic ? 1 : 0,
         1.0 / grid.dx(), 1.0 / grid.dy());
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
@@ -186,13 +190,19 @@ void compute_surface_slopes_pism(const Grid2D& grid,
   const double inv_dx = 1.0 / grid.dx();
   const double inv_dy = 1.0 / grid.dy();
   auto diff_grounded = uphill ? diff_uphill : diff_centered;
+  const bool periodic =
+      (grid.dims_x() == 1 && grid.dims_y() == 1);
 
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
-      const int il = (i == 0) ? 0 : (i - 1);
-      const int ir = (i == mx - 1) ? (mx - 1) : (i + 1);
-      const int jd = (j == 0) ? 0 : (j - 1);
-      const int ju = (j == my - 1) ? (my - 1) : (j + 1);
+      const int il =
+          periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? 0 : (i - 1));
+      const int ir = periodic ? ((i == mx - 1) ? 0 : (i + 1))
+                              : ((i == mx - 1) ? (mx - 1) : (i + 1));
+      const int jd =
+          periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? 0 : (j - 1));
+      const int ju = periodic ? ((j == my - 1) ? 0 : (j + 1))
+                              : ((j == my - 1) ? (my - 1) : (j + 1));
 
       const double h_c = usurf(i, j);
       const double h_w = usurf(il, j);
@@ -207,12 +217,8 @@ void compute_surface_slopes_pism(const Grid2D& grid,
       const int M_n = cell_type(i, ju);
 
       if (surface_gradient_inward) {
-        const double left = (i == 0) ? h_c : h_w;
-        const double right = (i == mx - 1) ? h_c : h_e;
-        const double down = (j == 0) ? h_c : h_s;
-        const double up = (j == my - 1) ? h_c : h_n;
-        dhdx(i, j) = 0.5 * (right - left) * inv_dx;
-        dhdy(i, j) = 0.5 * (up - down) * inv_dy;
+        dhdx(i, j) = 0.5 * (h_e - h_w) * inv_dx;
+        dhdy(i, j) = 0.5 * (h_n - h_s) * inv_dy;
         continue;
       }
 

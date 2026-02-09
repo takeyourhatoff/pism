@@ -20,6 +20,10 @@ void update_thickness_cuda(int mx, int my, int gw, int stride_thk,
                            int enforce_nonnegative, double* thk);
 void update_mask_cuda(int mx, int my, int gw, int stride_thk, int stride_mask,
                       const double* thk, int* mask);
+void compute_face_velocity_from_center_cuda(
+    int mx, int my, int gw, int stride_u_center, int stride_v_center,
+    int stride_u_face, int stride_v_face, const double* u_center,
+    const double* v_center, double* u_face, double* v_face);
 void compute_cell_center_velocity_cuda(int mx, int my, int gw, int stride_u,
                                        int stride_v, int stride_uvel,
                                        int stride_vvel, const double* u_face,
@@ -133,6 +137,52 @@ void update_mask(const Grid2D& grid, const Field2D<double>& thk,
   for (int j = 0; j < my; ++j) {
     for (int i = 0; i < mx; ++i) {
       mask(i, j) = (thk(i, j) > 0.0) ? 1 : 0;
+    }
+  }
+}
+
+void compute_face_velocity_from_center(const Grid2D& grid,
+                                       const FieldStag2D<double>& vel_center,
+                                       FieldStag2D<double>& vel_face) {
+#if GPISM_HAVE_CUDA
+  if (vel_center.component(0).has_device_data() &&
+      vel_center.component(1).has_device_data() &&
+      vel_face.component(0).has_device_data() &&
+      vel_face.component(1).has_device_data()) {
+    compute_face_velocity_from_center_cuda(
+        grid.local_mx(), grid.local_my(), vel_center.component(0).ghost_width(),
+        vel_center.component(0).stride(), vel_center.component(1).stride(),
+        vel_face.component(0).stride(), vel_face.component(1).stride(),
+        vel_center.component(0).device_data(),
+        vel_center.component(1).device_data(),
+        vel_face.component(0).device_data(), vel_face.component(1).device_data());
+    return;
+  }
+#endif
+  const int mx = grid.local_mx();
+  const int my = grid.local_my();
+  const int gw = grid.ghost_width();
+  auto clamp_i = [mx](int i) { return std::clamp(i, 0, mx - 1); };
+  auto clamp_j = [my](int j) { return std::clamp(j, 0, my - 1); };
+
+  const Field2D<double>& u_center = vel_center.component(0);
+  const Field2D<double>& v_center = vel_center.component(1);
+
+  for (int j = -gw; j < my + gw; ++j) {
+    const int jc = clamp_j(j);
+    for (int i = -gw; i < mx + gw; ++i) {
+      const int i0 = clamp_i(i);
+      const int i1 = clamp_i(i + 1);
+      vel_face(i, j, 0) = 0.5 * (u_center(i0, jc) + u_center(i1, jc));
+    }
+  }
+
+  for (int j = -gw; j < my + gw; ++j) {
+    const int j0 = clamp_j(j);
+    const int j1 = clamp_j(j + 1);
+    for (int i = -gw; i < mx + gw; ++i) {
+      const int ic = clamp_i(i);
+      vel_face(i, j, 1) = 0.5 * (v_center(ic, j0) + v_center(ic, j1));
     }
   }
 }

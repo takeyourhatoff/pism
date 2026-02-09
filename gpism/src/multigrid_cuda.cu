@@ -29,7 +29,8 @@ __device__ inline double shear(int i, int j, int gw, int stride_u, int stride_v,
   return du_dy + dv_dx;
 }
 
-__global__ void restrict_stag_kernel(int coarse_mx, int coarse_my, int fine_gw,
+__global__ void restrict_stag_kernel(int fine_mx, int fine_my, int coarse_mx,
+                                     int coarse_my, int fine_gw,
                                      int fine_stride_u, int fine_stride_v,
                                      int coarse_gw, int coarse_stride_u,
                                      int coarse_stride_v, const double* fine_u,
@@ -40,16 +41,21 @@ __global__ void restrict_stag_kernel(int coarse_mx, int coarse_my, int fine_gw,
   if (i >= coarse_mx || j >= coarse_my) {
     return;
   }
-  const int fi = 2 * i;
-  const int fj = 2 * j;
-  const int f00 = idx(fi, fj, fine_gw, fine_stride_u);
-  const int f10 = idx(fi + 1, fj, fine_gw, fine_stride_u);
-  const int f01 = idx(fi, fj + 1, fine_gw, fine_stride_u);
-  const int f11 = idx(fi + 1, fj + 1, fine_gw, fine_stride_u);
-  const int f00v = idx(fi, fj, fine_gw, fine_stride_v);
-  const int f10v = idx(fi + 1, fj, fine_gw, fine_stride_v);
-  const int f01v = idx(fi, fj + 1, fine_gw, fine_stride_v);
-  const int f11v = idx(fi + 1, fj + 1, fine_gw, fine_stride_v);
+  // Clamp fine indices so odd-sized fine grids restrict correctly without
+  // pulling in (potentially stale) ghost values.
+  const int fi0 = (2 * i < fine_mx) ? (2 * i) : (fine_mx - 1);
+  const int fj0 = (2 * j < fine_my) ? (2 * j) : (fine_my - 1);
+  const int fi1 = (fi0 + 1 < fine_mx) ? (fi0 + 1) : (fine_mx - 1);
+  const int fj1 = (fj0 + 1 < fine_my) ? (fj0 + 1) : (fine_my - 1);
+
+  const int f00 = idx(fi0, fj0, fine_gw, fine_stride_u);
+  const int f10 = idx(fi1, fj0, fine_gw, fine_stride_u);
+  const int f01 = idx(fi0, fj1, fine_gw, fine_stride_u);
+  const int f11 = idx(fi1, fj1, fine_gw, fine_stride_u);
+  const int f00v = idx(fi0, fj0, fine_gw, fine_stride_v);
+  const int f10v = idx(fi1, fj0, fine_gw, fine_stride_v);
+  const int f01v = idx(fi0, fj1, fine_gw, fine_stride_v);
+  const int f11v = idx(fi1, fj1, fine_gw, fine_stride_v);
   const int cidx_u = idx(i, j, coarse_gw, coarse_stride_u);
   const int cidx_v = idx(i, j, coarse_gw, coarse_stride_v);
   coarse_u[cidx_u] =
@@ -227,7 +233,7 @@ __global__ void jacobi_fused_kernel(
     double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
     const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
-    const double* bc_v, int has_bc, int has_values) {
+    const double* bc_v, int has_bc, int has_values, int periodic) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
   const int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
@@ -239,10 +245,10 @@ __global__ void jacobi_fused_kernel(
   const int mask_idx_v = idx(i, j, gw, stride_mask_v);
   const double inv_d4 = inv_2dx * inv_2dy;
   const double inv_d2 = 2.0 * inv_d4;
-  const int im1 = (i == 0) ? i : i - 1;
-  const int ip1 = (i == mx - 1) ? i : i + 1;
-  const int jm1 = (j == 0) ? j : j - 1;
-  const int jp1 = (j == my - 1) ? j : j + 1;
+  const int im1 = periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
+  const int ip1 = periodic ? ((i == mx - 1) ? 0 : (i + 1)) : ((i == mx - 1) ? i : (i + 1));
+  const int jm1 = periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
+  const int jp1 = periodic ? ((j == my - 1) ? 0 : (j + 1)) : ((j == my - 1) ? j : (j + 1));
 
   if (has_bc && mask_u && mask_u[mask_idx_u] != 0) {
     if (has_values && bc_u) {
@@ -474,8 +480,9 @@ void mg_restrict_stag_cuda(int fine_mx, int fine_my, int fine_gw,
   const dim3 grid((coarse_mx + block.x - 1) / block.x,
                   (coarse_my + block.y - 1) / block.y);
   restrict_stag_kernel<<<grid, block>>>(
-      coarse_mx, coarse_my, fine_gw, fine_stride_u, fine_stride_v, coarse_gw,
-      coarse_stride_u, coarse_stride_v, fine_u, fine_v, coarse_u, coarse_v);
+      fine_mx, fine_my, coarse_mx, coarse_my, fine_gw, fine_stride_u,
+      fine_stride_v, coarse_gw, coarse_stride_u, coarse_stride_v, fine_u,
+      fine_v, coarse_u, coarse_v);
 }
 
 void mg_prolong_stag_cuda(int coarse_mx, int coarse_my, int coarse_gw,
@@ -549,7 +556,7 @@ void mg_jacobi_fused_cuda(
     double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
     const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
-    const double* bc_v, int has_bc, int has_values) {
+    const double* bc_v, int has_bc, int has_values, int periodic) {
   CudaEventTimer timer("mg_jacobi_fused");
   const dim3 block(16, 16);
   const dim3 grid((mx + block.x - 1) / block.x,
@@ -559,7 +566,7 @@ void mg_jacobi_fused_cuda(
       stride_beta_v, stride_b_u, stride_b_v, x_old_u, x_old_v, x_u, x_v, nu_u,
       nu_v, beta_u, beta_v, b_u, b_v, omega, inv_dx2, inv_dy2, inv_2dx, inv_2dy,
       stride_mask_u, stride_mask_v, mask_u, mask_v, stride_bc_u, stride_bc_v,
-      bc_u, bc_v, has_bc, has_values);
+      bc_u, bc_v, has_bc, has_values, periodic);
 }
 
 void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,

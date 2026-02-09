@@ -46,6 +46,78 @@ __global__ void relax_vel_kernel(int mx, int my, int gw, int stride,
   cur[id] = relax * cur[id] + (1.0 - relax) * prev[id];
 }
 
+__device__ inline bool is_ice_free_cell(int mask) {
+  return mask == IceFreeBedrock || mask == IceFreeOcean;
+}
+
+__device__ inline bool is_icy_cell(int mask) {
+  return mask == GroundedIce || mask == FloatingIce;
+}
+
+__global__ void extrapolate_velocity_kernel(int mx, int my, int gw,
+                                            int stride_cell_type,
+                                            int stride_u, int stride_v,
+                                            const int* cell_type,
+                                            double* u, double* v) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+
+  const int c = idx(i, j, gw, stride_cell_type);
+  if (!is_ice_free_cell(cell_type[c])) {
+    return;
+  }
+
+  double sum_u = 0.0;
+  double sum_v = 0.0;
+  int n = 0;
+
+  // North
+  if (j + 1 < my) {
+    const int cn = idx(i, j + 1, gw, stride_cell_type);
+    if (is_icy_cell(cell_type[cn])) {
+      sum_u += u[idx(i, j + 1, gw, stride_u)];
+      sum_v += v[idx(i, j + 1, gw, stride_v)];
+      ++n;
+    }
+  }
+  // East
+  if (i + 1 < mx) {
+    const int ce = idx(i + 1, j, gw, stride_cell_type);
+    if (is_icy_cell(cell_type[ce])) {
+      sum_u += u[idx(i + 1, j, gw, stride_u)];
+      sum_v += v[idx(i + 1, j, gw, stride_v)];
+      ++n;
+    }
+  }
+  // South
+  if (j > 0) {
+    const int cs = idx(i, j - 1, gw, stride_cell_type);
+    if (is_icy_cell(cell_type[cs])) {
+      sum_u += u[idx(i, j - 1, gw, stride_u)];
+      sum_v += v[idx(i, j - 1, gw, stride_v)];
+      ++n;
+    }
+  }
+  // West
+  if (i > 0) {
+    const int cw = idx(i - 1, j, gw, stride_cell_type);
+    if (is_icy_cell(cell_type[cw])) {
+      sum_u += u[idx(i - 1, j, gw, stride_u)];
+      sum_v += v[idx(i - 1, j, gw, stride_v)];
+      ++n;
+    }
+  }
+
+  if (n > 0) {
+    const double inv = 1.0 / static_cast<double>(n);
+    u[idx(i, j, gw, stride_u)] = sum_u * inv;
+    v[idx(i, j, gw, stride_v)] = sum_v * inv;
+  }
+}
+
 }  // namespace
 
 void ssa_relax_nuH_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -71,6 +143,17 @@ void ssa_relax_vel_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                     vel_relax);
   relax_vel_kernel<<<grid, block>>>(mx, my, gw, stride_v, vel_prev_v, vel_v,
                                     vel_relax);
+}
+
+void ssa_extrapolate_velocity_cuda(int mx, int my, int gw, int stride_cell_type,
+                                   int stride_u, int stride_v,
+                                   const int* cell_type, double* u,
+                                   double* v) {
+  CudaEventTimer timer("ssa_extrapolate_velocity");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  extrapolate_velocity_kernel<<<grid, block>>>(
+      mx, my, gw, stride_cell_type, stride_u, stride_v, cell_type, u, v);
 }
 
 }  // namespace gpism

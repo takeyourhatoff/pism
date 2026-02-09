@@ -37,7 +37,8 @@ int main() {
   gpism::Field2D<double> vvel(mx, my, gw);
   gpism::Field2D<double> usurf(mx, my, gw);
   gpism::Field2D<int> mask(mx, my, gw);
-  gpism::FieldStag2D<double> vel(mx, my, gw);
+  gpism::FieldStag2D<double> vel_cc(mx, my, gw);
+  gpism::FieldStag2D<double> vel_face(mx, my, gw);
   gpism::FieldStag2D<double> flux(mx, my, gw);
 
   for (int j = 0; j < my; ++j) {
@@ -49,7 +50,7 @@ int main() {
       mask(i, j) = 1;
     }
   }
-  vel.fill(0.0);
+  vel_cc.fill(0.0);
 
   gpism::Field3D<double> enthalpy(mx, my, nz, gw);
   gpism::Field3D<double> enthalpy_next(mx, my, nz, gw);
@@ -74,7 +75,8 @@ int main() {
   gpism::sync_host_to_device(topg);
   gpism::sync_host_to_device(tauc);
   gpism::sync_host_to_device(smb);
-  gpism::sync_host_to_device(vel);
+  gpism::sync_host_to_device(vel_cc);
+  gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
   gpism::sync_host_to_device(enthalpy);
   gpism::sync_host_to_device(enthalpy_next);
 
@@ -96,18 +98,19 @@ int main() {
 
   for (int step = 0; step < steps; ++step) {
     gpism::SSASolverResult result =
-        solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel,
+        solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel_cc,
                      ssa_options);
     if (!result.converged) {
       std::cerr << "SSA solver did not converge in GPU timestep loop\n";
       return 1;
     }
 
-    gpism::compute_face_fluxes(grid, thk, vel, flux);
+    gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
+    gpism::compute_face_fluxes(grid, thk, vel_face, flux);
     gpism::update_thickness(grid, flux, smb, dt, thickness_opts, thk);
     gpism::update_mask(grid, thk, mask);
     geometry.compute_usurf(grid, thk, topg, usurf);
-    gpism::compute_cell_center_velocity(grid, vel, uvel, vvel);
+    gpism::compute_cell_center_velocity(grid, vel_face, uvel, vvel);
 
     gpism::vertical_diffusion_step(enthalpy, nz, dz, dt, thermo_opts,
                                    enthalpy_next);

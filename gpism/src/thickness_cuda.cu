@@ -126,6 +126,54 @@ __global__ void cell_center_velocity_kernel(int mx, int my, int gw,
              v_face[idx(i, jd, gw, stride_v)]);
 }
 
+__global__ void face_u_from_center_kernel(int mx, int my, int gw,
+                                          int stride_center, int stride_face,
+                                          const double* u_center,
+                                          double* u_face) {
+  const int nx = mx + 2 * gw;
+  const int ny = my + 2 * gw;
+  int ti = blockIdx.x * blockDim.x + threadIdx.x;
+  int tj = blockIdx.y * blockDim.y + threadIdx.y;
+  if (ti >= nx || tj >= ny) {
+    return;
+  }
+  const int i = ti - gw;
+  const int j = tj - gw;
+
+  int i0 = i < 0 ? 0 : (i >= mx ? mx - 1 : i);
+  int i1 = i + 1;
+  i1 = i1 < 0 ? 0 : (i1 >= mx ? mx - 1 : i1);
+  int jc = j < 0 ? 0 : (j >= my ? my - 1 : j);
+
+  u_face[idx(i, j, gw, stride_face)] =
+      0.5 * (u_center[idx(i0, jc, gw, stride_center)] +
+             u_center[idx(i1, jc, gw, stride_center)]);
+}
+
+__global__ void face_v_from_center_kernel(int mx, int my, int gw,
+                                          int stride_center, int stride_face,
+                                          const double* v_center,
+                                          double* v_face) {
+  const int nx = mx + 2 * gw;
+  const int ny = my + 2 * gw;
+  int ti = blockIdx.x * blockDim.x + threadIdx.x;
+  int tj = blockIdx.y * blockDim.y + threadIdx.y;
+  if (ti >= nx || tj >= ny) {
+    return;
+  }
+  const int i = ti - gw;
+  const int j = tj - gw;
+
+  int ic = i < 0 ? 0 : (i >= mx ? mx - 1 : i);
+  int j0 = j < 0 ? 0 : (j >= my ? my - 1 : j);
+  int j1 = j + 1;
+  j1 = j1 < 0 ? 0 : (j1 >= my ? my - 1 : j1);
+
+  v_face[idx(i, j, gw, stride_face)] =
+      0.5 * (v_center[idx(ic, j0, gw, stride_center)] +
+             v_center[idx(ic, j1, gw, stride_center)]);
+}
+
 }  // namespace
 
 void compute_face_fluxes_cuda(int mx, int my, int gw, int stride_thk,
@@ -181,6 +229,20 @@ void compute_cell_center_velocity_cuda(int mx, int my, int gw, int stride_u,
   cell_center_velocity_kernel<<<grid, block>>>(
       mx, my, gw, stride_u, stride_v, stride_uvel, stride_vvel, u_face, v_face,
       uvel, vvel);
+}
+
+void compute_face_velocity_from_center_cuda(
+    int mx, int my, int gw, int stride_u_center, int stride_v_center,
+    int stride_u_face, int stride_v_face, const double* u_center,
+    const double* v_center, double* u_face, double* v_face) {
+  CudaEventTimer timer("velocity_face");
+  dim3 block(16, 16);
+  dim3 grid((mx + 2 * gw + block.x - 1) / block.x,
+            (my + 2 * gw + block.y - 1) / block.y);
+  face_u_from_center_kernel<<<grid, block>>>(mx, my, gw, stride_u_center,
+                                             stride_u_face, u_center, u_face);
+  face_v_from_center_kernel<<<grid, block>>>(mx, my, gw, stride_v_center,
+                                             stride_v_face, v_center, v_face);
 }
 
 }  // namespace gpism

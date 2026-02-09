@@ -120,6 +120,36 @@ bool deterministic_reductions_enabled() {
   return deterministic_reductions;
 }
 
+double norm1(const Field2D<double>& a) {
+#if GPISM_HAVE_CUDA
+  if (a.has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<Field2D<double>&>(a));
+      return norm1_field_host(a);
+    }
+    return norm1_cuda(a.local_mx(), a.local_my(), a.ghost_width(), a.stride(),
+                      a.device_data());
+  }
+#endif
+  return norm1_field_host(a);
+}
+
+double diff_norm1(const Field2D<double>& a, const Field2D<double>& b) {
+#if GPISM_HAVE_CUDA
+  if (a.has_device_data() && b.has_device_data()) {
+    if (deterministic_reductions) {
+      sync_device_to_host(const_cast<Field2D<double>&>(a));
+      sync_device_to_host(const_cast<Field2D<double>&>(b));
+      return diff_norm1_field_host(a, b);
+    }
+    return diff_norm1_cuda(a.local_mx(), a.local_my(), a.ghost_width(),
+                           a.stride(), b.stride(), a.device_data(),
+                           b.device_data());
+  }
+#endif
+  return diff_norm1_field_host(a, b);
+}
+
 void axpy(double alpha, const FieldStag2D<double>& x, FieldStag2D<double>& y) {
 #if GPISM_HAVE_CUDA
   if (x.component(0).has_device_data() && x.component(1).has_device_data() &&

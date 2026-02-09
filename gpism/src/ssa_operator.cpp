@@ -26,7 +26,8 @@ void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
                                  double sliding_scale_factor,
                                  double beta_ice_free_bedrock,
                                  double beta_lateral_margin,
-                                 int pseudo_plastic);
+                                 int pseudo_plastic,
+                                 int periodic);
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
                            int stride_dhdx, int stride_dhdy, int stride_rhs,
                            const double* thk, const double* dhdx,
@@ -42,7 +43,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const double* beta_v, double* out_u, double* out_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, int stride_mask_u, int stride_mask_v,
-                    const int* mask_u, const int* mask_v, int has_bc);
+                    const int* mask_u, const int* mask_v, int has_bc,
+                    int periodic);
 void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            int stride_nu_u, int stride_nu_v, int stride_beta_u,
                            int stride_beta_v, int stride_out_u, int stride_out_v,
@@ -52,20 +54,20 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            double inv_dx2, double inv_dy2, double inv_2dx,
                            double inv_2dy, int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
-                           int i_start, int i_end, int j_start, int j_end);
+                           int i_start, int i_end, int j_start, int j_end,
+                           int periodic);
 void ssa_replace_zero_diagonal_entries_cuda(
     int mx, int my, int gw, int stride_nu_u, int stride_nu_v,
     int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
     const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
-    const int* mask_v, int has_bc, double beta_ice_free_bedrock);
+    const int* mask_v, int has_bc, double beta_ice_free_bedrock,
+    int periodic);
 }  // namespace gpism
 #endif
 
 namespace gpism {
 namespace {
-
-double avg2(double a, double b) { return 0.5 * (a + b); }
 
 bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
   if (!bc || !bc->mask) {
@@ -93,6 +95,7 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
       usurf.has_device_data() && cell_type.has_device_data() &&
       beta.component(0).has_device_data() &&
       beta.component(1).has_device_data()) {
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     ssa_compute_basal_drag_cuda(
         grid.local_mx(), grid.local_my(), tauc.ghost_width(), tauc.stride(),
         u_center.stride(), v_center.stride(), topg.stride(), usurf.stride(),
@@ -104,7 +107,8 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
         params.plastic_regularization, params.sliding_scale_factor,
         params.beta_ice_free_bedrock,
         params.beta_lateral_margin,
-        params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0);
+        params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0,
+        periodic);
     return;
   }
 #endif
@@ -118,6 +122,7 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
           ? std::pow(params.sliding_scale_factor, q)
           : 1.0;
   const double beta_lateral_margin = std::max(0.0, params.beta_lateral_margin);
+  const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
 
   auto is_ice_free = [](int mask) {
     return mask == IceFreeBedrock || mask == IceFreeOcean;
@@ -146,10 +151,11 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
     if (beta_lateral_margin <= 0.0) {
       return base;
     }
-    const int mx = grid.local_mx();
     const int my = grid.local_my();
-    const int jn = (j == my - 1) ? j : j + 1;
-    const int js = (j == 0) ? j : j - 1;
+    const int jn =
+        periodic ? ((j == my - 1) ? 0 : (j + 1)) : ((j == my - 1) ? j : (j + 1));
+    const int js =
+        periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
     const double h = usurf(i, j);
     const bool wall_n = is_ice_free(cell_type(i, jn)) && (topg(i, jn) > h);
     const bool wall_s = is_ice_free(cell_type(i, js)) && (topg(i, js) > h);
@@ -162,9 +168,10 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
       return base;
     }
     const int mx = grid.local_mx();
-    const int my = grid.local_my();
-    const int ie = (i == mx - 1) ? i : i + 1;
-    const int iw = (i == 0) ? i : i - 1;
+    const int ie =
+        periodic ? ((i == mx - 1) ? 0 : (i + 1)) : ((i == mx - 1) ? i : (i + 1));
+    const int iw =
+        periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
     const double h = usurf(i, j);
     const bool wall_e = is_ice_free(cell_type(ie, j)) && (topg(ie, j) > h);
     const bool wall_w = is_ice_free(cell_type(iw, j)) && (topg(iw, j) > h);
@@ -173,29 +180,8 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
 
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
-      const int ie = (i == grid.local_mx() - 1) ? i : i + 1;
-      const int jn = (j == grid.local_my() - 1) ? j : j + 1;
-
-      const int mask_c = cell_type(i, j);
-      const int mask_e = cell_type(ie, j);
-      const int mask_n = cell_type(i, jn);
-
-      const double beta_u_c = beta_center_u(i, j);
-      const double beta_u_e = beta_center_u(ie, j);
-      const double beta_v_c = beta_center_v(i, j);
-      const double beta_v_n = beta_center_v(i, jn);
-
-      if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
-        beta(i, j, 0) = params.beta_ice_free_bedrock;
-      } else {
-        beta(i, j, 0) = 0.5 * (beta_u_c + beta_u_e);
-      }
-
-      if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
-        beta(i, j, 1) = params.beta_ice_free_bedrock;
-      } else {
-        beta(i, j, 1) = 0.5 * (beta_v_c + beta_v_n);
-      }
+      beta(i, j, 0) = beta_center_u(i, j);
+      beta(i, j, 1) = beta_center_v(i, j);
     }
   }
 }
@@ -231,13 +217,8 @@ void SSAOperator::assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
   const double scale = -rho_ * g_;
   for (int j = 0; j < grid.local_my(); ++j) {
     for (int i = 0; i < grid.local_mx(); ++i) {
-      const double H_u = avg2(thk(i, j), thk(i + 1, j));
-      const double H_v = avg2(thk(i, j), thk(i, j + 1));
-      const double slope_x = avg2(dhdx(i, j), dhdx(i + 1, j));
-      const double slope_y = avg2(dhdy(i, j), dhdy(i, j + 1));
-
-      rhs(i, j, 0) = scale * H_u * slope_x;
-      rhs(i, j, 1) = scale * H_v * slope_y;
+      rhs(i, j, 0) = scale * thk(i, j) * dhdx(i, j);
+      rhs(i, j, 1) = scale * thk(i, j) * dhdy(i, j);
 
       if (is_dirichlet(bc, i, j, 0) && bc->values) {
         rhs(i, j, 0) = (*bc->values)(i, j, 0);
@@ -298,6 +279,7 @@ void SSAOperator::apply_region(const Grid2D& grid,
         bc->mask->component(1).has_device_data() &&
         bc->values->component(0).has_device_data() &&
         bc->values->component(1).has_device_data()))) {
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     ssa_apply_region_cuda(
         mx, my, vel.component(0).ghost_width(),
         vel.component(0).stride(), vel.component(1).stride(),
@@ -313,7 +295,7 @@ void SSAOperator::apply_region(const Grid2D& grid,
         has_bc ? bc->mask->component(1).stride() : 0,
         has_bc ? bc->mask->component(0).device_data() : nullptr,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0, i0, i1, j0, j1);
+        has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
     return;
   }
 #endif
@@ -327,10 +309,15 @@ void SSAOperator::apply_region(const Grid2D& grid,
 
   for (int j = j0; j < j1; ++j) {
     for (int i = i0; i < i1; ++i) {
-      const int im1 = (i == 0) ? i : i - 1;
-      const int ip1 = (i == mx - 1) ? i : i + 1;
-      const int jm1 = (j == 0) ? j : j - 1;
-      const int jp1 = (j == my - 1) ? j : j + 1;
+      const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
+      const int im1 =
+          periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
+      const int ip1 =
+          periodic ? ((i == mx - 1) ? 0 : (i + 1)) : ((i == mx - 1) ? i : (i + 1));
+      const int jm1 =
+          periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
+      const int jp1 =
+          periodic ? ((j == my - 1) ? 0 : (j + 1)) : ((j == my - 1) ? j : (j + 1));
       if (is_dirichlet(bc, i, j, 0)) {
         out(i, j, 0) = u(i, j);
       } else {
@@ -419,6 +406,7 @@ void SSAOperator::replace_zero_diagonal_entries(
       (!has_bc ||
        (bc->mask->component(0).has_device_data() &&
         bc->mask->component(1).has_device_data()))) {
+    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
     ssa_replace_zero_diagonal_entries_cuda(
         grid.local_mx(), grid.local_my(), grid.ghost_width(),
         nuH.component(0).stride(), nuH.component(1).stride(),
@@ -430,7 +418,7 @@ void SSAOperator::replace_zero_diagonal_entries(
         has_bc ? bc->mask->component(1).stride() : 0,
         has_bc ? bc->mask->component(0).device_data() : nullptr,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0, beta_ice_free_bedrock);
+        has_bc ? 1 : 0, beta_ice_free_bedrock, periodic);
     return;
   }
 #endif
@@ -440,10 +428,13 @@ void SSAOperator::replace_zero_diagonal_entries(
   const double eps = 1e-16;
   const int mx = grid.local_mx();
   const int my = grid.local_my();
+  const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
   for (int j = 0; j < my; ++j) {
-    const int jm1 = (j == 0) ? j : j - 1;
+    const int jm1 =
+        periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
     for (int i = 0; i < mx; ++i) {
-      const int im1 = (i == 0) ? i : i - 1;
+      const int im1 =
+          periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
       const double c_n = nuH(i, j, 1);
       const double c_s = nuH(i, jm1, 1);
       const double c_e = nuH(i, j, 0);

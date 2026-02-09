@@ -16,7 +16,7 @@ void ssa_replace_zero_diagonal_entries_cuda(
     int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
     const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
-    const int* mask_v, int has_bc, double beta_ice_free_bedrock);
+    const int* mask_v, int has_bc, double beta_ice_free_bedrock, int periodic);
 }  // namespace gpism
 #endif
 
@@ -140,6 +140,8 @@ void guard_zero_diag(gpism::MGLevel& level,
       (!has_bc ||
        (bc->mask->component(0).has_device_data() &&
         bc->mask->component(1).has_device_data()))) {
+    const int periodic =
+        (level.grid.dims_x() == 1 && level.grid.dims_y() == 1) ? 1 : 0;
     gpism::ssa_replace_zero_diagonal_entries_cuda(
         level.grid.local_mx(), level.grid.local_my(),
         level.grid.ghost_width(), level.nuH.component(0).stride(),
@@ -155,7 +157,7 @@ void guard_zero_diag(gpism::MGLevel& level,
         has_bc ? bc->mask->component(1).stride() : 0,
         has_bc ? bc->mask->component(0).device_data() : nullptr,
         has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0, beta_ice_free_bedrock);
+        has_bc ? 1 : 0, beta_ice_free_bedrock, periodic);
     return;
   }
 #endif

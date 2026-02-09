@@ -54,7 +54,7 @@ __device__ inline double beta_center_component(
     const double* topg, const double* usurf, const int* cell_type, double q,
     double u_threshold, double reg, double sliding_scale_factor,
     double beta_ice_free_bedrock, double beta_lateral_margin, int pseudo_plastic,
-    int comp) {
+    int comp, int periodic) {
   const double base = beta_center(i, j, gw, stride_tauc, stride_u, stride_v,
                                   stride_mask, tauc, u_center, v_center,
                                   cell_type, q, u_threshold, reg,
@@ -66,8 +66,10 @@ __device__ inline double beta_center_component(
   const int c = idx(i, j, gw, stride_usurf);
   const double h = usurf[c];
   if (comp == 0) {
-    const int jn = (j == my - 1) ? j : (j + 1);
-    const int js = (j == 0) ? j : (j - 1);
+    const int jn = periodic ? ((j == my - 1) ? 0 : (j + 1))
+                            : ((j == my - 1) ? j : (j + 1));
+    const int js = periodic ? ((j == 0) ? (my - 1) : (j - 1))
+                            : ((j == 0) ? j : (j - 1));
     const int n = idx(i, jn, gw, stride_mask);
     const int s = idx(i, js, gw, stride_mask);
     const bool wall_n = is_ice_free(cell_type[n]) &&
@@ -76,8 +78,10 @@ __device__ inline double beta_center_component(
                         (topg[idx(i, js, gw, stride_topg)] > h);
     return base + ((wall_n || wall_s) ? beta_lateral_margin : 0.0);
   }
-  const int ie = (i == mx - 1) ? i : (i + 1);
-  const int iw = (i == 0) ? i : (i - 1);
+  const int ie = periodic ? ((i == mx - 1) ? 0 : (i + 1))
+                          : ((i == mx - 1) ? i : (i + 1));
+  const int iw = periodic ? ((i == 0) ? (mx - 1) : (i - 1))
+                          : ((i == 0) ? i : (i - 1));
   const int e = idx(ie, j, gw, stride_mask);
   const int w = idx(iw, j, gw, stride_mask);
   const bool wall_e = is_ice_free(cell_type[e]) &&
@@ -94,54 +98,23 @@ __global__ void basal_drag_kernel(
     const double* usurf, const int* cell_type, double* beta_u, double* beta_v,
     double q, double u_threshold, double reg,
     double sliding_scale_factor, double beta_ice_free_bedrock,
-    double beta_lateral_margin, int pseudo_plastic) {
+    double beta_lateral_margin, int pseudo_plastic, int periodic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
     return;
   }
-  const int ie = (i == mx - 1) ? i : (i + 1);
-  const int jn = (j == my - 1) ? j : (j + 1);
   const int c = idx(i, j, gw, stride_tauc);
-  const int e = idx(ie, j, gw, stride_tauc);
-  const int n = idx(i, jn, gw, stride_tauc);
-
-  const int mask_c = cell_type[c];
-  const int mask_e = cell_type[e];
-  const int mask_n = cell_type[n];
-
-  const double beta_u_c = beta_center_component(
+  beta_u[c] = beta_center_component(
       i, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
       stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
       cell_type, q, u_threshold, reg, sliding_scale_factor,
-      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 0);
-  const double beta_u_e = beta_center_component(
-      ie, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
-      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
-      cell_type, q, u_threshold, reg, sliding_scale_factor,
-      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 0);
-  const double beta_v_c = beta_center_component(
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 0, periodic);
+  beta_v[c] = beta_center_component(
       i, j, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
       stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
       cell_type, q, u_threshold, reg, sliding_scale_factor,
-      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 1);
-  const double beta_v_n = beta_center_component(
-      i, jn, mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg,
-      stride_usurf, stride_mask, tauc, u_center, v_center, topg, usurf,
-      cell_type, q, u_threshold, reg, sliding_scale_factor,
-      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 1);
-
-  if (mask_c == IceFreeBedrock || mask_e == IceFreeBedrock) {
-    beta_u[c] = beta_ice_free_bedrock;
-  } else {
-    beta_u[c] = 0.5 * (beta_u_c + beta_u_e);
-  }
-
-  if (mask_c == IceFreeBedrock || mask_n == IceFreeBedrock) {
-    beta_v[c] = beta_ice_free_bedrock;
-  } else {
-    beta_v[c] = 0.5 * (beta_v_c + beta_v_n);
-  }
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, 1, periodic);
 }
 
 __global__ void rhs_kernel(int mx, int my, int gw, int stride_thk, int stride_dhdx,
@@ -155,20 +128,13 @@ __global__ void rhs_kernel(int mx, int my, int gw, int stride_thk, int stride_dh
   if (i >= mx || j >= my) {
     return;
   }
-  const int c = idx(i, j, gw, stride_thk);
-  const int e = idx(i + 1, j, gw, stride_thk);
-  const int n = idx(i, j + 1, gw, stride_thk);
   const int c_rhs = idx(i, j, gw, stride_rhs);
-  const int e_dhdx = idx(i + 1, j, gw, stride_dhdx);
-  const int n_dhdy = idx(i, j + 1, gw, stride_dhdy);
+  const int c_thk = idx(i, j, gw, stride_thk);
+  const int c_dhdx = idx(i, j, gw, stride_dhdx);
+  const int c_dhdy = idx(i, j, gw, stride_dhdy);
 
-  const double H_u = 0.5 * (thk[c] + thk[e]);
-  const double H_v = 0.5 * (thk[c] + thk[n]);
-  const double slope_x = 0.5 * (dhdx[c] + dhdx[e_dhdx]);
-  const double slope_y = 0.5 * (dhdy[c] + dhdy[n_dhdy]);
-
-  double rhs0 = scale * H_u * slope_x;
-  double rhs1 = scale * H_v * slope_y;
+  double rhs0 = scale * thk[c_thk] * dhdx[c_dhdx];
+  double rhs1 = scale * thk[c_thk] * dhdy[c_dhdy];
 
   if (has_bc && mask_u && bc_u && mask_u[c_rhs] != 0) {
     rhs0 = bc_u[c_rhs];
@@ -190,17 +156,22 @@ __global__ void apply_kernel(int mx, int my, int gw, int stride_u, int stride_v,
                              double* out_u, double* out_v, double inv_dx2,
                              double inv_dy2, double inv_2dx, double inv_2dy,
                              int stride_mask_u, int stride_mask_v,
-                             const int* mask_u, const int* mask_v, int has_bc) {
+                             const int* mask_u, const int* mask_v, int has_bc,
+                             int periodic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
     return;
   }
 
-  const int im1 = (i == 0) ? i : i - 1;
-  const int ip1 = (i == mx - 1) ? i : i + 1;
-  const int jm1 = (j == 0) ? j : j - 1;
-  const int jp1 = (j == my - 1) ? j : j + 1;
+  const int im1 = periodic ? ((i == 0) ? (mx - 1) : (i - 1))
+                           : ((i == 0) ? i : (i - 1));
+  const int ip1 = periodic ? ((i == mx - 1) ? 0 : (i + 1))
+                           : ((i == mx - 1) ? i : (i + 1));
+  const int jm1 = periodic ? ((j == 0) ? (my - 1) : (j - 1))
+                           : ((j == 0) ? j : (j - 1));
+  const int jp1 = periodic ? ((j == my - 1) ? 0 : (j + 1))
+                           : ((j == my - 1) ? j : (j + 1));
 
   const double inv_d4 = inv_2dx * inv_2dy;
   const double inv_d2 = 2.0 * inv_d4;
@@ -277,7 +248,7 @@ __global__ void apply_region_kernel(
     double* out_u, double* out_v, double inv_dx2, double inv_dy2,
     double inv_2dx, double inv_2dy, const int* mask_u, const int* mask_v,
     int stride_mask_u, int stride_mask_v, int has_bc, int i_start, int i_end,
-    int j_start, int j_end) {
+    int j_start, int j_end, int periodic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x + i_start;
   int j = blockIdx.y * blockDim.y + threadIdx.y + j_start;
   if (i >= i_end || j >= j_end) {
@@ -291,10 +262,14 @@ __global__ void apply_region_kernel(
   if (has_bc && mask_u && mask_u[mask_u_idx] != 0) {
     out_u[c_u] = u[c_u];
   } else {
-    const int im1 = (i == 0) ? i : i - 1;
-    const int ip1 = (i == mx - 1) ? i : i + 1;
-    const int jm1 = (j == 0) ? j : j - 1;
-    const int jp1 = (j == my - 1) ? j : j + 1;
+    const int im1 = periodic ? ((i == 0) ? (mx - 1) : (i - 1))
+                             : ((i == 0) ? i : (i - 1));
+    const int ip1 = periodic ? ((i == mx - 1) ? 0 : (i + 1))
+                             : ((i == mx - 1) ? i : (i + 1));
+    const int jm1 = periodic ? ((j == 0) ? (my - 1) : (j - 1))
+                             : ((j == 0) ? j : (j - 1));
+    const int jp1 = periodic ? ((j == my - 1) ? 0 : (j + 1))
+                             : ((j == my - 1) ? j : (j + 1));
 
     const double inv_d4 = inv_2dx * inv_2dy;
     const double inv_d2 = 2.0 * inv_d4;
@@ -329,10 +304,14 @@ __global__ void apply_region_kernel(
   if (has_bc && mask_v && mask_v[mask_v_idx] != 0) {
     out_v[c_v] = v[c_v];
   } else {
-    const int im1 = (i == 0) ? i : i - 1;
-    const int ip1 = (i == mx - 1) ? i : i + 1;
-    const int jm1 = (j == 0) ? j : j - 1;
-    const int jp1 = (j == my - 1) ? j : j + 1;
+    const int im1 = periodic ? ((i == 0) ? (mx - 1) : (i - 1))
+                             : ((i == 0) ? i : (i - 1));
+    const int ip1 = periodic ? ((i == mx - 1) ? 0 : (i + 1))
+                             : ((i == mx - 1) ? i : (i + 1));
+    const int jm1 = periodic ? ((j == 0) ? (my - 1) : (j - 1))
+                             : ((j == 0) ? j : (j - 1));
+    const int jp1 = periodic ? ((j == my - 1) ? 0 : (j + 1))
+                             : ((j == my - 1) ? j : (j + 1));
 
     const double inv_d4 = inv_2dx * inv_2dy;
     const double inv_d2 = 2.0 * inv_d4;
@@ -369,15 +348,17 @@ __global__ void replace_zero_diagonal_entries_kernel(
     int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
     const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
     int stride_mask_u, int stride_mask_v, const int* mask_u, const int* mask_v,
-    int has_bc, double beta_ice_free_bedrock) {
+    int has_bc, double beta_ice_free_bedrock, int periodic) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   int j = blockIdx.y * blockDim.y + threadIdx.y;
   if (i >= mx || j >= my) {
     return;
   }
 
-  const int im1 = (i == 0) ? i : i - 1;
-  const int jm1 = (j == 0) ? j : j - 1;
+  const int im1 = periodic ? ((i == 0) ? (mx - 1) : (i - 1))
+                           : ((i == 0) ? i : (i - 1));
+  const int jm1 = periodic ? ((j == 0) ? (my - 1) : (j - 1))
+                           : ((j == 0) ? j : (j - 1));
 
   const int c_beta_u = idx(i, j, gw, stride_beta_u);
   const int c_beta_v = idx(i, j, gw, stride_beta_v);
@@ -428,7 +409,8 @@ void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
                                  double sliding_scale_factor,
                                  double beta_ice_free_bedrock,
                                  double beta_lateral_margin,
-                                 int pseudo_plastic) {
+                                 int pseudo_plastic,
+                                 int periodic) {
   CudaEventTimer timer("ssa_basal_drag");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
@@ -437,7 +419,7 @@ void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
       mx, my, gw, stride_tauc, stride_u, stride_v, stride_topg, stride_usurf,
       stride_mask, tauc, u_center, v_center, topg, usurf, cell_type, beta_u,
       beta_v, q, u_threshold, plastic_regularization, sliding_scale_factor,
-      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic);
+      beta_ice_free_bedrock, beta_lateral_margin, pseudo_plastic, periodic);
 }
 
 void ssa_assemble_rhs_cuda(int mx, int my, int gw, int stride_thk,
@@ -464,7 +446,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                     const double* beta_v, double* out_u, double* out_v,
                     double inv_dx2, double inv_dy2, double inv_2dx,
                     double inv_2dy, int stride_mask_u, int stride_mask_v,
-                    const int* mask_u, const int* mask_v, int has_bc) {
+                    const int* mask_u, const int* mask_v, int has_bc,
+                    int periodic) {
   CudaEventTimer timer("ssa_apply");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
@@ -474,7 +457,8 @@ void ssa_apply_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                                     stride_out_u, stride_out_v, u, v, nu_u,
                                     nu_v, beta_u, beta_v, out_u, out_v, inv_dx2,
                                     inv_dy2, inv_2dx, inv_2dy, stride_mask_u,
-                                    stride_mask_v, mask_u, mask_v, has_bc);
+                                    stride_mask_v, mask_u, mask_v, has_bc,
+                                    periodic);
 }
 
 void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -487,7 +471,8 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                            double inv_dy2, double inv_2dx, double inv_2dy,
                            int stride_mask_u, int stride_mask_v,
                            const int* mask_u, const int* mask_v, int has_bc,
-                           int i_start, int i_end, int j_start, int j_end) {
+                           int i_start, int i_end, int j_start, int j_end,
+                           int periodic) {
   CudaEventTimer timer("ssa_apply");
   if (i_start >= i_end || j_start >= j_end) {
     return;
@@ -499,7 +484,8 @@ void ssa_apply_region_cuda(int mx, int my, int gw, int stride_u, int stride_v,
       mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v, stride_beta_u,
       stride_beta_v, stride_out_u, stride_out_v, u, v, nu_u, nu_v, beta_u,
       beta_v, out_u, out_v, inv_dx2, inv_dy2, inv_2dx, inv_2dy, mask_u, mask_v,
-      stride_mask_u, stride_mask_v, has_bc, i_start, i_end, j_start, j_end);
+      stride_mask_u, stride_mask_v, has_bc, i_start, i_end, j_start, j_end,
+      periodic);
 }
 
 void ssa_replace_zero_diagonal_entries_cuda(
@@ -507,7 +493,7 @@ void ssa_replace_zero_diagonal_entries_cuda(
     int stride_beta_u, int stride_beta_v, double* beta_u, double* beta_v,
     const double* nu_u, const double* nu_v, double inv_dx2, double inv_dy2,
     int stride_mask_u, int stride_mask_v, const int* mask_u, const int* mask_v,
-    int has_bc, double beta_ice_free_bedrock) {
+    int has_bc, double beta_ice_free_bedrock, int periodic) {
   CudaEventTimer timer("ssa_replace_zero_diagonal_entries");
   dim3 block(16, 16);
   dim3 grid_dim((mx + block.x - 1) / block.x,
@@ -515,7 +501,7 @@ void ssa_replace_zero_diagonal_entries_cuda(
   replace_zero_diagonal_entries_kernel<<<grid_dim, block>>>(
       mx, my, gw, stride_nu_u, stride_nu_v, stride_beta_u, stride_beta_v, beta_u,
       beta_v, nu_u, nu_v, inv_dx2, inv_dy2, stride_mask_u, stride_mask_v, mask_u,
-      mask_v, has_bc, beta_ice_free_bedrock);
+      mask_v, has_bc, beta_ice_free_bedrock, periodic);
 }
 
 }  // namespace gpism

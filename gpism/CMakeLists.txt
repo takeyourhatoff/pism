@@ -309,6 +309,14 @@ if(GPISM_BUILD_TESTS)
   target_link_libraries(gpism-ssa-operator-smoke PRIVATE gpism-core)
   add_test(NAME gpism-ssa-operator-smoke COMMAND gpism-ssa-operator-smoke)
 
+  add_executable(gpism-ssa-rhs-centered-smoke tests/ssa_rhs_centered_smoke.cpp)
+  target_link_libraries(gpism-ssa-rhs-centered-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-rhs-centered-smoke COMMAND gpism-ssa-rhs-centered-smoke)
+
+  add_executable(gpism-ssa-beta-centered-smoke tests/ssa_beta_centered_smoke.cpp)
+  target_link_libraries(gpism-ssa-beta-centered-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-ssa-beta-centered-smoke COMMAND gpism-ssa-beta-centered-smoke)
+
   add_executable(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
   target_link_libraries(gpism-linear-algebra-smoke PRIVATE gpism-core)
   add_test(NAME gpism-linear-algebra-smoke COMMAND gpism-linear-algebra-smoke)
@@ -346,6 +354,10 @@ if(GPISM_BUILD_TESTS)
   add_executable(gpism-gmres-smoke tests/gmres_smoke.cpp)
   target_link_libraries(gpism-gmres-smoke PRIVATE gpism-core)
   add_test(NAME gpism-gmres-smoke COMMAND gpism-gmres-smoke)
+
+  add_executable(gpism-gmres-givens-smoke tests/gmres_givens_smoke.cpp)
+  target_link_libraries(gpism-gmres-givens-smoke PRIVATE gpism-core)
+  add_test(NAME gpism-gmres-givens-smoke COMMAND gpism-gmres-givens-smoke)
 
   add_executable(gpism-multigrid-levels-smoke tests/multigrid_levels_smoke.cpp)
   target_link_libraries(gpism-multigrid-levels-smoke PRIVATE gpism-core)

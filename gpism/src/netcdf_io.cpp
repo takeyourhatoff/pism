@@ -29,9 +29,9 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
 // Keep consistent with the gpism runtime config default ("constants.seconds_per_year").
 constexpr double kSecondsPerYear = 31556926.0;
 
-// Velocity-like NetCDF variables are stored in "m/year" for compatibility with
-// PISM conventions. gpism's internal SSA solver uses SI units (m/s), so we need
-// to undo the scale factor when reading restart inputs.
+// gpism stores velocity-like NetCDF variables in SI units ("m s^-1") to match
+// PISM outputs. Older gpism outputs used "m/year"; on read we detect the units
+// attribute and convert to SI (m/s) when needed.
 void scale_field_2d(Field2D<double>& field, double factor) {
   const int mx = field.local_mx();
   const int my = field.local_my();
@@ -71,11 +71,11 @@ bool read_units_attr(int ncid, const char* var_name, std::string* units_out) {
 }
 
 bool velocity_units_are_per_year(int ncid, const char* var_name) {
-  // Prefer explicit units. If missing/unknown, keep the old behavior (assume
-  // "m/year") since gpism writes that convention by default.
+  // Prefer explicit units. If missing/unknown, assume SI (m/s): this matches
+  // PISM outputs and current gpism convention.
   std::string units;
   if (!read_units_attr(ncid, var_name, &units)) {
-    return true;
+    return false;
   }
   const std::string u = to_lower(units);
   // Common patterns: "m year^-1", "m/year", "m a-1".
@@ -385,7 +385,7 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   const char* units_m = "m";
   const char* units_pa = "Pa";
   const char* units_years = "years";
-  const char* units_velocity = "m year^-1";
+  const char* units_velocity = "m s^-1";
   nc_put_att_text(ncid, var_thk, "units", 1, units_m);
   nc_put_att_text(ncid, var_topg, "units", 1, units_m);
   nc_put_att_text(ncid, var_tauc, "units", 2, units_pa);
@@ -393,19 +393,25 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   nc_put_att_text(ncid, var_x, "units", 1, units_m);
   nc_put_att_text(ncid, var_y, "units", 1, units_m);
   if (fields.has_velocity) {
-    nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_uvel, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_vvel, "units", std::strlen(units_velocity),
+                    units_velocity);
   }
   if (fields.has_ssa_velocity) {
-    nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_u_ssa, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_v_ssa, "units", std::strlen(units_velocity),
+                    units_velocity);
   }
   if (fields.has_usurf) {
     nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
   }
   if (fields.has_vel_bc) {
-    nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_u_bc, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_v_bc, "units", std::strlen(units_velocity),
+                    units_velocity);
     put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
   }
   const std::string history = "gpism write_output";
@@ -525,19 +531,19 @@ bool write_output_parallel(const std::string& path, MPI_Comm comm, int rank,
   ok = write_local(var_topg, fields.topg) && ok;
   ok = write_local(var_tauc, fields.tauc) && ok;
   if (fields.has_velocity) {
-    ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
-    ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
+    ok = write_local(var_uvel, fields.uvel) && ok;
+    ok = write_local(var_vvel, fields.vvel) && ok;
   }
   if (fields.has_ssa_velocity) {
-    ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
-    ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
+    ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+    ok = write_local(var_v_ssa, fields.v_ssa) && ok;
   }
   if (fields.has_usurf) {
     ok = write_local(var_usurf, fields.usurf) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
-    ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
+    ok = write_local(var_u_bc, fields.u_bc) && ok;
+    ok = write_local(var_v_bc, fields.v_bc) && ok;
     ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
   }
   nc_close(ncid);
@@ -777,31 +783,19 @@ bool write_output_append_serial(const std::string& path, const Grid2D& grid,
   ok = write_var_2d(ncid, var_topg, fields.topg, mx, my, t_index) && ok;
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, t_index) && ok;
   if (fields.has_velocity) {
-    ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_uvel, fields.uvel, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_vvel, fields.vvel, mx, my, t_index) && ok;
   }
   if (fields.has_ssa_velocity) {
-    ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_u_ssa, fields.u_ssa, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_v_ssa, fields.v_ssa, mx, my, t_index) && ok;
   }
   if (fields.has_usurf) {
     ok = write_var_2d(ncid, var_usurf, fields.usurf, mx, my, t_index) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, t_index,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_u_bc, fields.u_bc, mx, my, t_index) && ok;
+    ok = write_var_2d(ncid, var_v_bc, fields.v_bc, mx, my, t_index) && ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, t_index) &&
          ok;
   }
@@ -964,15 +958,15 @@ bool write_output_append_parallel(const std::string& path, MPI_Comm comm,
   ok = write_local(var_topg, fields.topg) && ok;
   ok = write_local(var_tauc, fields.tauc) && ok;
   if (fields.has_velocity) {
-    ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
-    ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
+    ok = write_local(var_uvel, fields.uvel) && ok;
+    ok = write_local(var_vvel, fields.vvel) && ok;
   }
   if (fields.has_usurf) {
     ok = write_local(var_usurf, fields.usurf) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
-    ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
+    ok = write_local(var_u_bc, fields.u_bc) && ok;
+    ok = write_local(var_v_bc, fields.v_bc) && ok;
     ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
   }
 
@@ -1121,19 +1115,19 @@ bool write_output_append_serial_mpi(const std::string& path, int rank, int size,
       ok = write_local(var_topg, fields.topg) && ok;
       ok = write_local(var_tauc, fields.tauc) && ok;
       if (fields.has_velocity) {
-        ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
-        ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
+        ok = write_local(var_uvel, fields.uvel) && ok;
+        ok = write_local(var_vvel, fields.vvel) && ok;
       }
       if (fields.has_ssa_velocity) {
-        ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
-        ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
+        ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+        ok = write_local(var_v_ssa, fields.v_ssa) && ok;
       }
       if (fields.has_usurf) {
         ok = write_local(var_usurf, fields.usurf) && ok;
       }
       if (fields.has_vel_bc) {
-        ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
-        ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
+        ok = write_local(var_u_bc, fields.u_bc) && ok;
+        ok = write_local(var_v_bc, fields.v_bc) && ok;
         ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
       }
       nc_close(ncid);
@@ -1840,7 +1834,7 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       const char* units_m = "m";
       const char* units_pa = "Pa";
       const char* units_years = "years";
-      const char* units_velocity = "m year^-1";
+      const char* units_velocity = "m s^-1";
       nc_put_att_text(ncid, var_thk, "units", 1, units_m);
       nc_put_att_text(ncid, var_topg, "units", 1, units_m);
       nc_put_att_text(ncid, var_tauc, "units", 2, units_pa);
@@ -1848,19 +1842,25 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
       nc_put_att_text(ncid, var_x, "units", 1, units_m);
       nc_put_att_text(ncid, var_y, "units", 1, units_m);
       if (fields.has_velocity) {
-        nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
-        nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
+        nc_put_att_text(ncid, var_uvel, "units", std::strlen(units_velocity),
+                        units_velocity);
+        nc_put_att_text(ncid, var_vvel, "units", std::strlen(units_velocity),
+                        units_velocity);
       }
       if (fields.has_ssa_velocity) {
-        nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
-        nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
+        nc_put_att_text(ncid, var_u_ssa, "units", std::strlen(units_velocity),
+                        units_velocity);
+        nc_put_att_text(ncid, var_v_ssa, "units", std::strlen(units_velocity),
+                        units_velocity);
       }
       if (fields.has_usurf) {
         nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
       }
       if (fields.has_vel_bc) {
-        nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
-        nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+        nc_put_att_text(ncid, var_u_bc, "units", std::strlen(units_velocity),
+                        units_velocity);
+        nc_put_att_text(ncid, var_v_bc, "units", std::strlen(units_velocity),
+                        units_velocity);
         put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
       }
       const std::string history = "gpism write_output";
@@ -1995,19 +1995,19 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
         ok = write_local(var_topg, fields.topg) && ok;
         ok = write_local(var_tauc, fields.tauc) && ok;
         if (fields.has_velocity) {
-          ok = write_local_scaled(var_uvel, fields.uvel, kSecondsPerYear) && ok;
-          ok = write_local_scaled(var_vvel, fields.vvel, kSecondsPerYear) && ok;
+          ok = write_local(var_uvel, fields.uvel) && ok;
+          ok = write_local(var_vvel, fields.vvel) && ok;
         }
         if (fields.has_ssa_velocity) {
-          ok = write_local_scaled(var_u_ssa, fields.u_ssa, kSecondsPerYear) && ok;
-          ok = write_local_scaled(var_v_ssa, fields.v_ssa, kSecondsPerYear) && ok;
+          ok = write_local(var_u_ssa, fields.u_ssa) && ok;
+          ok = write_local(var_v_ssa, fields.v_ssa) && ok;
         }
         if (fields.has_usurf) {
           ok = write_local(var_usurf, fields.usurf) && ok;
         }
         if (fields.has_vel_bc) {
-          ok = write_local_scaled(var_u_bc, fields.u_bc, kSecondsPerYear) && ok;
-          ok = write_local_scaled(var_v_bc, fields.v_bc, kSecondsPerYear) && ok;
+          ok = write_local(var_u_bc, fields.u_bc) && ok;
+          ok = write_local(var_v_bc, fields.v_bc) && ok;
           ok = write_local_mask(var_vel_bc_mask, fields.vel_bc_mask) && ok;
         }
         nc_close(ncid);
@@ -2101,7 +2101,7 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   const char* units_m = "m";
   const char* units_pa = "Pa";
   const char* units_years = "years";
-  const char* units_velocity = "m year^-1";
+  const char* units_velocity = "m s^-1";
   nc_put_att_text(ncid, var_thk, "units", 1, units_m);
   nc_put_att_text(ncid, var_topg, "units", 1, units_m);
   nc_put_att_text(ncid, var_tauc, "units", 2, units_pa);
@@ -2109,19 +2109,25 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   nc_put_att_text(ncid, var_x, "units", 1, units_m);
   nc_put_att_text(ncid, var_y, "units", 1, units_m);
   if (fields.has_velocity) {
-    nc_put_att_text(ncid, var_uvel, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_vvel, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_uvel, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_vvel, "units", std::strlen(units_velocity),
+                    units_velocity);
   }
   if (fields.has_ssa_velocity) {
-    nc_put_att_text(ncid, var_u_ssa, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_v_ssa, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_u_ssa, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_v_ssa, "units", std::strlen(units_velocity),
+                    units_velocity);
   }
   if (fields.has_usurf) {
     nc_put_att_text(ncid, var_usurf, "units", 1, units_m);
   }
   if (fields.has_vel_bc) {
-    nc_put_att_text(ncid, var_u_bc, "units", 9, units_velocity);
-    nc_put_att_text(ncid, var_v_bc, "units", 9, units_velocity);
+    nc_put_att_text(ncid, var_u_bc, "units", std::strlen(units_velocity),
+                    units_velocity);
+    nc_put_att_text(ncid, var_v_bc, "units", std::strlen(units_velocity),
+                    units_velocity);
     put_vel_bc_mask_attrs(ncid, var_vel_bc_mask);
   }
   const std::string history = "gpism write_output";
@@ -2161,31 +2167,19 @@ bool write_output_impl(const std::string& path, int rank, int size, bool mpi_ena
   ok = write_var_2d(ncid, var_topg, fields.topg, mx, my, 0) && ok;
   ok = write_var_2d(ncid, var_tauc, fields.tauc, mx, my, 0) && ok;
   if (fields.has_velocity) {
-    ok = write_var_2d_scaled(ncid, var_uvel, fields.uvel, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_vvel, fields.vvel, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_uvel, fields.uvel, mx, my, 0) && ok;
+    ok = write_var_2d(ncid, var_vvel, fields.vvel, mx, my, 0) && ok;
   }
   if (fields.has_ssa_velocity) {
-    ok = write_var_2d_scaled(ncid, var_u_ssa, fields.u_ssa, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_v_ssa, fields.v_ssa, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_u_ssa, fields.u_ssa, mx, my, 0) && ok;
+    ok = write_var_2d(ncid, var_v_ssa, fields.v_ssa, mx, my, 0) && ok;
   }
   if (fields.has_usurf) {
     ok = write_var_2d(ncid, var_usurf, fields.usurf, mx, my, 0) && ok;
   }
   if (fields.has_vel_bc) {
-    ok = write_var_2d_scaled(ncid, var_u_bc, fields.u_bc, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
-    ok = write_var_2d_scaled(ncid, var_v_bc, fields.v_bc, mx, my, 0,
-                             kSecondsPerYear) &&
-         ok;
+    ok = write_var_2d(ncid, var_u_bc, fields.u_bc, mx, my, 0) && ok;
+    ok = write_var_2d(ncid, var_v_bc, fields.v_bc, mx, my, 0) && ok;
     ok = write_var_2d(ncid, var_vel_bc_mask, fields.vel_bc_mask, mx, my, 0) &&
          ok;
   }

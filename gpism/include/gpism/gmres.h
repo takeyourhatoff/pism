@@ -33,9 +33,9 @@ struct GMRESOptions {
   int max_iter = 200;
   double tol = 1e-8;
   bool tol_relative = false;
-  // If true, scale the relative tolerance using max(||M^{-1}r0||, ||M^{-1}b||)
-  // instead of only ||M^{-1}r0||. This avoids over-tightening the solve when the
-  // initial guess is already close (||r0|| << ||b||), which can stall GMRES.
+  // If true, scale the relative tolerance using max(||r0||, ||b||) instead of
+  // only ||r0||. This avoids over-tightening the solve when the initial guess
+  // is already close (||r0|| << ||b||), which can stall GMRES.
   bool tol_relative_to_rhs = false;
   bool verbose = false;
   bool precond_diagnostic = false;
@@ -44,7 +44,11 @@ struct GMRESOptions {
 
 struct GMRESResult {
   int iterations = 0;
+  // Residual norm estimate (unpreconditioned) tracked by the Arnoldi process.
   double residual = 0.0;
+  // True residual norm ||b - A x||, computed at the start and after each
+  // restart update.
+  double true_residual = 0.0;
   bool converged = false;
   std::vector<double> residuals;
 };

@@ -1,16 +1,21 @@
-# SSA Discretization (v0)
+# SSA Discretization (PISM SSAFD-Compatible)
 
-This document defines the initial matrix‑free SSA discretization used in gpism (Strategy A).
-The goal is PISM‑compatible behavior on a structured 2‑D grid while preserving GPU‑friendly
-stencils.
+This document defines gpism's matrix-free SSA discretization.
+The goal is PISM-compatible behavior (matching PISM's SSAFD method) on a structured 2-D
+grid while preserving GPU-friendly stencils.
 
 ## Grid and variable locations
 
-- Cell centers: scalar fields `H` (thk), `b` (topg), `h` (usurf), `tauc`, masks.
-- Staggered (MAC‑like) faces:
-  - `u` on **x‑faces** (east/west faces of a cell).
-  - `v` on **y‑faces** (north/south faces of a cell).
-  - Staggered fields use component index `0` for x‑faces and `1` for y‑faces.
+- Cell centers:
+  - Scalar fields: `H` (thk), `b` (topg), `h` (usurf), `tauc`, masks.
+  - SSA unknowns: velocities `u` and `v` are **cell-centered** (as in PISM SSAFD).
+- Staggered faces (coefficients):
+  - `nuH` is stored on faces:
+    - component `0`: x-faces (between `(i,j)` and `(i+1,j)`)
+    - component `1`: y-faces (between `(i,j)` and `(i,j+1)`)
+- Thickness transport:
+  - The transport solver uses a derived face-staggered velocity field computed
+    from the cell-centered SSA velocity by averaging to faces.
 
 ## Continuous form (SSA)
 
@@ -29,20 +34,24 @@ is effective viscosity (depth‑averaged).
 
 - `h = b + H` (or flotation‑aware later).
 - `∂h/∂x` and `∂h/∂y` are computed with centered differences at cell centers.
-- Driving stress is then interpolated to faces as needed.
+- Driving stress RHS is cell-centered:
+  - `b_u = -rho * g * H * (∂h/∂x)`
+  - `b_v = -rho * g * H * (∂h/∂y)`
 
 ### Viscosity and coefficients
 
-- Compute strain‑rate invariants on the staggered grid.
-- Effective viscosity `ν̄` is computed per face.
-- Define `νH = ν̄ * H_face` at faces by linearly interpolating `H` to faces:
+- Compute strain-rate invariants using cell-centered velocities and PISM-style
+  staggered formulas.
+- Effective viscosity `ν̄` is computed per face, and we store `nuH = ν̄ * H_face`
+  on faces by linearly interpolating `H` to faces:
   - `H_{i+1/2,j} = 0.5 (H_{i,j} + H_{i+1,j})`
   - `H_{i,j+1/2} = 0.5 (H_{i,j} + H_{i,j+1})`
 
 ### Matrix‑free operator
 
-Given `U = (u, v)` on faces, compute `A(U)` by applying the discrete divergence of
-membrane stresses using centered differences and interpolated `νH` coefficients.
+Given `U = (u, v)` at cell centers, compute `A(U)` using the PISM SSAFD stencil:
+- `nuH` provides variable-coefficient coupling on faces.
+- Basal drag `beta_u/beta_v` multiplies `u/v` at the same cell center.
 
 ### Basal resistance (v0)
 

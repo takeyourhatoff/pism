@@ -15,6 +15,7 @@ enum CellType : int {
 void compute_cell_type(const Grid2D& grid, const Field2D<double>& thk,
                        const Field2D<double>& topg, double sea_level,
                        double rho_ice, double rho_water,
+                       double ice_free_thickness_threshold,
                        Field2D<int>& cell_type);
 
 void compute_usurf_flotation(const Grid2D& grid, const Field2D<double>& thk,

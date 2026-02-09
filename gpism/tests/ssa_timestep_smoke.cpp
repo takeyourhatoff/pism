@@ -44,11 +44,14 @@ int main() {
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
 
   gpism::SSASolverOptions options;
-  options.max_picard = 10;
+  options.max_picard = 80;
   options.tol_nuH = 0.7;
   options.tol_vel = 0.7;
-  options.gmres_max_iter = 100;
+  options.gmres_max_iter = 200;
   options.gmres_tol = 1e-7;
+  // Plastic basal drag is strongly nonlinear; damping improves robustness.
+  options.vel_relax = 0.5;
+  options.nuH_relax = 0.5;
   options.use_bc = false;
 
   gpism::TimeManager clock(0.0, 0.1, 1.0, 0.2);
@@ -63,7 +66,11 @@ int main() {
     gpism::SSASolverResult result =
         solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel, options);
     if (!result.converged) {
-      std::cerr << "SSA solver did not converge in timestep loop\n";
+      std::cerr << "SSA solver did not converge in timestep loop (picard_iters="
+                << result.picard_iters << " nuH_change=" << result.nuH_change
+                << " vel_change=" << result.vel_change
+                << " linear_iters=" << result.linear_iters
+                << " linear_residual=" << result.linear_residual << ")\n";
       return 1;
     }
     if (!std::isfinite(vel_norm(vel))) {

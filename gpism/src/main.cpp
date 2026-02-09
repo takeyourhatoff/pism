@@ -131,35 +131,6 @@ void log_rank0(const gpism::Context& context, const std::string& message) {
   }
 }
 
-void init_face_velocity_from_center(const gpism::Grid2D& grid,
-                                    const gpism::Field2D<double>& u_center,
-                                    const gpism::Field2D<double>& v_center,
-                                    gpism::FieldStag2D<double>& vel) {
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  const int gw = grid.ghost_width();
-  auto clamp_i = [mx](int i) { return std::clamp(i, 0, mx - 1); };
-  auto clamp_j = [my](int j) { return std::clamp(j, 0, my - 1); };
-
-  for (int j = -gw; j < my + gw; ++j) {
-    const int jc = clamp_j(j);
-    for (int i = -gw; i < mx + gw; ++i) {
-      const int i0 = clamp_i(i);
-      const int i1 = clamp_i(i + 1);
-      vel(i, j, 0) = 0.5 * (u_center(i0, jc) + u_center(i1, jc));
-    }
-  }
-
-  for (int j = -gw; j < my + gw; ++j) {
-    const int j0 = clamp_j(j);
-    const int j1 = clamp_j(j + 1);
-    for (int i = -gw; i < mx + gw; ++i) {
-      const int ic = clamp_i(i);
-      vel(i, j, 1) = 0.5 * (v_center(ic, j0) + v_center(ic, j1));
-    }
-  }
-}
-
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -264,16 +235,31 @@ int main(int argc, char** argv) {
     gpism::Field2D<double> smb(grid.local_mx(), grid.local_my(), grid.ghost_width());
     smb.fill(smb_constant);
 
-    gpism::FieldStag2D<double> vel(grid.local_mx(), grid.local_my(),
-                                   grid.ghost_width());
+    gpism::FieldStag2D<double> vel_cc(grid.local_mx(), grid.local_my(),
+                                      grid.ghost_width());
+    gpism::FieldStag2D<double> vel_face(grid.local_mx(), grid.local_my(),
+                                        grid.ghost_width());
+    auto init_vel_cc_from_center_fields =
+        [&](const gpism::Field2D<double>& u_center,
+            const gpism::Field2D<double>& v_center) {
+          const int mx = grid.local_mx();
+          const int my = grid.local_my();
+          for (int j = 0; j < my; ++j) {
+            for (int i = 0; i < mx; ++i) {
+              vel_cc(i, j, 0) = u_center(i, j);
+              vel_cc(i, j, 1) = v_center(i, j);
+            }
+          }
+        };
     if (fields.has_ssa_velocity) {
-      init_face_velocity_from_center(grid, fields.u_ssa, fields.v_ssa, vel);
-      log_rank0(context, "Initialized SSA velocity guess from input u_ssa/v_ssa.");
+      init_vel_cc_from_center_fields(fields.u_ssa, fields.v_ssa);
+      log_rank0(context,
+                "Initialized SSA velocity guess from input u_ssa/v_ssa.");
     } else if (fields.has_velocity) {
-      init_face_velocity_from_center(grid, fields.uvel, fields.vvel, vel);
+      init_vel_cc_from_center_fields(fields.uvel, fields.vvel);
       log_rank0(context, "Initialized velocity guess from input uvel/vvel.");
     } else {
-      vel.fill(0.0);
+      vel_cc.fill(0.0);
     }
 
     gpism::FieldStag2D<double> flux(grid.local_mx(), grid.local_my(),
@@ -285,6 +271,8 @@ int main(int argc, char** argv) {
     const double rho_water = config.get_double("constants.sea_water.density");
     const double gravity = config.get_double("constants.standard_gravity");
     const double sea_level = config.get_double("constants.sea_level");
+    const double ice_free_thickness_standard =
+        config.get_double("stress_balance.ice_free_thickness_standard");
     const double seconds_per_year = config.get_double("constants.seconds_per_year");
     const double glen_n = config.get_double("stress_balance.ssa.Glen_exponent");
     const std::string flow_law = config.get_string("stress_balance.ssa.flow_law");
@@ -379,10 +367,13 @@ int main(int argc, char** argv) {
     ssa_options.sea_level = sea_level;
     ssa_options.rho_ice = rho_ice;
     ssa_options.rho_water = rho_water;
+    ssa_options.ice_free_thickness_standard = ice_free_thickness_standard;
     ssa_options.surface_gradient_inward =
         config.get_bool("stress_balance.ssa.compute_surface_gradient_inward");
     ssa_options.surface_slope_uphill =
         config.get_bool("stress_balance.ssa.fd.upstream_surface_slope_approximation");
+    ssa_options.extrapolate_at_margins =
+        config.get_bool("stress_balance.ssa.fd.extrapolate_at_margins");
     ssa_options.use_cfbc =
         config.get_bool("stress_balance.calving_front_stress_bc");
     // PISM's SSA strength extension (keeps SSA elliptic in thin-ice regions).
@@ -482,7 +473,8 @@ int main(int argc, char** argv) {
                                        grid.ghost_width());
 
         gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level, rho_ice,
-                                 rho_water, cell_type_guess);
+                                 rho_water, ice_free_thickness_standard,
+                                 cell_type_guess);
         gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
                                        cell_type_guess, sea_level, rho_ice,
                                        rho_water, usurf_guess);
@@ -504,7 +496,7 @@ int main(int argc, char** argv) {
           }
         }
 
-        init_face_velocity_from_center(grid, u_guess, v_guess, vel);
+        init_vel_cc_from_center_fields(u_guess, v_guess);
         log_rank0(context, "Initialized velocity guess from driving stress.");
 
         if (was_device_enabled) {
@@ -517,7 +509,8 @@ int main(int argc, char** argv) {
     gpism::sync_host_to_device(fields.topg);
     gpism::sync_host_to_device(fields.tauc);
     gpism::sync_host_to_device(smb);
-    gpism::sync_host_to_device(vel);
+    gpism::sync_host_to_device(vel_cc);
+    gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
     if (thermo_enabled) {
       gpism::sync_host_to_device(enthalpy);
       gpism::sync_host_to_device(enthalpy_next);
@@ -569,14 +562,28 @@ int main(int argc, char** argv) {
     while (!clock.done()) {
       if (clock.should_output()) {
         gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
-                                 rho_ice, rho_water, cell_type);
+                                 rho_ice, rho_water,
+                                 ice_free_thickness_standard, cell_type);
         gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
                                        cell_type, sea_level, rho_ice,
                                        rho_water, fields.usurf);
-        gpism::compute_cell_center_velocity(grid, vel, fields.uvel,
-                                            fields.vvel);
-        gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
-                                            fields.v_ssa);
+        gpism::sync_device_to_host(vel_cc);
+        for (int j = 0; j < grid.local_my(); ++j) {
+          for (int i = 0; i < grid.local_mx(); ++i) {
+            const double u = vel_cc(i, j, 0);
+            const double v = vel_cc(i, j, 1);
+            fields.uvel(i, j) = u;
+            fields.vvel(i, j) = v;
+            fields.u_ssa(i, j) = u;
+            fields.v_ssa(i, j) = v;
+          }
+        }
+        // Ensure device buffers are consistent with host-produced diagnostics
+        // for async output staging.
+        gpism::sync_host_to_device(fields.uvel);
+        gpism::sync_host_to_device(fields.vvel);
+        gpism::sync_host_to_device(fields.u_ssa);
+        gpism::sync_host_to_device(fields.v_ssa);
         // NetCDF writers use host buffers; ensure derived fields computed on the
         // device are synced before enqueueing asynchronous output.
         gpism::sync_device_to_host(fields.usurf);
@@ -604,7 +611,7 @@ int main(int argc, char** argv) {
                        fields.has_vel_bc ? &fields.u_bc : nullptr,
                        fields.has_vel_bc ? &fields.v_bc : nullptr,
                        fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
-                       vel, ssa_options);
+                       vel_cc, ssa_options);
         } catch (const std::exception& exc) {
           std::cerr << "SSA failure: " << exc.what() << '\n';
           return 2;
@@ -620,12 +627,15 @@ int main(int argc, char** argv) {
 
       if (evolve_thickness) {
         exchange_field2d(fields.thk);
-        exchange_field_stag(vel);
-        gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
+        exchange_field_stag(vel_cc);
+        gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
+        exchange_field_stag(vel_face);
+        gpism::compute_face_fluxes(grid, fields.thk, vel_face, flux);
         gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
                                 fields.thk);
         gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
-                                 rho_ice, rho_water, cell_type);
+                                 rho_ice, rho_water,
+                                 ice_free_thickness_standard, cell_type);
       }
 
       clock.advance();
@@ -634,13 +644,26 @@ int main(int argc, char** argv) {
     if (!options.output.empty() &&
         (last_output_time < clock.time() - 1e-12)) {
       gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
-                               rho_ice, rho_water, cell_type);
+                               rho_ice, rho_water,
+                               ice_free_thickness_standard, cell_type);
       gpism::compute_usurf_flotation(grid, fields.thk, fields.topg, cell_type,
                                      sea_level, rho_ice, rho_water,
                                      fields.usurf);
-      gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
-      gpism::compute_cell_center_velocity(grid, vel, fields.u_ssa,
-                                          fields.v_ssa);
+      gpism::sync_device_to_host(vel_cc);
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          const double u = vel_cc(i, j, 0);
+          const double v = vel_cc(i, j, 1);
+          fields.uvel(i, j) = u;
+          fields.vvel(i, j) = v;
+          fields.u_ssa(i, j) = u;
+          fields.v_ssa(i, j) = v;
+        }
+      }
+      gpism::sync_host_to_device(fields.uvel);
+      gpism::sync_host_to_device(fields.vvel);
+      gpism::sync_host_to_device(fields.u_ssa);
+      gpism::sync_host_to_device(fields.v_ssa);
       gpism::sync_device_to_host(fields.usurf);
       gpism::sync_device_to_host(fields.uvel);
       gpism::sync_device_to_host(fields.vvel);

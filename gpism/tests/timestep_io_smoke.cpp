@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 
 #if GPISM_HAVE_NETCDF
@@ -23,7 +24,9 @@ int main() {
   const int mx = 4;
   const int my = 4;
   const int gw = 1;
-  gpism::Grid2D grid(mx, my, 1.0, 1.0, gw, 0, 1);
+  // Use a larger grid spacing to keep the explicit thickness update stable
+  // for the short IO smoke run.
+  gpism::Grid2D grid(mx, my, 1000.0, 1000.0, gw, 0, 1);
   gpism::IOFields2D fields;
   fields.thk.resize(mx, my, gw);
   fields.topg.resize(mx, my, gw);
@@ -42,26 +45,46 @@ int main() {
 
   gpism::Field2D<double> smb(mx, my, gw);
   smb.fill(0.1);
-  gpism::FieldStag2D<double> vel(mx, my, gw);
+  gpism::FieldStag2D<double> vel_cc(mx, my, gw);
+  gpism::FieldStag2D<double> vel_face(mx, my, gw);
   gpism::FieldStag2D<double> flux(mx, my, gw);
-  vel.fill(0.0);
+  vel_cc.fill(0.0);
 
   gpism::sync_host_to_device(fields.thk);
   gpism::sync_host_to_device(fields.topg);
   gpism::sync_host_to_device(fields.tauc);
   gpism::sync_host_to_device(smb);
-  gpism::sync_host_to_device(vel);
+  gpism::sync_host_to_device(vel_cc);
+  gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
 
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
   gpism::SSASolverOptions options;
-  options.max_picard = 5;
+  options.max_picard = 80;
   options.tol_nuH = 1.0;
   options.tol_vel = 1.0;
   options.gmres_max_iter = 200;
   options.gmres_tol = 1e-5;
+  // Plastic basal drag is strongly nonlinear; damping improves robustness and
+  // reduces CPU/GPU divergence in small test cases.
+  options.vel_relax = 0.5;
+  options.nuH_relax = 0.5;
+  // Avoid the ill-posed "pure plastic" nullspace on a tiny domain with no
+  // boundary conditions: use a linearized pseudo-plastic law (q=1) so the SSA
+  // solve stays bounded and this test can focus on IO + thickness evolution.
+  options.basal_params.law = gpism::BasalResistanceLaw::PseudoPlastic;
+  options.basal_params.q = 1.0;
   options.use_bc = false;
-  options.use_mg_precond = true;
+  // MG preconditioning is exercised by dedicated unit tests; keep this IO smoke
+  // focused on end-to-end evolution and NetCDF output.
+  options.use_mg_precond = false;
+  if (const char* env = std::getenv("GPISM_TIMESTEP_IO_DIAG")) {
+    if (std::atoi(env) != 0) {
+      options.diagnostic = true;
+      options.gmres_verbose = true;
+      options.fail_fast_dump_prefix = "io_smoke_failfast";
+    }
+  }
 
   gpism::NetcdfIO io;
   const std::string path = "gpism_timestep_io_smoke.nc";
@@ -74,17 +97,22 @@ int main() {
   while (!clock.done()) {
     gpism::SSASolverResult result =
         solver.solve(fields.thk, fields.topg, fields.tauc, nullptr, nullptr, nullptr,
-                     vel, options);
+                     vel_cc, options);
     if (!result.converged) {
-      std::cerr << "SSA solver did not converge in IO timestep loop\n";
+      std::cerr << "SSA solver did not converge in IO timestep loop (picard_iters="
+                << result.picard_iters << " nuH_change=" << result.nuH_change
+                << " vel_change=" << result.vel_change
+                << " linear_iters=" << result.linear_iters
+                << " linear_residual=" << result.linear_residual << ")\n";
       return 1;
     }
 
-    gpism::compute_face_fluxes(grid, fields.thk, vel, flux);
+    gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
+    gpism::compute_face_fluxes(grid, fields.thk, vel_face, flux);
     gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
                             fields.thk);
     geometry.compute_usurf(grid, fields.thk, fields.topg, fields.usurf);
-    gpism::compute_cell_center_velocity(grid, vel, fields.uvel, fields.vvel);
+    gpism::compute_cell_center_velocity(grid, vel_face, fields.uvel, fields.vvel);
     fields.has_usurf = true;
     fields.has_velocity = true;
 
