@@ -44,10 +44,11 @@ struct GMRESOptions {
 
 struct GMRESResult {
   int iterations = 0;
-  // Residual norm estimate (unpreconditioned) tracked by the Arnoldi process.
+  // Residual norm estimate tracked by the Arnoldi process. For GMRES with a
+  // left preconditioner this corresponds to ||M^{-1}(b - A x)||.
   double residual = 0.0;
-  // True residual norm ||b - A x||, computed at the start and after each
-  // restart update.
+  // True residual norm ||b - A x|| (unpreconditioned). This is computed at
+  // the start and after each restart update for diagnostics.
   double true_residual = 0.0;
   bool converged = false;
   std::vector<double> residuals;

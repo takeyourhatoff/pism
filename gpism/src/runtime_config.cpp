@@ -69,7 +69,9 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.gmres_max_iter"] = "200";
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
-  values_["ssa.gmres_tol"] = "1e-8";
+  // PETSc KSP default relative tolerance is 1e-5; matching it here improves
+  // SSAFD parity and avoids over-solving on large domains.
+  values_["ssa.gmres_tol"] = "1e-5";
   values_["ssa.gmres_tol_relative_to_rhs"] = "0";
   values_["ssa.vel_relax"] = "1.0";
   values_["ssa.nuH_relax"] = "1.0";

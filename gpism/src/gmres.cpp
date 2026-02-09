@@ -228,49 +228,53 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
   FieldStag2D<double>& z = workspace.z;
   FieldStag2D<double>& w = workspace.w;
   auto& V = workspace.V;
-  auto& Z = workspace.Z;
+
+  // Left-preconditioned GMRES (PETSc KSPGMRES default): solve (M^{-1} A) x =
+  // (M^{-1} b), monitoring ||M^{-1}(b - A x)||. This matches PISM SSAFD's
+  // default convergence behavior and keeps the GMRES residual in velocity-like
+  // units.
 
   double b_norm = 0.0;
   if (options.tol_relative && options.tol_relative_to_rhs) {
-    b_norm = std::sqrt(global_sum(options.context, dot(b, b)));
+    M->apply(b, z);
+    b_norm = std::sqrt(global_sum(options.context, dot(z, z)));
   }
 
-  // Right-preconditioned GMRES (PISM SSAFD-like): Krylov on A M^{-1}, using the
-  // unpreconditioned residual norm for convergence checks. This avoids the
-  // "small preconditioned residual but large true residual" failure mode that
-  // can occur with left preconditioning and highly scaled operators.
   op.apply(x, Ax);
   copy(b, r);
   axpy(-1.0, Ax, r);
-  double beta = std::sqrt(global_sum(options.context, dot(r, r)));
-  result.true_residual = beta;
+
+  // Preconditioned residual z = M^{-1} r.
+  M->apply(r, z);
+  double beta = std::sqrt(global_sum(options.context, dot(z, z)));
   result.residual = beta;
+  result.true_residual = std::sqrt(global_sum(options.context, dot(r, r)));
   result.residuals.push_back(result.residual);
   if (!std::isfinite(beta)) {
     if (options.verbose && is_rank0(options.context)) {
-      std::cout << "GMRES init: r0=" << beta << " (non-finite)\n";
+      std::cout << "GMRES init: beta0=" << beta << " (non-finite)\n";
     }
     return result;
   }
-  const double r0_norm = beta;
+  const double beta0 = beta;
 
   if (options.precond_diagnostic) {
-    M->apply(r, z);
-    const double z_norm = std::sqrt(global_sum(options.context, dot(z, z)));
-    op.apply(z, Ax);
-    const double az_norm = std::sqrt(global_sum(options.context, dot(Ax, Ax)));
-    copy(r, w);
+    const double z_norm = beta0;
+    // Check how close M^{-1}A is to identity for the initial residual:
+    // p = M^{-1} A z, then compare ||z - p|| / ||z||.
+    op.apply(z, w);
+    M->apply(w, Ax);  // reuse Ax as p
+    copy(z, w);
     axpy(-1.0, Ax, w);
-    const double r_az_norm = std::sqrt(global_sum(options.context, dot(w, w)));
+    const double z_mp_norm =
+        std::sqrt(global_sum(options.context, dot(w, w)));
     if (is_rank0(options.context)) {
-      std::cout << "GMRES preconditioning: right (Krylov on A M^{-1}), "
-                   "apply M^{-1} to V_j, then A*(M^{-1} V_j)\n";
-      std::cout << "GMRES preconditioner diagnostic: ||r||=" << r0_norm
-                << " ||M^{-1} r||=" << z_norm
-                << " ||A M^{-1} r||=" << az_norm
-                << " ||r - A M^{-1} r||=" << r_az_norm;
-      if (r0_norm > 0.0) {
-        std::cout << " ratio=" << (r_az_norm / r0_norm);
+      std::cout << "GMRES preconditioning: left (Krylov on M^{-1} A), "
+                   "monitoring ||M^{-1}(b-Ax)||\n";
+      std::cout << "GMRES preconditioner diagnostic: ||M^{-1} r0||=" << z_norm
+                << " ||z - M^{-1}A z||=" << z_mp_norm;
+      if (z_norm > 0.0) {
+        std::cout << " ratio=" << (z_mp_norm / z_norm);
       }
       std::cout << '\n';
     }
@@ -278,12 +282,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
   double tol_abs = options.tol;
   if (options.tol_relative && options.tol_relative_to_rhs) {
-    tol_abs = options.tol * std::max(r0_norm, b_norm);
+    tol_abs = options.tol * std::max(beta0, b_norm);
   } else if (options.tol_relative) {
-    tol_abs = options.tol * r0_norm;
+    tol_abs = options.tol * beta0;
   }
   if (options.verbose && is_rank0(options.context)) {
-    std::cout << "GMRES init: r0=" << r0_norm;
+    std::cout << "GMRES init: beta0=" << beta0
+              << " r0=" << result.true_residual;
     if (options.tol_relative_to_rhs) {
       std::cout << " b=" << b_norm;
     }
@@ -315,24 +320,31 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
     std::fill(g.begin(), g.begin() + static_cast<std::size_t>(restart + 1), 0.0);
 
     g[0] = beta;
-    copy(r, *V[0]);
+    copy(z, *V[0]);
     if (beta != 0.0) {
       scal(1.0 / beta, *V[0]);
     }
 
     int inner_iters = 0;
     for (int j = 0; j < restart && total_iter < max_iter; ++j) {
-      // Right preconditioning:
-      //   z_j = M^{-1} v_j
-      //   w   = A z_j
-      M->apply(*V[static_cast<std::size_t>(j)],
-               *Z[static_cast<std::size_t>(j)]);
-      op.apply(*Z[static_cast<std::size_t>(j)], w);
+      // Left preconditioning:
+      //   w = A v_j
+      //   z = M^{-1} w
+      op.apply(*V[static_cast<std::size_t>(j)], w);
+      M->apply(w, z);
 
 #if GPISM_HAVE_CUDA
-      bool gpu_ortho = w.component(0).has_device_data() &&
-                       w.component(1).has_device_data() &&
-                       !deterministic_reductions_enabled();
+      const bool multi_rank =
+#if GPISM_HAVE_MPI
+          (options.context && options.context->mpi_enabled() &&
+           options.context->size() > 1);
+#else
+          false;
+#endif
+      bool gpu_ortho = z.component(0).has_device_data() &&
+                       z.component(1).has_device_data() &&
+                       !deterministic_reductions_enabled() &&
+                       !multi_rank;
       if (gpu_ortho) {
         const int count = j + 1;
         for (int i = 0; i < count; ++i) {
@@ -349,20 +361,13 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
                    static_cast<std::size_t>(count) * sizeof(double*),
                    cudaMemcpyHostToDevice);
         orthogonalize_stag_cuda(
-            w.local_mx(), w.local_my(), w.ghost_width(),
-            w.component(0).stride(), w.component(1).stride(),
-            w.component(0).device_data(), w.component(1).device_data(),
+            z.local_mx(), z.local_my(), z.ghost_width(),
+            z.component(0).stride(), z.component(1).stride(),
+            z.component(0).device_data(), z.component(1).device_data(),
             workspace.V_u_dev, workspace.V_v_dev, count, workspace.hij_dev);
         cudaMemcpy(workspace.hij_host.data(), workspace.hij_dev,
                    static_cast<std::size_t>(count) * sizeof(double),
                    cudaMemcpyDeviceToHost);
-#if GPISM_HAVE_MPI
-        if (options.context && options.context->mpi_enabled() &&
-            options.context->size() > 1) {
-          MPI_Allreduce(MPI_IN_PLACE, workspace.hij_host.data(), count,
-                        MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        }
-#endif
         for (int i = 0; i < count; ++i) {
           H[static_cast<std::size_t>(i) +
             static_cast<std::size_t>(restart + 1) * j] =
@@ -373,18 +378,18 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
       {
         for (int i = 0; i <= j; ++i) {
           const double hij = global_sum(options.context, dot(
-              w, *V[static_cast<std::size_t>(i)]));
+              z, *V[static_cast<std::size_t>(i)]));
           H[static_cast<std::size_t>(i) +
             static_cast<std::size_t>(restart + 1) * j] = hij;
-          axpy(-hij, *V[static_cast<std::size_t>(i)], w);
+          axpy(-hij, *V[static_cast<std::size_t>(i)], z);
         }
       }
 
-      const double h_next = std::sqrt(global_sum(options.context, dot(w, w)));
+      const double h_next = std::sqrt(global_sum(options.context, dot(z, z)));
       H[static_cast<std::size_t>(j + 1) +
         static_cast<std::size_t>(restart + 1) * j] = h_next;
       if (h_next != 0.0) {
-        copy(w, *V[static_cast<std::size_t>(j + 1)]);
+        copy(z, *V[static_cast<std::size_t>(j + 1)]);
         scal(1.0 / h_next, *V[static_cast<std::size_t>(j + 1)]);
       }
 
@@ -446,15 +451,16 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
     for (int i = 0; i < k; ++i) {
       axpy(y[static_cast<std::size_t>(i)],
-           *Z[static_cast<std::size_t>(i)], x);
+           *V[static_cast<std::size_t>(i)], x);
     }
 
     op.apply(x, Ax);
     copy(b, r);
     axpy(-1.0, Ax, r);
-    beta = std::sqrt(global_sum(options.context, dot(r, r)));
-    result.true_residual = beta;
+    M->apply(r, z);
+    beta = std::sqrt(global_sum(options.context, dot(z, z)));
     result.residual = beta;
+    result.true_residual = std::sqrt(global_sum(options.context, dot(r, r)));
     result.residuals.push_back(result.residual);
     if (!std::isfinite(beta)) {
       break;
@@ -466,7 +472,7 @@ GMRESResult gmres_solve(const LinearOperator& op, const FieldStag2D<double>& b,
 
   result.iterations = total_iter;
   result.converged =
-      std::isfinite(result.true_residual) && (result.true_residual <= tol_abs);
+      std::isfinite(result.residual) && (result.residual <= tol_abs);
   if (options.verbose && is_rank0(options.context)) {
     std::cout << "GMRES done: iters=" << result.iterations
               << " residual=" << result.residual
