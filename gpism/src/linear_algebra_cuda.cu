@@ -83,6 +83,69 @@ __global__ void set_kernel(int mx, int my, int gw, int stride, double* x,
   x[ix] = value;
 }
 
+__global__ void axpy_stag_kernel(int mx, int my, int gw, int stride_x_u,
+                                 int stride_x_v, int stride_y_u,
+                                 int stride_y_v, const double* x_u,
+                                 const double* x_v, double* y_u, double* y_v,
+                                 double alpha) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int ix_u = idx(i, j, gw, stride_x_u);
+  const int ix_v = idx(i, j, gw, stride_x_v);
+  const int iy_u = idx(i, j, gw, stride_y_u);
+  const int iy_v = idx(i, j, gw, stride_y_v);
+  y_u[iy_u] += alpha * x_u[ix_u];
+  y_v[iy_v] += alpha * x_v[ix_v];
+}
+
+__global__ void scal_stag_kernel(int mx, int my, int gw, int stride_u,
+                                 int stride_v, double* x_u, double* x_v,
+                                 double alpha) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  x_u[iu] *= alpha;
+  x_v[iv] *= alpha;
+}
+
+__global__ void copy_stag_kernel(int mx, int my, int gw, int stride_x_u,
+                                 int stride_x_v, int stride_y_u,
+                                 int stride_y_v, const double* x_u,
+                                 const double* x_v, double* y_u, double* y_v) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int ix_u = idx(i, j, gw, stride_x_u);
+  const int ix_v = idx(i, j, gw, stride_x_v);
+  const int iy_u = idx(i, j, gw, stride_y_u);
+  const int iy_v = idx(i, j, gw, stride_y_v);
+  y_u[iy_u] = x_u[ix_u];
+  y_v[iy_v] = x_v[ix_v];
+}
+
+__global__ void set_stag_kernel(int mx, int my, int gw, int stride_u,
+                                int stride_v, double* x_u, double* x_v,
+                                double value) {
+  const int i = blockIdx.x * blockDim.x + threadIdx.x;
+  const int j = blockIdx.y * blockDim.y + threadIdx.y;
+  if (i >= mx || j >= my) {
+    return;
+  }
+  const int iu = idx(i, j, gw, stride_u);
+  const int iv = idx(i, j, gw, stride_v);
+  x_u[iu] = value;
+  x_v[iv] = value;
+}
+
 __global__ void dot_kernel(int mx, int my, int gw, int stride_a, int stride_b,
                            const double* a, const double* b, double* out) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -276,6 +339,46 @@ void set_cuda(int mx, int my, int gw, int stride, double* x, double value) {
   dim3 block(16, 16);
   dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
   set_kernel<<<grid, block>>>(mx, my, gw, stride, x, value);
+}
+
+void axpy_stag_cuda(int mx, int my, int gw, int stride_x_u, int stride_x_v,
+                    int stride_y_u, int stride_y_v, const double* x_u,
+                    const double* x_v, double* y_u, double* y_v,
+                    double alpha) {
+  CudaEventTimer timer("la_axpy_stag");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  axpy_stag_kernel<<<grid, block>>>(mx, my, gw, stride_x_u, stride_x_v,
+                                    stride_y_u, stride_y_v, x_u, x_v, y_u, y_v,
+                                    alpha);
+}
+
+void scal_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                    double* x_u, double* x_v, double alpha) {
+  CudaEventTimer timer("la_scal_stag");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  scal_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, x_u, x_v,
+                                    alpha);
+}
+
+void copy_stag_cuda(int mx, int my, int gw, int stride_x_u, int stride_x_v,
+                    int stride_y_u, int stride_y_v, const double* x_u,
+                    const double* x_v, double* y_u, double* y_v) {
+  CudaEventTimer timer("la_copy_stag");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  copy_stag_kernel<<<grid, block>>>(mx, my, gw, stride_x_u, stride_x_v,
+                                    stride_y_u, stride_y_v, x_u, x_v, y_u, y_v);
+}
+
+void set_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                   double* x_u, double* x_v, double value) {
+  CudaEventTimer timer("la_set_stag");
+  dim3 block(16, 16);
+  dim3 grid((mx + block.x - 1) / block.x, (my + block.y - 1) / block.y);
+  set_stag_kernel<<<grid, block>>>(mx, my, gw, stride_u, stride_v, x_u, x_v,
+                                   value);
 }
 
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,

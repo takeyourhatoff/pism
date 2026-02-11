@@ -9,10 +9,20 @@
 namespace gpism {
 void axpy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
               const double* x, double* y, double alpha);
+void axpy_stag_cuda(int mx, int my, int gw, int stride_x_u, int stride_x_v,
+                    int stride_y_u, int stride_y_v, const double* x_u,
+                    const double* x_v, double* y_u, double* y_v, double alpha);
 void scal_cuda(int mx, int my, int gw, int stride, double* x, double alpha);
+void scal_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                    double* x_u, double* x_v, double alpha);
 void copy_cuda(int mx, int my, int gw, int stride_x, int stride_y,
                const double* x, double* y);
+void copy_stag_cuda(int mx, int my, int gw, int stride_x_u, int stride_x_v,
+                    int stride_y_u, int stride_y_v, const double* x_u,
+                    const double* x_v, double* y_u, double* y_v);
 void set_cuda(int mx, int my, int gw, int stride, double* x, double value);
+void set_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
+                   double* x_u, double* x_v, double value);
 double dot_cuda(int mx, int my, int gw, int stride_a, int stride_b,
                 const double* a, const double* b);
 double dot_stag_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -162,14 +172,12 @@ void axpy(double alpha, const FieldStag2D<double>& x, FieldStag2D<double>& y) {
       sync_host_to_device(y);
       return;
     }
-    axpy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(0).stride(), y.component(0).stride(),
-             x.component(0).device_data(), y.component(0).device_data(),
-             alpha);
-    axpy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(1).stride(), y.component(1).stride(),
-             x.component(1).device_data(), y.component(1).device_data(),
-             alpha);
+    axpy_stag_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
+                   x.component(0).stride(), x.component(1).stride(),
+                   y.component(0).stride(), y.component(1).stride(),
+                   x.component(0).device_data(), x.component(1).device_data(),
+                   y.component(0).device_data(), y.component(1).device_data(),
+                   alpha);
     return;
   }
 #endif
@@ -187,10 +195,10 @@ void scal(double alpha, FieldStag2D<double>& x) {
       sync_host_to_device(x);
       return;
     }
-    scal_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(0).stride(), x.component(0).device_data(), alpha);
-    scal_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(1).stride(), x.component(1).device_data(), alpha);
+    scal_stag_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
+                   x.component(0).stride(), x.component(1).stride(),
+                   x.component(0).device_data(), x.component(1).device_data(),
+                   alpha);
     return;
   }
 #endif
@@ -210,12 +218,11 @@ void copy(const FieldStag2D<double>& x, FieldStag2D<double>& y) {
       sync_host_to_device(y);
       return;
     }
-    copy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(0).stride(), y.component(0).stride(),
-             x.component(0).device_data(), y.component(0).device_data());
-    copy_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-             x.component(1).stride(), y.component(1).stride(),
-             x.component(1).device_data(), y.component(1).device_data());
+    copy_stag_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
+                   x.component(0).stride(), x.component(1).stride(),
+                   y.component(0).stride(), y.component(1).stride(),
+                   x.component(0).device_data(), x.component(1).device_data(),
+                   y.component(0).device_data(), y.component(1).device_data());
     return;
   }
 #endif
@@ -233,10 +240,10 @@ void set(double value, FieldStag2D<double>& x) {
       sync_host_to_device(x);
       return;
     }
-    set_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-            x.component(0).stride(), x.component(0).device_data(), value);
-    set_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
-            x.component(1).stride(), x.component(1).device_data(), value);
+    set_stag_cuda(x.local_mx(), x.local_my(), x.ghost_width(),
+                  x.component(0).stride(), x.component(1).stride(),
+                  x.component(0).device_data(), x.component(1).device_data(),
+                  value);
     return;
   }
 #endif

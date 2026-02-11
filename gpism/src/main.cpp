@@ -558,6 +558,64 @@ int main(int argc, char** argv) {
       exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
     };
 
+    auto populate_velocity_diagnostics = [&]() {
+#if GPISM_HAVE_CUDA
+      auto copy_field2d_device =
+          [&](const gpism::Field2D<double>& src, gpism::Field2D<double>& dst) {
+            if (!src.has_device_data() || !dst.has_device_data()) {
+              return false;
+            }
+            const std::size_t src_offset =
+                static_cast<std::size_t>(src.ghost_width()) *
+                    static_cast<std::size_t>(src.stride()) +
+                static_cast<std::size_t>(src.ghost_width());
+            const std::size_t dst_offset =
+                static_cast<std::size_t>(dst.ghost_width()) *
+                    static_cast<std::size_t>(dst.stride()) +
+                static_cast<std::size_t>(dst.ghost_width());
+            const std::size_t row_bytes =
+                static_cast<std::size_t>(grid.local_mx()) * sizeof(double);
+            const std::size_t row_count =
+                static_cast<std::size_t>(grid.local_my());
+            if (row_bytes == 0 || row_count == 0) {
+              return true;
+            }
+            const cudaError_t err =
+                cudaMemcpy2D(dst.device_data() + dst_offset,
+                             static_cast<std::size_t>(dst.stride()) *
+                                 sizeof(double),
+                             src.device_data() + src_offset,
+                             static_cast<std::size_t>(src.stride()) *
+                                 sizeof(double),
+                             row_bytes, row_count, cudaMemcpyDeviceToDevice);
+            return err == cudaSuccess;
+          };
+      const bool copied_on_device =
+          copy_field2d_device(vel_cc.component(0), fields.uvel) &&
+          copy_field2d_device(vel_cc.component(1), fields.vvel) &&
+          copy_field2d_device(vel_cc.component(0), fields.u_ssa) &&
+          copy_field2d_device(vel_cc.component(1), fields.v_ssa);
+      if (copied_on_device) {
+        return;
+      }
+#endif
+      gpism::sync_device_to_host(vel_cc);
+      for (int j = 0; j < grid.local_my(); ++j) {
+        for (int i = 0; i < grid.local_mx(); ++i) {
+          const double u = vel_cc(i, j, 0);
+          const double v = vel_cc(i, j, 1);
+          fields.uvel(i, j) = u;
+          fields.vvel(i, j) = v;
+          fields.u_ssa(i, j) = u;
+          fields.v_ssa(i, j) = v;
+        }
+      }
+      gpism::sync_host_to_device(fields.uvel);
+      gpism::sync_host_to_device(fields.vvel);
+      gpism::sync_host_to_device(fields.u_ssa);
+      gpism::sync_host_to_device(fields.v_ssa);
+    };
+
     double last_output_time = -1.0;
     while (!clock.done()) {
       if (clock.should_output()) {
@@ -567,23 +625,7 @@ int main(int argc, char** argv) {
         gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
                                        cell_type, sea_level, rho_ice,
                                        rho_water, fields.usurf);
-        gpism::sync_device_to_host(vel_cc);
-        for (int j = 0; j < grid.local_my(); ++j) {
-          for (int i = 0; i < grid.local_mx(); ++i) {
-            const double u = vel_cc(i, j, 0);
-            const double v = vel_cc(i, j, 1);
-            fields.uvel(i, j) = u;
-            fields.vvel(i, j) = v;
-            fields.u_ssa(i, j) = u;
-            fields.v_ssa(i, j) = v;
-          }
-        }
-        // Ensure device buffers are consistent with host-produced diagnostics
-        // for async output staging.
-        gpism::sync_host_to_device(fields.uvel);
-        gpism::sync_host_to_device(fields.vvel);
-        gpism::sync_host_to_device(fields.u_ssa);
-        gpism::sync_host_to_device(fields.v_ssa);
+        populate_velocity_diagnostics();
         // NetCDF writers use host buffers; ensure derived fields computed on the
         // device are synced before enqueueing asynchronous output.
         gpism::sync_device_to_host(fields.usurf);
@@ -649,21 +691,7 @@ int main(int argc, char** argv) {
       gpism::compute_usurf_flotation(grid, fields.thk, fields.topg, cell_type,
                                      sea_level, rho_ice, rho_water,
                                      fields.usurf);
-      gpism::sync_device_to_host(vel_cc);
-      for (int j = 0; j < grid.local_my(); ++j) {
-        for (int i = 0; i < grid.local_mx(); ++i) {
-          const double u = vel_cc(i, j, 0);
-          const double v = vel_cc(i, j, 1);
-          fields.uvel(i, j) = u;
-          fields.vvel(i, j) = v;
-          fields.u_ssa(i, j) = u;
-          fields.v_ssa(i, j) = v;
-        }
-      }
-      gpism::sync_host_to_device(fields.uvel);
-      gpism::sync_host_to_device(fields.vvel);
-      gpism::sync_host_to_device(fields.u_ssa);
-      gpism::sync_host_to_device(fields.v_ssa);
+      populate_velocity_diagnostics();
       gpism::sync_device_to_host(fields.usurf);
       gpism::sync_device_to_host(fields.uvel);
       gpism::sync_device_to_host(fields.vvel);
