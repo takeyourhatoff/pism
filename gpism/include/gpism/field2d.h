@@ -70,6 +70,7 @@ public:
 
   T* host_staging_data() {
 #if GPISM_HAVE_CUDA
+    ensure_host_staging();
     return host_staging_;
 #else
     return host_staging_.empty() ? nullptr : host_staging_.data();
@@ -83,8 +84,21 @@ public:
 #endif
   }
 
+  void ensure_host_staging() {
+#if GPISM_HAVE_CUDA
+    if (!device_enabled()) {
+      return;
+    }
+    if (host_staging_ != nullptr || host_staging_count_ == 0) {
+      return;
+    }
+    allocate_host_staging(host_staging_count_);
+#endif
+  }
+
   void copy_host_to_device() {
 #if GPISM_HAVE_CUDA
+    ensure_host_staging();
     if (device_enabled() && device_data_ && host_staging_) {
       cudaMemcpy(device_data_, host_staging_,
                  elements() * sizeof(T), cudaMemcpyHostToDevice);
@@ -94,6 +108,7 @@ public:
 
   void copy_device_to_host() {
 #if GPISM_HAVE_CUDA
+    ensure_host_staging();
     if (device_enabled() && device_data_ && host_staging_) {
       cudaMemcpy(host_staging_, device_data_,
                  elements() * sizeof(T), cudaMemcpyDeviceToHost);
@@ -134,7 +149,12 @@ private:
     const size_t total = static_cast<size_t>(stride_) *
                          static_cast<size_t>(local_my_ + 2 * ghost_width_);
     data_.assign(total, T{});
+#if GPISM_HAVE_CUDA
+    release_host_staging();
+    host_staging_count_ = total;
+#else
     allocate_host_staging(total);
+#endif
     allocate_device(total);
   }
 

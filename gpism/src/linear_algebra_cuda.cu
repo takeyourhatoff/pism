@@ -32,8 +32,9 @@ double* scalar_host_buffer() {
 
 double read_scalar(double* d_out) {
   double* h_out = scalar_host_buffer();
-  cudaMemcpyAsync(h_out, d_out, sizeof(double), cudaMemcpyDeviceToHost);
-  cudaStreamSynchronize(0);
+  // Use a blocking copy instead of async+stream synchronize to avoid an extra
+  // API sync call per scalar reduction.
+  cudaMemcpy(h_out, d_out, sizeof(double), cudaMemcpyDeviceToHost);
   return *h_out;
 }
 

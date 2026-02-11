@@ -17,7 +17,11 @@ void sync_host_to_device(Field2D<T>& field) {
   if (!device_enabled()) {
     return;
   }
-  if (!field.host_staging_data() || field.elements() == 0) {
+  if (field.elements() == 0) {
+    return;
+  }
+  field.ensure_host_staging();
+  if (!field.host_staging_data()) {
     return;
   }
   SyncStats::record_h2d(field.elements() * sizeof(T));
@@ -38,7 +42,11 @@ void sync_device_to_host(Field2D<T>& field) {
   if (!field.device_data()) {
     return;
   }
-  if (!field.host_staging_data() || field.elements() == 0) {
+  if (field.elements() == 0) {
+    return;
+  }
+  field.ensure_host_staging();
+  if (!field.host_staging_data()) {
     return;
   }
   SyncStats::record_d2h(field.elements() * sizeof(T));
@@ -68,7 +76,11 @@ void sync_host_to_device(Field3D<T>& field) {
   if (!device_enabled()) {
     return;
   }
-  if (!field.host_staging_data() || field.elements() == 0) {
+  if (field.elements() == 0) {
+    return;
+  }
+  field.ensure_host_staging();
+  if (!field.host_staging_data()) {
     return;
   }
   SyncStats::record_h2d(field.elements() * sizeof(T));
@@ -89,7 +101,11 @@ void sync_device_to_host(Field3D<T>& field) {
   if (!field.device_data()) {
     return;
   }
-  if (!field.host_staging_data() || field.elements() == 0) {
+  if (field.elements() == 0) {
+    return;
+  }
+  field.ensure_host_staging();
+  if (!field.host_staging_data()) {
     return;
   }
   SyncStats::record_d2h(field.elements() * sizeof(T));
