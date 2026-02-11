@@ -931,16 +931,33 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
     const bool single_rank =
         !(context && context->mpi_enabled() && context->size() > 1);
     if (single_rank) {
-      for (int iter = 0; iter < iterations; ++iter) {
+      // Ping-pong between x and Ax to avoid a full-field copy every Jacobi
+      // iteration. This relies on mg_jacobi_fused_cuda writing x_new, not doing
+      // an in-place += update.
+      const bool odd_iters = (iterations & 1) != 0;
+      if (odd_iters) {
+        // Seed Ax with the initial x so we can start from Ax and end in x.
         copy(x, Ax);
+      }
+      bool input_is_x = !odd_iters;
+      const double* x0_u = x.component(0).device_data();
+      const double* x0_v = x.component(1).device_data();
+      const double* x1_u = Ax.component(0).device_data();
+      const double* x1_v = Ax.component(1).device_data();
+      for (int iter = 0; iter < iterations; ++iter) {
+        const double* in_u = input_is_x ? x0_u : x1_u;
+        const double* in_v = input_is_x ? x0_v : x1_v;
+        double* out_u = input_is_x ? Ax.component(0).device_data()
+                                   : x.component(0).device_data();
+        double* out_v = input_is_x ? Ax.component(1).device_data()
+                                   : x.component(1).device_data();
         mg_jacobi_fused_cuda(
             grid.local_mx(), grid.local_my(), x.ghost_width(),
             x.component(0).stride(), x.component(1).stride(),
             nuH.component(0).stride(), nuH.component(1).stride(),
             beta.component(0).stride(), beta.component(1).stride(),
             b.component(0).stride(), b.component(1).stride(),
-            Ax.component(0).device_data(), Ax.component(1).device_data(),
-            x.component(0).device_data(), x.component(1).device_data(),
+            in_u, in_v, out_u, out_v,
             nuH.component(0).device_data(), nuH.component(1).device_data(),
             beta.component(0).device_data(), beta.component(1).device_data(),
             b.component(0).device_data(), b.component(1).device_data(), omega,
@@ -951,6 +968,7 @@ void jacobi_smooth(const Grid2D& grid, const FieldStag2D<double>& nuH,
             has_values ? bc->values->component(0).device_data() : nullptr,
             has_values ? bc->values->component(1).device_data() : nullptr,
             has_bc ? 1 : 0, has_values ? 1 : 0, periodic);
+        input_is_x = !input_is_x;
       }
       return;
     }

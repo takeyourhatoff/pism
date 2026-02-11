@@ -253,6 +253,8 @@ __global__ void jacobi_fused_kernel(
   if (has_bc && mask_u && mask_u[mask_idx_u] != 0) {
     if (has_values && bc_u) {
       x_u[idx_u] = bc_u[idx(i, j, gw, stride_bc_u)];
+    } else {
+      x_u[idx_u] = x_old_u[idx_u];
     }
   } else {
     const int u_e = idx(ip1, j, gw, stride_u);
@@ -294,14 +296,15 @@ __global__ void jacobi_fused_kernel(
     const double diag =
         beta_u[idx(i, j, gw, stride_beta_u)] +
         (c_n + c_s) * inv_dy2 + 4.0 * (c_e + c_w) * inv_dx2;
-    if (diag != 0.0) {
-      x_u[idx_u] += omega * r / diag;
-    }
+    const double x_old = x_old_u[idx_u];
+    x_u[idx_u] = (diag != 0.0) ? (x_old + omega * r / diag) : x_old;
   }
 
   if (has_bc && mask_v && mask_v[mask_idx_v] != 0) {
     if (has_values && bc_v) {
       x_v[idx_v] = bc_v[idx(i, j, gw, stride_bc_v)];
+    } else {
+      x_v[idx_v] = x_old_v[idx_v];
     }
   } else {
     const int v_e = idx(ip1, j, gw, stride_v);
@@ -343,9 +346,8 @@ __global__ void jacobi_fused_kernel(
     const double diag =
         beta_v[idx(i, j, gw, stride_beta_v)] +
         4.0 * (c_n + c_s) * inv_dy2 + (c_e + c_w) * inv_dx2;
-    if (diag != 0.0) {
-      x_v[idx_v] += omega * r / diag;
-    }
+    const double x_old = x_old_v[idx_v];
+    x_v[idx_v] = (diag != 0.0) ? (x_old + omega * r / diag) : x_old;
   }
 }
 
