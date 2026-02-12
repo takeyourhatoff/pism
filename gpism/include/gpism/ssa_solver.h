@@ -16,8 +16,13 @@ namespace gpism {
 
 class Context;
 
+enum class SSAPrecondPrecision { FP64, FP32 };
+enum class SSAHaloMode { Device };
+
 struct SSASolverOptions {
   int max_picard = 10;
+  int picard_convergence_check_interval = 1;
+  bool device_metrics_batch = true;
   double tol_nuH = 1e-6;
   double tol_vel = 1e-6;
 
@@ -28,13 +33,13 @@ struct SSASolverOptions {
   double nuH_max = 0.0;
   double strength_extension_nu = 0.0;
   double strength_extension_min_thickness = 0.0;
-  double max_speed = 0.0;
 
   int gmres_restart = 30;
   int gmres_max_iter = 200;
   double gmres_tol = 1e-8;
   bool gmres_tol_relative = true;
   bool gmres_tol_relative_to_rhs = false;
+  int gmres_residual_check_interval = 1;
   bool gmres_verbose = false;
 
   bool use_mg_precond = false;
@@ -43,6 +48,7 @@ struct SSASolverOptions {
   int mg_coarse_iters = 10;
   double mg_omega = 0.8;
   int mg_min_size = 4;
+  int mg_jacobi_sweeps_per_launch = 1;
   MGSmoother mg_smoother = MGSmoother::Jacobi;
   double mg_cheby_lambda_min = 0.1;
   double mg_cheby_lambda_max = 2.0;
@@ -53,7 +59,7 @@ struct SSASolverOptions {
   bool mg_diagnostic = false;
   bool gmres_precond_diagnostic = false;
   bool diagnostic = false;
-  bool force_host_convergence = false;
+  SSAPrecondPrecision precond_precision = SSAPrecondPrecision::FP64;
   bool fail_fast = true;
   bool fail_fast_require_converged = false;
   double fail_fast_residual_max = 0.0;
@@ -72,6 +78,8 @@ struct SSASolverOptions {
   bool replace_zero_diagonal_entries = true;
 
   bool use_bc = false;
+  SSAHaloMode halo_mode = SSAHaloMode::Device;
+  bool require_cuda_aware_mpi = false;
   // PISM only enforces "ice-free velocity = 0" Dirichlet conditions when using
   // calving-front stress boundary conditions (CFBC). When CFBC is disabled,
   // enforcing Dirichlet conditions in ice-free areas can clamp the solution
@@ -123,7 +131,6 @@ private:
     FieldStag2D<double> nuH;
     FieldStag2D<double> nuH_prev;
     FieldStag2D<double> vel_prev;
-    Field2D<double> speed_scale;
     FieldStag2D<int> bc_mask;
     FieldStag2D<double> bc_values;
     std::unique_ptr<MultigridHierarchy> mg;
@@ -148,7 +155,6 @@ private:
         nuH.resize(mx, my, gw);
         nuH_prev.resize(mx, my, gw);
         vel_prev.resize(mx, my, gw);
-        speed_scale.resize(mx, my, gw);
         bc_mask.resize(mx, my, gw);
         bc_values.resize(mx, my, gw);
       } else if (dims_changed) {
@@ -161,7 +167,6 @@ private:
         nuH.resize(mx, my, gw);
         nuH_prev.resize(mx, my, gw);
         vel_prev.resize(mx, my, gw);
-        speed_scale.resize(mx, my, gw);
         bc_mask.resize(mx, my, gw);
         bc_values.resize(mx, my, gw);
       }

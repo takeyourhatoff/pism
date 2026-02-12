@@ -1,15 +1,10 @@
 #include "gpism/ssa_operator.h"
 
-#include "gpism/field_sync.h"
-#include "gpism/linear_algebra.h"
-
 #include <algorithm>
-#include <cmath>
+#include <stdexcept>
 
-#include "gpism/config.h"
 #include "gpism/geometry.h"
 
-#if GPISM_HAVE_CUDA
 namespace gpism {
 void ssa_compute_basal_drag_cuda(int mx, int my, int gw, int stride_tauc,
                                  int stride_u, int stride_v,
@@ -64,19 +59,8 @@ void ssa_replace_zero_diagonal_entries_cuda(
     const int* mask_v, int has_bc, double beta_ice_free_bedrock,
     int periodic);
 }  // namespace gpism
-#endif
 
 namespace gpism {
-namespace {
-
-bool is_dirichlet(const SSABoundaryCondition* bc, int i, int j, int comp) {
-  if (!bc || !bc->mask) {
-    return false;
-  }
-  return (*bc->mask)(i, j, comp) != 0;
-}
-
-}  // namespace
 
 SSAOperator::SSAOperator(double rho, double g) : rho_(rho), g_(g) {}
 
@@ -89,101 +73,26 @@ void SSAOperator::compute_basal_drag(const Grid2D& grid,
                                      const Field2D<int>& cell_type,
                                      FieldStag2D<double>& beta,
                                      const BasalResistanceParams& params) const {
-#if GPISM_HAVE_CUDA
-  if (tauc.has_device_data() && u_center.has_device_data() &&
-      v_center.has_device_data() && topg.has_device_data() &&
-      usurf.has_device_data() && cell_type.has_device_data() &&
-      beta.component(0).has_device_data() &&
-      beta.component(1).has_device_data()) {
-    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
-    ssa_compute_basal_drag_cuda(
-        grid.local_mx(), grid.local_my(), tauc.ghost_width(), tauc.stride(),
-        u_center.stride(), v_center.stride(), topg.stride(), usurf.stride(),
-        cell_type.stride(),
-        tauc.device_data(), u_center.device_data(), v_center.device_data(),
-        topg.device_data(), usurf.device_data(),
-        cell_type.device_data(), beta.component(0).device_data(),
-        beta.component(1).device_data(), params.q, params.u_threshold,
-        params.plastic_regularization, params.sliding_scale_factor,
-        params.beta_ice_free_bedrock,
-        params.beta_lateral_margin,
-        params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0,
-        periodic);
-    return;
+  if (!(tauc.has_device_data() && u_center.has_device_data() &&
+        v_center.has_device_data() && topg.has_device_data() &&
+        usurf.has_device_data() && cell_type.has_device_data() &&
+        beta.component(0).has_device_data() &&
+        beta.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::compute_basal_drag requires device-resident fields");
   }
-#endif
 
-  const double reg = params.plastic_regularization;
-  const double q = params.q;
-  const double u_threshold = std::max(params.u_threshold, 1e-6);
-  const double u_threshold_factor = std::pow(u_threshold, -q);
-  const double Aq =
-      (params.sliding_scale_factor > 0.0)
-          ? std::pow(params.sliding_scale_factor, q)
-          : 1.0;
-  const double beta_lateral_margin = std::max(0.0, params.beta_lateral_margin);
-  const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
-
-  auto is_ice_free = [](int mask) {
-    return mask == IceFreeBedrock || mask == IceFreeOcean;
-  };
-
-  auto beta_center_base = [&](int i, int j) {
-    const int mask = cell_type(i, j);
-    if (mask == IceFreeBedrock) {
-      return params.beta_ice_free_bedrock;
-    }
-    if (mask == IceFreeOcean || mask == FloatingIce) {
-      return 0.0;
-    }
-    const double u = u_center(i, j);
-    const double v = v_center(i, j);
-    const double mag2 = reg * reg + u * u + v * v;
-    if (params.law == BasalResistanceLaw::PseudoPlastic) {
-      return (tauc(i, j) / Aq) * std::pow(mag2, 0.5 * (q - 1.0)) *
-             u_threshold_factor;
-    }
-    return tauc(i, j) / std::sqrt(mag2);
-  };
-
-  auto beta_center_u = [&](int i, int j) {
-    const double base = beta_center_base(i, j);
-    if (beta_lateral_margin <= 0.0) {
-      return base;
-    }
-    const int my = grid.local_my();
-    const int jn =
-        periodic ? ((j == my - 1) ? 0 : (j + 1)) : ((j == my - 1) ? j : (j + 1));
-    const int js =
-        periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
-    const double h = usurf(i, j);
-    const bool wall_n = is_ice_free(cell_type(i, jn)) && (topg(i, jn) > h);
-    const bool wall_s = is_ice_free(cell_type(i, js)) && (topg(i, js) > h);
-    return base + ((wall_n || wall_s) ? beta_lateral_margin : 0.0);
-  };
-
-  auto beta_center_v = [&](int i, int j) {
-    const double base = beta_center_base(i, j);
-    if (beta_lateral_margin <= 0.0) {
-      return base;
-    }
-    const int mx = grid.local_mx();
-    const int ie =
-        periodic ? ((i == mx - 1) ? 0 : (i + 1)) : ((i == mx - 1) ? i : (i + 1));
-    const int iw =
-        periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
-    const double h = usurf(i, j);
-    const bool wall_e = is_ice_free(cell_type(ie, j)) && (topg(ie, j) > h);
-    const bool wall_w = is_ice_free(cell_type(iw, j)) && (topg(iw, j) > h);
-    return base + ((wall_e || wall_w) ? beta_lateral_margin : 0.0);
-  };
-
-  for (int j = 0; j < grid.local_my(); ++j) {
-    for (int i = 0; i < grid.local_mx(); ++i) {
-      beta(i, j, 0) = beta_center_u(i, j);
-      beta(i, j, 1) = beta_center_v(i, j);
-    }
-  }
+  const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
+  ssa_compute_basal_drag_cuda(
+      grid.local_mx(), grid.local_my(), tauc.ghost_width(), tauc.stride(),
+      u_center.stride(), v_center.stride(), topg.stride(), usurf.stride(),
+      cell_type.stride(), tauc.device_data(), u_center.device_data(),
+      v_center.device_data(), topg.device_data(), usurf.device_data(),
+      cell_type.device_data(), beta.component(0).device_data(),
+      beta.component(1).device_data(), params.q, params.u_threshold,
+      params.plastic_regularization, params.sliding_scale_factor,
+      params.beta_ice_free_bedrock, params.beta_lateral_margin,
+      params.law == BasalResistanceLaw::PseudoPlastic ? 1 : 0, periodic);
 }
 
 void SSAOperator::assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
@@ -191,43 +100,31 @@ void SSAOperator::assemble_rhs(const Grid2D& grid, const Field2D<double>& thk,
                                const Field2D<double>& dhdy,
                                FieldStag2D<double>& rhs,
                                const SSABoundaryCondition* bc) const {
-#if GPISM_HAVE_CUDA
   const bool has_bc = bc && bc->mask && bc->values;
-  if (thk.has_device_data() && dhdx.has_device_data() && dhdy.has_device_data() &&
-      rhs.component(0).has_device_data() && rhs.component(1).has_device_data() &&
-      (!has_bc ||
-       (bc->mask->component(0).has_device_data() &&
-        bc->mask->component(1).has_device_data() &&
-        bc->values->component(0).has_device_data() &&
-        bc->values->component(1).has_device_data()))) {
-    ssa_assemble_rhs_cuda(
-        grid.local_mx(), grid.local_my(), thk.ghost_width(), thk.stride(),
-        dhdx.stride(), dhdy.stride(), rhs.component(0).stride(),
-        thk.device_data(), dhdx.device_data(), dhdy.device_data(),
-        rhs.component(0).device_data(), rhs.component(1).device_data(),
-        -rho_ * g_,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? bc->values->component(0).device_data() : nullptr,
-        has_bc ? bc->values->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0);
-    return;
+  if (!(thk.has_device_data() && dhdx.has_device_data() &&
+        dhdy.has_device_data() && rhs.component(0).has_device_data() &&
+        rhs.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::assemble_rhs requires device-resident fields");
   }
-#endif
-  const double scale = -rho_ * g_;
-  for (int j = 0; j < grid.local_my(); ++j) {
-    for (int i = 0; i < grid.local_mx(); ++i) {
-      rhs(i, j, 0) = scale * thk(i, j) * dhdx(i, j);
-      rhs(i, j, 1) = scale * thk(i, j) * dhdy(i, j);
+  if (has_bc && !(bc->mask->component(0).has_device_data() &&
+                  bc->mask->component(1).has_device_data() &&
+                  bc->values->component(0).has_device_data() &&
+                  bc->values->component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::assemble_rhs requires device-resident BC fields");
+  }
 
-      if (is_dirichlet(bc, i, j, 0) && bc->values) {
-        rhs(i, j, 0) = (*bc->values)(i, j, 0);
-      }
-      if (is_dirichlet(bc, i, j, 1) && bc->values) {
-        rhs(i, j, 1) = (*bc->values)(i, j, 1);
-      }
-    }
-  }
+  ssa_assemble_rhs_cuda(
+      grid.local_mx(), grid.local_my(), thk.ghost_width(), thk.stride(),
+      dhdx.stride(), dhdy.stride(), rhs.component(0).stride(), thk.device_data(),
+      dhdx.device_data(), dhdy.device_data(), rhs.component(0).device_data(),
+      rhs.component(1).device_data(), -rho_ * g_,
+      has_bc ? bc->mask->component(0).device_data() : nullptr,
+      has_bc ? bc->mask->component(1).device_data() : nullptr,
+      has_bc ? bc->values->component(0).device_data() : nullptr,
+      has_bc ? bc->values->component(1).device_data() : nullptr,
+      has_bc ? 1 : 0);
 }
 
 void SSAOperator::apply_region(const Grid2D& grid,
@@ -252,132 +149,41 @@ void SSAOperator::apply_region(const Grid2D& grid,
   const double inv_dy2 = 1.0 / (dy * dy);
   const double inv_2dx = 1.0 / (2.0 * dx);
   const double inv_2dy = 1.0 / (2.0 * dy);
-  const double inv_d4 = 1.0 / (4.0 * dx * dy);
-  const double inv_d2 = 2.0 * inv_d4;
-
-#if GPISM_HAVE_CUDA
   const bool has_bc = bc && bc->mask && bc->values;
-  const bool deterministic = deterministic_reductions_enabled();
-  if (deterministic) {
-    if (vel.component(0).has_device_data() && vel.component(1).has_device_data()) {
-      sync_device_to_host(const_cast<FieldStag2D<double>&>(vel));
-    }
-    if (nuH.component(0).has_device_data() && nuH.component(1).has_device_data()) {
-      sync_device_to_host(const_cast<FieldStag2D<double>&>(nuH));
-    }
-    if (beta.component(0).has_device_data() && beta.component(1).has_device_data()) {
-      sync_device_to_host(const_cast<FieldStag2D<double>&>(beta));
-    }
+  if (!(nuH.component(0).has_device_data() &&
+        nuH.component(1).has_device_data() &&
+        beta.component(0).has_device_data() &&
+        beta.component(1).has_device_data() &&
+        vel.component(0).has_device_data() && vel.component(1).has_device_data() &&
+        out.component(0).has_device_data() &&
+        out.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::apply_region requires device-resident fields");
   }
-  if (!deterministic && nuH.component(0).has_device_data() &&
-      nuH.component(1).has_device_data() &&
-      beta.component(0).has_device_data() && beta.component(1).has_device_data() &&
-      vel.component(0).has_device_data() && vel.component(1).has_device_data() &&
-      out.component(0).has_device_data() && out.component(1).has_device_data() &&
-      (!has_bc ||
-       (bc->mask->component(0).has_device_data() &&
-        bc->mask->component(1).has_device_data() &&
-        bc->values->component(0).has_device_data() &&
-        bc->values->component(1).has_device_data()))) {
-    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
-    ssa_apply_region_cuda(
-        mx, my, vel.component(0).ghost_width(),
-        vel.component(0).stride(), vel.component(1).stride(),
-        nuH.component(0).stride(), nuH.component(1).stride(),
-        beta.component(0).stride(), beta.component(1).stride(),
-        out.component(0).stride(), out.component(1).stride(),
-        vel.component(0).device_data(), vel.component(1).device_data(),
-        nuH.component(0).device_data(), nuH.component(1).device_data(),
-        beta.component(0).device_data(), beta.component(1).device_data(),
-        out.component(0).device_data(), out.component(1).device_data(),
-        inv_dx2, inv_dy2, inv_2dx, inv_2dy,
-        has_bc ? bc->mask->component(0).stride() : 0,
-        has_bc ? bc->mask->component(1).stride() : 0,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
-    return;
-  }
-#endif
-
-  const Field2D<double>& u = vel.component(0);
-  const Field2D<double>& v = vel.component(1);
-  const Field2D<double>& nu_u = nuH.component(0);
-  const Field2D<double>& nu_v = nuH.component(1);
-  const Field2D<double>& beta_u = beta.component(0);
-  const Field2D<double>& beta_v = beta.component(1);
-
-  for (int j = j0; j < j1; ++j) {
-    for (int i = i0; i < i1; ++i) {
-      const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
-      const int im1 =
-          periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
-      const int ip1 =
-          periodic ? ((i == mx - 1) ? 0 : (i + 1)) : ((i == mx - 1) ? i : (i + 1));
-      const int jm1 =
-          periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
-      const int jp1 =
-          periodic ? ((j == my - 1) ? 0 : (j + 1)) : ((j == my - 1) ? j : (j + 1));
-      if (is_dirichlet(bc, i, j, 0)) {
-        out(i, j, 0) = u(i, j);
-      } else {
-        const double u_c = u(i, j);
-        const double c_n = nu_v(i, j);
-        const double c_s = nu_v(i, jm1);
-        const double c_e = nu_u(i, j);
-        const double c_w = nu_u(im1, j);
-        double sum =
-            (-c_n * u(i, jp1) - c_s * u(i, jm1) +
-             (c_n + c_s) * u_c) *
-                inv_dy2 +
-            (-4.0 * c_e * u(ip1, j) - 4.0 * c_w * u(im1, j) +
-             4.0 * (c_e + c_w) * u_c) *
-                inv_dx2;
-        sum += (c_w * inv_d2 + c_n * inv_d4) * v(im1, jp1);
-        sum += (c_w - c_e) * inv_d2 * v(i, jp1);
-        sum += (-c_e * inv_d2 - c_n * inv_d4) * v(ip1, jp1);
-        sum += (c_n - c_s) * inv_d4 * v(im1, j);
-        sum += (c_s - c_n) * inv_d4 * v(ip1, j);
-        sum += (-c_w * inv_d2 - c_s * inv_d4) * v(im1, jm1);
-        sum += (c_e - c_w) * inv_d2 * v(i, jm1);
-        sum += (c_e * inv_d2 + c_s * inv_d4) * v(ip1, jm1);
-        out(i, j, 0) = sum + beta_u(i, j) * u_c;
-      }
-
-      if (is_dirichlet(bc, i, j, 1)) {
-        out(i, j, 1) = v(i, j);
-      } else {
-        const double v_c = v(i, j);
-        const double c_n = nu_v(i, j);
-        const double c_s = nu_v(i, jm1);
-        const double c_e = nu_u(i, j);
-        const double c_w = nu_u(im1, j);
-        double sum =
-            (-4.0 * c_n * v(i, jp1) - 4.0 * c_s * v(i, jm1) +
-             4.0 * (c_n + c_s) * v_c) *
-                inv_dy2 +
-            (-c_e * v(ip1, j) - c_w * v(im1, j) +
-             (c_e + c_w) * v_c) *
-                inv_dx2;
-        sum += (c_w * inv_d4 + c_n * inv_d2) * u(im1, jp1);
-        sum += (c_w - c_e) * inv_d4 * u(i, jp1);
-        sum += (-c_e * inv_d4 - c_n * inv_d2) * u(ip1, jp1);
-        sum += (c_n - c_s) * inv_d2 * u(im1, j);
-        sum += (c_s - c_n) * inv_d2 * u(ip1, j);
-        sum += (-c_w * inv_d4 - c_s * inv_d2) * u(im1, jm1);
-        sum += (c_e - c_w) * inv_d4 * u(i, jm1);
-        sum += (c_e * inv_d4 + c_s * inv_d2) * u(ip1, jm1);
-        out(i, j, 1) = sum + beta_v(i, j) * v_c;
-      }
-    }
+  if (has_bc && !(bc->mask->component(0).has_device_data() &&
+                  bc->mask->component(1).has_device_data() &&
+                  bc->values->component(0).has_device_data() &&
+                  bc->values->component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::apply_region requires device-resident BC fields");
   }
 
-#if GPISM_HAVE_CUDA
-  if (deterministic && out.component(0).has_device_data() &&
-      out.component(1).has_device_data()) {
-    sync_host_to_device(out);
-  }
-#endif
+  const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
+  ssa_apply_region_cuda(
+      mx, my, vel.component(0).ghost_width(), vel.component(0).stride(),
+      vel.component(1).stride(), nuH.component(0).stride(),
+      nuH.component(1).stride(), beta.component(0).stride(),
+      beta.component(1).stride(), out.component(0).stride(),
+      out.component(1).stride(), vel.component(0).device_data(),
+      vel.component(1).device_data(), nuH.component(0).device_data(),
+      nuH.component(1).device_data(), beta.component(0).device_data(),
+      beta.component(1).device_data(), out.component(0).device_data(),
+      out.component(1).device_data(), inv_dx2, inv_dy2, inv_2dx, inv_2dy,
+      has_bc ? bc->mask->component(0).stride() : 0,
+      has_bc ? bc->mask->component(1).stride() : 0,
+      has_bc ? bc->mask->component(0).device_data() : nullptr,
+      has_bc ? bc->mask->component(1).device_data() : nullptr,
+      has_bc ? 1 : 0, i0, i1, j0, j1, periodic);
 }
 
 void SSAOperator::apply(const Grid2D& grid, const FieldStag2D<double>& nuH,
@@ -396,61 +202,35 @@ void SSAOperator::replace_zero_diagonal_entries(
   if (beta_ice_free_bedrock <= 0.0) {
     return;
   }
-#if GPISM_HAVE_CUDA
   const bool has_bc = bc && bc->mask;
-  if (!deterministic_reductions_enabled() &&
-      nuH.component(0).has_device_data() &&
-      nuH.component(1).has_device_data() &&
-      beta.component(0).has_device_data() &&
-      beta.component(1).has_device_data() &&
-      (!has_bc ||
-       (bc->mask->component(0).has_device_data() &&
-        bc->mask->component(1).has_device_data()))) {
-    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
-    ssa_replace_zero_diagonal_entries_cuda(
-        grid.local_mx(), grid.local_my(), grid.ghost_width(),
-        nuH.component(0).stride(), nuH.component(1).stride(),
-        beta.component(0).stride(), beta.component(1).stride(),
-        beta.component(0).device_data(), beta.component(1).device_data(),
-        nuH.component(0).device_data(), nuH.component(1).device_data(),
-        1.0 / (grid.dx() * grid.dx()), 1.0 / (grid.dy() * grid.dy()),
-        has_bc ? bc->mask->component(0).stride() : 0,
-        has_bc ? bc->mask->component(1).stride() : 0,
-        has_bc ? bc->mask->component(0).device_data() : nullptr,
-        has_bc ? bc->mask->component(1).device_data() : nullptr,
-        has_bc ? 1 : 0, beta_ice_free_bedrock, periodic);
-    return;
+  if (!(nuH.component(0).has_device_data() &&
+        nuH.component(1).has_device_data() &&
+        beta.component(0).has_device_data() &&
+        beta.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::replace_zero_diagonal_entries requires "
+        "device-resident fields");
   }
-#endif
+  if (has_bc && !(bc->mask->component(0).has_device_data() &&
+                  bc->mask->component(1).has_device_data())) {
+    throw std::runtime_error(
+        "SSAOperator::replace_zero_diagonal_entries requires "
+        "device-resident BC mask");
+  }
 
-  const double inv_dx2 = 1.0 / (grid.dx() * grid.dx());
-  const double inv_dy2 = 1.0 / (grid.dy() * grid.dy());
-  const double eps = 1e-16;
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
-  for (int j = 0; j < my; ++j) {
-    const int jm1 =
-        periodic ? ((j == 0) ? (my - 1) : (j - 1)) : ((j == 0) ? j : (j - 1));
-    for (int i = 0; i < mx; ++i) {
-      const int im1 =
-          periodic ? ((i == 0) ? (mx - 1) : (i - 1)) : ((i == 0) ? i : (i - 1));
-      const double c_n = nuH(i, j, 1);
-      const double c_s = nuH(i, jm1, 1);
-      const double c_e = nuH(i, j, 0);
-      const double c_w = nuH(im1, j, 0);
-      const double diag_u =
-          beta(i, j, 0) + (c_n + c_s) * inv_dy2 + 4.0 * (c_e + c_w) * inv_dx2;
-      const double diag_v =
-          beta(i, j, 1) + 4.0 * (c_n + c_s) * inv_dy2 + (c_e + c_w) * inv_dx2;
-      if (!is_dirichlet(bc, i, j, 0) && std::abs(diag_u) < eps) {
-        beta(i, j, 0) = beta_ice_free_bedrock;
-      }
-      if (!is_dirichlet(bc, i, j, 1) && std::abs(diag_v) < eps) {
-        beta(i, j, 1) = beta_ice_free_bedrock;
-      }
-    }
-  }
+  const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
+  ssa_replace_zero_diagonal_entries_cuda(
+      grid.local_mx(), grid.local_my(), grid.ghost_width(),
+      nuH.component(0).stride(), nuH.component(1).stride(),
+      beta.component(0).stride(), beta.component(1).stride(),
+      beta.component(0).device_data(), beta.component(1).device_data(),
+      nuH.component(0).device_data(), nuH.component(1).device_data(),
+      1.0 / (grid.dx() * grid.dx()), 1.0 / (grid.dy() * grid.dy()),
+      has_bc ? bc->mask->component(0).stride() : 0,
+      has_bc ? bc->mask->component(1).stride() : 0,
+      has_bc ? bc->mask->component(0).device_data() : nullptr,
+      has_bc ? bc->mask->component(1).device_data() : nullptr,
+      has_bc ? 1 : 0, beta_ice_free_bedrock, periodic);
 }
 
 }  // namespace gpism

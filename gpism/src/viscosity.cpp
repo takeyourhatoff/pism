@@ -1,12 +1,8 @@
 #include "gpism/viscosity.h"
 
-#include <algorithm>
 #include <cmath>
-#include <vector>
+#include <stdexcept>
 
-#include "gpism/config.h"
-
-#if GPISM_HAVE_CUDA
 namespace gpism {
 void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                 int stride_u, int stride_v, int stride_nuH_u,
@@ -21,7 +17,6 @@ void viscosity_compute_nuH_cuda(int mx, int my, int gw, int stride_thk,
                                 double eps0, double inv_dx, double inv_dy,
                                 int periodic);
 }  // namespace gpism
-#endif
 
 namespace gpism {
 namespace {
@@ -52,157 +47,42 @@ void ViscosityModel::compute_nuH(const Grid2D& grid, const Field2D<double>& thk,
   const double inv_dx = 1.0 / dx;
   const double inv_dy = 1.0 / dy;
 
-#if GPISM_HAVE_CUDA
-  if (thk.has_device_data() && vel.component(0).has_device_data() &&
-      vel.component(1).has_device_data() && nuH.component(0).has_device_data() &&
-      nuH.component(1).has_device_data()) {
-    // Note: PISM uses B = A^{-1/n}. Do not clamp A to an overly-large floor
-    // (Glen softness A is typically ~1e-24 in SI units), otherwise viscosity
-    // becomes far too small and velocities blow up.
-    const double enhancement = clamp_positive(enhancement_, 1e-12);
-    const double A_eff = clamp_positive(A_ * enhancement, 1e-60);
-    const double n_eff = clamp_positive(n_, 1.0);
-    const double B = std::pow(A_eff, -1.0 / n_eff);
-    const bool use_temp = enthalpy && enthalpy->has_device_data() &&
-                          enthalpy_gamma != 0.0;
-    const double* enthalpy_ptr = use_temp ? enthalpy->device_data() : nullptr;
-    const int nz = use_temp ? enthalpy->local_mz() : 0;
-    const int enthalpy_gw = use_temp ? enthalpy->ghost_width() : 0;
-    const int enthalpy_stride = use_temp ? enthalpy->stride() : 0;
-    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
-    viscosity_compute_nuH_cuda(
-        mx, my, thk.ghost_width(), thk.stride(), vel.component(0).stride(),
-        vel.component(1).stride(), nuH.component(0).stride(),
-        nuH.component(1).stride(), thk.device_data(),
-        vel.component(0).device_data(), vel.component(1).device_data(),
-        nuH.component(0).device_data(), nuH.component(1).device_data(),
-        nuH_regularization, strength_extension_nu,
-        strength_extension_min_thickness, enthalpy_ptr, nz, enthalpy_gw,
-        enthalpy_stride, enthalpy_gamma, enthalpy_ref, B, n_eff, eps0_, inv_dx,
-        inv_dy, periodic);
-    return;
+  if (!(thk.has_device_data() && vel.component(0).has_device_data() &&
+        vel.component(1).has_device_data() &&
+        nuH.component(0).has_device_data() &&
+        nuH.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "ViscosityModel::compute_nuH requires device-resident thk/vel/nuH");
   }
-#endif
-
-  std::vector<double> temp_avg;
-  if (enthalpy && enthalpy_gamma != 0.0) {
-    temp_avg.assign(static_cast<std::size_t>(mx) * my, 0.0);
+  if (enthalpy && enthalpy_gamma != 0.0 && !enthalpy->has_device_data()) {
+    throw std::runtime_error(
+        "ViscosityModel::compute_nuH requires device-resident enthalpy");
   }
 
-  auto idx = [mx](int i, int j) { return static_cast<std::size_t>(j * mx + i); };
-
-  if (!temp_avg.empty()) {
-    for (int j = 0; j < my; ++j) {
-      for (int i = 0; i < mx; ++i) {
-        double sum = 0.0;
-        for (int k = 0; k < enthalpy->local_mz(); ++k) {
-          sum += (*enthalpy)(i, j, k);
-        }
-        temp_avg[idx(i, j)] = sum / static_cast<double>(enthalpy->local_mz());
-      }
-    }
-  }
-
+  // Note: PISM uses B = A^{-1/n}. Do not clamp A to an overly-large floor
+  // (Glen softness A is typically ~1e-24 in SI units), otherwise viscosity
+  // becomes far too small and velocities blow up.
   const double enhancement = clamp_positive(enhancement_, 1e-12);
   const double A_eff = clamp_positive(A_ * enhancement, 1e-60);
   const double n_eff = clamp_positive(n_, 1.0);
   const double B = std::pow(A_eff, -1.0 / n_eff);
 
-  const double nu_reg = std::max(0.0, nuH_regularization);
-  const double nu_ext = strength_extension_nu;
-  const double H_ext_min = std::max(0.0, strength_extension_min_thickness);
-
-  const bool periodic = (grid.dims_x() == 1 && grid.dims_y() == 1);
-  auto index_i = [&](int i) {
-    if (periodic) {
-      const int r = i % mx;
-      return (r < 0) ? (r + mx) : r;
-    }
-    return std::max(0, std::min(mx - 1, i));
-  };
-  auto index_j = [&](int j) {
-    if (periodic) {
-      const int r = j % my;
-      return (r < 0) ? (r + my) : r;
-    }
-    return std::max(0, std::min(my - 1, j));
-  };
-
-  const Field2D<double>& u_cc = vel.component(0);
-  const Field2D<double>& v_cc = vel.component(1);
-  auto U = [&](int i, int j) { return u_cc(index_i(i), index_j(j)); };
-  auto V = [&](int i, int j) { return v_cc(index_i(i), index_j(j)); };
-  auto H = [&](int i, int j) { return thk(index_i(i), index_j(j)); };
-
-  auto apply_temp_scale = [&](int i, int j, double nu) {
-    if (temp_avg.empty()) {
-      return nu;
-    }
-    const double temp = temp_avg[idx(index_i(i), index_j(j))];
-    return nu * std::exp(-enthalpy_gamma * (temp - enthalpy_ref));
-  };
-
-  auto viscosity_from_derivs = [&](double u_x, double u_y, double v_x,
-                                   double v_y) {
-    const double eps_xx = u_x;
-    const double eps_yy = v_y;
-    const double eps_xy = 0.5 * (u_y + v_x);
-    const double eps2 = std::max(
-        0.0, eps_xx * eps_xx + eps_yy * eps_yy + eps_xx * eps_yy +
-                 eps_xy * eps_xy);
-    const double eps_e = std::sqrt(eps2 + eps0_ * eps0_);
-    return 0.5 * B * std::pow(eps_e, (1.0 / n_eff) - 1.0);
-  };
-
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      const int ip1 = i + 1;
-      const int im1 = i - 1;
-      const int jp1 = j + 1;
-      const int jm1 = j - 1;
-
-      // PISM-style nuH computation on the staggered grid, using cell-centered
-      // velocities U,V.
-      //
-      // o=0 (u-staggered): between (i,j) and (i+1,j)
-      {
-        const double u_x = (U(ip1, j) - U(i, j)) * inv_dx;
-        const double v_x = (V(ip1, j) - V(i, j)) * inv_dx;
-        const double u_y = (U(i, jp1) + U(ip1, jp1) - U(i, jm1) - U(ip1, jm1)) *
-                           (0.25 * inv_dy);
-        const double v_y = (V(i, jp1) + V(ip1, jp1) - V(i, jm1) - V(ip1, jm1)) *
-                           (0.25 * inv_dy);
-
-        double nu = apply_temp_scale(i, j, viscosity_from_derivs(u_x, u_y, v_x, v_y));
-
-        double H_face = 0.5 * (H(i, j) + H(ip1, j));
-        if (nu_ext > 0.0 && H_face < H_ext_min) {
-          H_face = std::max(H_face, H_ext_min);
-          nu = nu_ext;
-        }
-        nuH(i, j, 0) = nu * H_face + nu_reg;
-      }
-
-      // o=1 (v-staggered): between (i,j) and (i,j+1)
-      {
-        const double u_y = (U(i, jp1) - U(i, j)) * inv_dy;
-        const double v_y = (V(i, jp1) - V(i, j)) * inv_dy;
-        const double u_x =
-            (U(ip1, j) + U(ip1, jp1) - U(im1, j) - U(im1, jp1)) * (0.25 * inv_dx);
-        const double v_x =
-            (V(ip1, j) + V(ip1, jp1) - V(im1, j) - V(im1, jp1)) * (0.25 * inv_dx);
-
-        double nu = apply_temp_scale(i, j, viscosity_from_derivs(u_x, u_y, v_x, v_y));
-
-        double H_face = 0.5 * (H(i, j) + H(i, jp1));
-        if (nu_ext > 0.0 && H_face < H_ext_min) {
-          H_face = std::max(H_face, H_ext_min);
-          nu = nu_ext;
-        }
-        nuH(i, j, 1) = nu * H_face + nu_reg;
-      }
-    }
-  }
+  const bool use_temp =
+      enthalpy && enthalpy->has_device_data() && enthalpy_gamma != 0.0;
+  const double* enthalpy_ptr = use_temp ? enthalpy->device_data() : nullptr;
+  const int nz = use_temp ? enthalpy->local_mz() : 0;
+  const int enthalpy_gw = use_temp ? enthalpy->ghost_width() : 0;
+  const int enthalpy_stride = use_temp ? enthalpy->stride() : 0;
+  const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
+  viscosity_compute_nuH_cuda(
+      mx, my, thk.ghost_width(), thk.stride(), vel.component(0).stride(),
+      vel.component(1).stride(), nuH.component(0).stride(),
+      nuH.component(1).stride(), thk.device_data(), vel.component(0).device_data(),
+      vel.component(1).device_data(), nuH.component(0).device_data(),
+      nuH.component(1).device_data(), nuH_regularization, strength_extension_nu,
+      strength_extension_min_thickness, enthalpy_ptr, nz, enthalpy_gw,
+      enthalpy_stride, enthalpy_gamma, enthalpy_ref, B, n_eff, eps0_, inv_dx,
+      inv_dy, periodic);
 }
 
 }  // namespace gpism

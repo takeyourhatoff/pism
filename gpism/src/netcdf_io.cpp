@@ -1180,7 +1180,6 @@ bool write_ssa_debug_bundle_impl(const std::string& path, int rank, int size,
   }
 
   // NetCDF writers use host buffers; sync device-produced fields when present.
-#if GPISM_HAVE_CUDA
   auto sync2d = [](const auto* field_ptr) {
     using FieldT =
         std::remove_const_t<std::remove_reference_t<decltype(*field_ptr)>>;
@@ -1208,7 +1207,6 @@ bool write_ssa_debug_bundle_impl(const std::string& path, int rank, int size,
   sync_stag(bundle.nuH);
   sync_stag(bundle.vel_prev);
   sync_stag(bundle.vel);
-#endif
 
 #if GPISM_HAVE_MPI && defined(NC_HAS_PARALLEL) && NC_HAS_PARALLEL
   if (mpi_enabled && size > 1) {

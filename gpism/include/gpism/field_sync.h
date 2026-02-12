@@ -2,21 +2,16 @@
 
 #include <cstring>
 
-#include "gpism/config.h"
-#include "gpism/device_policy.h"
 #include "gpism/field2d.h"
 #include "gpism/field3d.h"
 #include "gpism/field_stag2d.h"
+#include "gpism/sync_audit.h"
 #include "gpism/sync_stats.h"
 
 namespace gpism {
 
 template <typename T>
 void sync_host_to_device(Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
   if (field.elements() == 0) {
     return;
   }
@@ -24,21 +19,16 @@ void sync_host_to_device(Field2D<T>& field) {
   if (!field.host_staging_data()) {
     return;
   }
-  SyncStats::record_h2d(field.elements() * sizeof(T));
+  const std::size_t bytes = field.elements() * sizeof(T);
+  SyncAudit::record(SyncDirection::HostToDevice, bytes, "Field2D");
+  SyncStats::record_h2d(bytes);
   std::memcpy(field.host_staging_data(), field.data(),
-              field.elements() * sizeof(T));
+              bytes);
   field.copy_host_to_device();
-#else
-  (void)field;
-#endif
 }
 
 template <typename T>
 void sync_device_to_host(Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
   if (!field.device_data()) {
     return;
   }
@@ -49,13 +39,12 @@ void sync_device_to_host(Field2D<T>& field) {
   if (!field.host_staging_data()) {
     return;
   }
-  SyncStats::record_d2h(field.elements() * sizeof(T));
+  const std::size_t bytes = field.elements() * sizeof(T);
+  SyncAudit::record(SyncDirection::DeviceToHost, bytes, "Field2D");
+  SyncStats::record_d2h(bytes);
   field.copy_device_to_host();
   std::memcpy(field.data(), field.host_staging_data(),
-              field.elements() * sizeof(T));
-#else
-  (void)field;
-#endif
+              bytes);
 }
 
 template <typename T>
@@ -72,10 +61,6 @@ void sync_device_to_host(FieldStag2D<T>& field) {
 
 template <typename T>
 void sync_host_to_device(Field3D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
   if (field.elements() == 0) {
     return;
   }
@@ -83,21 +68,16 @@ void sync_host_to_device(Field3D<T>& field) {
   if (!field.host_staging_data()) {
     return;
   }
-  SyncStats::record_h2d(field.elements() * sizeof(T));
+  const std::size_t bytes = field.elements() * sizeof(T);
+  SyncAudit::record(SyncDirection::HostToDevice, bytes, "Field3D");
+  SyncStats::record_h2d(bytes);
   std::memcpy(field.host_staging_data(), field.data(),
-              field.elements() * sizeof(T));
+              bytes);
   field.copy_host_to_device();
-#else
-  (void)field;
-#endif
 }
 
 template <typename T>
 void sync_device_to_host(Field3D<T>& field) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return;
-  }
   if (!field.device_data()) {
     return;
   }
@@ -108,13 +88,12 @@ void sync_device_to_host(Field3D<T>& field) {
   if (!field.host_staging_data()) {
     return;
   }
-  SyncStats::record_d2h(field.elements() * sizeof(T));
+  const std::size_t bytes = field.elements() * sizeof(T);
+  SyncAudit::record(SyncDirection::DeviceToHost, bytes, "Field3D");
+  SyncStats::record_d2h(bytes);
   field.copy_device_to_host();
   std::memcpy(field.data(), field.host_staging_data(),
-              field.elements() * sizeof(T));
-#else
-  (void)field;
-#endif
+              bytes);
 }
 
 }  // namespace gpism

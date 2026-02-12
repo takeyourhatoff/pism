@@ -5,6 +5,8 @@
 
 namespace gpism {
 
+enum class MGPrecondPrecision { FP64, FP32 };
+
 class MultigridPreconditioner final : public Preconditioner {
 public:
   MultigridPreconditioner(MultigridHierarchy& mg, int pre_iters,
@@ -16,10 +18,13 @@ public:
                           int cheby_estimate_iters = 5,
                           double cheby_estimate_min_factor = 0.1,
                           double cheby_estimate_max_factor = 1.1,
+                          int jacobi_sweeps_per_launch = 1,
                           const SSABoundaryCondition* bc = nullptr,
                           const Context* context = nullptr,
                           bool diagnostic = false,
-                          double beta_ice_free_bedrock = 0.0)
+                          double beta_ice_free_bedrock = 0.0,
+                          MGPrecondPrecision precision =
+                              MGPrecondPrecision::FP64)
       : mg_(mg),
         pre_iters_(pre_iters),
         post_iters_(post_iters),
@@ -32,10 +37,12 @@ public:
         cheby_estimate_iters_(cheby_estimate_iters),
         cheby_estimate_min_factor_(cheby_estimate_min_factor),
         cheby_estimate_max_factor_(cheby_estimate_max_factor),
+        jacobi_sweeps_per_launch_(jacobi_sweeps_per_launch),
         beta_ice_free_bedrock_(beta_ice_free_bedrock),
         bc_(bc),
         context_(context),
-        diagnostic_(diagnostic) {}
+        diagnostic_(diagnostic),
+        precision_(precision) {}
 
   void apply(const FieldStag2D<double>& x,
              FieldStag2D<double>& y) const override;
@@ -53,6 +60,7 @@ private:
   int cheby_estimate_iters_;
   double cheby_estimate_min_factor_;
   double cheby_estimate_max_factor_;
+  int jacobi_sweeps_per_launch_ = 1;
   mutable std::vector<ChebyBounds> cheby_bounds_cache_;
   mutable bool cheby_bounds_cached_ = false;
   const double beta_ice_free_bedrock_ = 0.0;
@@ -62,6 +70,7 @@ private:
   const SSABoundaryCondition* bc_;
   const Context* context_;
   const bool diagnostic_ = false;
+  const MGPrecondPrecision precision_ = MGPrecondPrecision::FP64;
   mutable bool diagnostic_printed_ = false;
 };
 

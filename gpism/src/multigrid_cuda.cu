@@ -1,8 +1,5 @@
-#include "gpism/config.h"
-
 #include "gpism/profile.h"
 
-#if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
 
 namespace gpism {
@@ -558,17 +555,39 @@ void mg_jacobi_fused_cuda(
     double inv_dx2, double inv_dy2, double inv_2dx, double inv_2dy,
     int stride_mask_u, int stride_mask_v, const int* mask_u,
     const int* mask_v, int stride_bc_u, int stride_bc_v, const double* bc_u,
-    const double* bc_v, int has_bc, int has_values, int periodic) {
+    const double* bc_v, int has_bc, int has_values, int periodic,
+    int sweeps_per_launch) {
   CudaEventTimer timer("mg_jacobi_fused");
+  const int sweeps = (sweeps_per_launch > 0) ? sweeps_per_launch : 1;
   const dim3 block(16, 16);
   const dim3 grid((mx + block.x - 1) / block.x,
                   (my + block.y - 1) / block.y);
-  jacobi_fused_kernel<<<grid, block>>>(
-      mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v, stride_beta_u,
-      stride_beta_v, stride_b_u, stride_b_v, x_old_u, x_old_v, x_u, x_v, nu_u,
-      nu_v, beta_u, beta_v, b_u, b_v, omega, inv_dx2, inv_dy2, inv_2dx, inv_2dy,
-      stride_mask_u, stride_mask_v, mask_u, mask_v, stride_bc_u, stride_bc_v,
-      bc_u, bc_v, has_bc, has_values, periodic);
+  const double* in_u = x_old_u;
+  const double* in_v = x_old_v;
+  double* out_u = x_u;
+  double* out_v = x_v;
+  for (int sweep = 0; sweep < sweeps; ++sweep) {
+    jacobi_fused_kernel<<<grid, block>>>(
+        mx, my, gw, stride_u, stride_v, stride_nu_u, stride_nu_v,
+        stride_beta_u, stride_beta_v, stride_b_u, stride_b_v, in_u, in_v,
+        out_u, out_v, nu_u, nu_v, beta_u, beta_v, b_u, b_v, omega, inv_dx2,
+        inv_dy2, inv_2dx, inv_2dy, stride_mask_u, stride_mask_v, mask_u,
+        mask_v, stride_bc_u, stride_bc_v, bc_u, bc_v, has_bc, has_values,
+        periodic);
+    if (sweep + 1 < sweeps) {
+      const double* produced_u = out_u;
+      const double* produced_v = out_v;
+      if (out_u == x_u) {
+        out_u = const_cast<double*>(x_old_u);
+        out_v = const_cast<double*>(x_old_v);
+      } else {
+        out_u = x_u;
+        out_v = x_v;
+      }
+      in_u = produced_u;
+      in_v = produced_v;
+    }
+  }
 }
 
 void mg_cheby_compute_z_cuda(int mx, int my, int gw, int stride_u, int stride_v,
@@ -629,5 +648,3 @@ void mg_cheby_update_r_cuda(int mx, int my, int gw, int stride_u, int stride_v,
 }
 
 }  // namespace gpism
-
-#endif

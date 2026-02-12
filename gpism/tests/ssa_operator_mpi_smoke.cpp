@@ -8,29 +8,22 @@
 #include <cstring>
 #include <iostream>
 
-#if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
-#endif
 
 namespace {
 
 template <typename T>
 void sync_host_to_device(gpism::Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
   if (!field.host_staging_data() || field.elements() == 0) {
     return;
   }
   std::memcpy(field.host_staging_data(), field.data(),
               field.elements() * sizeof(T));
   field.copy_host_to_device();
-#else
-  (void)field;
-#endif
 }
 
 template <typename T>
 void sync_device_to_host(gpism::Field2D<T>& field) {
-#if GPISM_HAVE_CUDA
   if (!field.device_data()) {
     return;
   }
@@ -40,9 +33,6 @@ void sync_device_to_host(gpism::Field2D<T>& field) {
   field.copy_device_to_host();
   std::memcpy(field.data(), field.host_staging_data(),
               field.elements() * sizeof(T));
-#else
-  (void)field;
-#endif
 }
 
 template <typename T>
@@ -75,9 +65,7 @@ bool all_finite(const gpism::FieldStag2D<double>& field) {
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
 
-#if GPISM_HAVE_CUDA
   cudaSetDevice(context.device_id());
-#endif
 
   const int global_mx = 8;
   const int global_my = 6;

@@ -1,7 +1,7 @@
 #include "gpism/config.h"
-#include "gpism/device_policy.h"
 #include "gpism/field_sync.h"
 #include "gpism/geometry.h"
+#include "gpism/sync_audit.h"
 #include "gpism/sync_stats.h"
 #include "gpism/ssa_solver.h"
 #include "gpism/thermodynamics.h"
@@ -13,12 +13,6 @@
 #include <utility>
 
 int main() {
-#if !GPISM_HAVE_CUDA
-  std::cout << "timestep_gpu_smoke skipped (CUDA disabled)\n";
-  return 0;
-#else
-  gpism::set_device_enabled(true);
-
   const int mx = 16;
   const int my = 16;
   const int gw = 1;
@@ -82,6 +76,9 @@ int main() {
 
   gpism::SyncStats::reset();
   gpism::SyncStats::enable(true);
+  gpism::SyncAudit::enable(true);
+  gpism::SyncAudit::set_fail_fast(true);
+  gpism::SyncAudit::reset();
 
   gpism::ViscosityModel viscosity(1e-16, 3.0, 1.0);
   gpism::SSASolver solver(grid, 910.0, 9.81, 100.0, viscosity);
@@ -97,6 +94,7 @@ int main() {
   gpism::GeometryDiagnostics geometry;
 
   for (int step = 0; step < steps; ++step) {
+    gpism::ScopedSyncAudit compute_scope(false, "timestep_gpu_smoke.hot_loop");
     gpism::SSASolverResult result =
         solver.solve(thk, topg, tauc, nullptr, nullptr, nullptr, vel_cc,
                      ssa_options);
@@ -124,7 +122,14 @@ int main() {
               << ", d2h=" << d2h_calls << ")\n";
     return 1;
   }
+  if (gpism::SyncAudit::violations() != 0) {
+    std::cerr << "unexpected sync audit violations during hot loop (count="
+              << gpism::SyncAudit::violations() << ")\n";
+    return 1;
+  }
   gpism::SyncStats::enable(false);
+  gpism::SyncAudit::enable(false);
+  gpism::SyncAudit::set_fail_fast(false);
 
   gpism::sync_device_to_host(thk);
   gpism::sync_device_to_host(uvel);
@@ -152,5 +157,4 @@ int main() {
 
   std::cout << "timestep_gpu_smoke passed\n";
   return 0;
-#endif
 }

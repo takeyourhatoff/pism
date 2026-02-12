@@ -1,178 +1,227 @@
-# Performance Notes (GPU-first)
+# Performance Protocol
 
-## Environment
+## Goal
 
-- Host: single NVIDIA A10G (CUDA 13.1, nvcc `/usr/local/cuda-13.1/bin/nvcc`)
-- Build: `GPISM_ENABLE_CUDA=ON`, `GPISM_ENABLE_MPI=ON`, `GPISM_ENABLE_NETCDF=ON`
-- Input: `/home/ec2-user/pism/examples/std-greenland/pism_Greenland_5km_v1.1.nc`
-- Run length: `-y 0.05` (one output)
-- Config override (excerpt):
+Measure gpism GPU throughput against the original PISM binary while preserving
+strict SSA parity.
 
-```
-ssa.mg.enabled=1
-ssa.mg.smoother=jacobi
-ssa.mg.pre_iters=3
-ssa.mg.post_iters=3
-ssa.mg.coarse_iters=10
-ssa.gmres_max_iter=60
-ssa.max_picard=1
-time.dt=0.05
-time.output_interval=0.05
-io.async_output=1
-```
+## Locked benchmark protocol
 
-## Repeatable benchmarks
+- Baseline comparator: original `pism` binary.
+- Same input, physics family, and year horizon for both runs.
+- Wall-clock target: `MIN_WALL=120` (auto-scales years until threshold).
+- Benchmark script:
+  - `gpism/scripts/benchmark_pism_gpism.sh`
+  - For stable long-wall comparisons, cap PISM timestep:
+    - `PISM_MAX_DT=${GPISM_DT}`
+- Parity script (separate from benchmark):
+  - `gpism/scripts/compare_pism_gpism.sh`
 
-Scripts live in `gpism/scripts/benchmarks/`:
+## Baseline artifacts (locked references)
 
-- `run_std_greenland.sh` (std-greenland, fixed override config)
-- `run_gpu_smoke.sh` (device-resident hot loop smoke runtime)
+- Strict parity artifact:
+  - `/home/ec2-user/work/runs/strict_short_20260211_222659`
+- Throughput artifact:
+  - `/home/ec2-user/work/runs/bench_nowallhours_20260211_222851`
 
-See `gpism/scripts/benchmarks/README.md` for required inputs and environment
-variables.
+## Acceptance thresholds
 
-## Nsight Systems profile (std-greenland, single step)
+- Correctness:
+  - `COMPARE_STRICT=1`
+  - `COMPARE_TOL_RMS=0.02`
+  - `COMPARE_TOL_MAX=0.05`
+  - Pass required for `u_ssa` and `v_ssa`.
+- Throughput:
+  - Non-regression target: no worse than 5% versus the locked gpism baseline on
+    the same instance class and toolchain.
 
-Command (single rank):
+## Example commands
 
-```
-nsys profile --stats=true -t cuda,osrt,nvtx -o /tmp/gpism_stdgreenland_nsys \
-  gpism/build-cuda-mpi/gpism \
-  -i /home/ec2-user/pism/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
-  -o /tmp/gpism_stdgreenland_out_nsys.nc \
-  -y 0.05 \
-  -config_override gpism/scripts/benchmarks/std_greenland_override.cfg
-```
+Parity:
 
-Wall time (same args, no profiler): **1.00 s** (`/usr/bin/time -p`).
-
-### CUDA summary highlights (`cuda_api_gpu_sum`)
-
-- CUDA API time dominated by `cudaHostAlloc`/`cudaFreeHost` (staging buffers).
-- GPU kernel time is small in this short run (total kernel time ~6.6 ms).
-
-Top kernels (`cuda_gpu_kern_sum`):
-
-- `apply_region_kernel`: 43.7%
-- `jacobi_update_kernel`: 14.7%
-- `dot_stag_kernel`: 12.5%
-- `dot_stag_batch_kernel`: 8.4%
-- `diff_norm1_stag_kernel`: 4.2%
-
-This run is **not yet kernel-dominated** at the wall-clock level; longer runs
-or reduced host allocations are required to satisfy the M10 DoD.
-
-## Nsight Systems profile (std-greenland, longer run)
-
-Command (single rank, reduced output frequency):
-
-```
-nsys profile --force-overwrite true --stats=true -t cuda,osrt,nvtx \
-  -o /tmp/gpism_stdgreenland_long_nsys \
-  gpism/build-cuda-mpi/gpism \
-  -i /home/ec2-user/pism/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
-  -o /tmp/gpism_stdgreenland_long_out_nsys.nc \
-  -y 0.5 \
-  -config_override /tmp/gpism_std_greenland_long.cfg
+```bash
+COMPARE_STRICT=1 COMPARE_TOL_RMS=0.02 COMPARE_TOL_MAX=0.05 \
+YEARS=0.05 GPISM_DT=0.05 \
+gpism/scripts/compare_pism_gpism.sh
 ```
 
-Wall time (same args, no profiler): **1.57 s** (`/usr/bin/time -p`).
+Benchmark:
 
-### CUDA summary highlights (`cuda_api_sum`)
+```bash
+MIN_WALL=120 YEARS=0.05 GPISM_DT=0.05 \
+gpism/scripts/benchmark_pism_gpism.sh
+```
 
-- CUDA API time dominated by `cudaMemcpy` (~375 ms total), then
-  `cudaHostAlloc` (~258 ms) and `cudaFreeHost` (~128 ms).
-- Total kernel time ~**151 ms** (from `cuda_gpu_kern_sum`).
+## Phase 1 run log (2026-02-12)
 
-Top kernels (`cuda_gpu_kern_sum`):
+Hardware/profile target:
+- AWS instance `i-056a5fcf119ae85ad` (Tesla T4).
+- Build dir: `/home/ec2-user/work/build/gpism-codex-opt`
+- Source dir: `/home/ec2-user/work/src/pism-gpism/gpism`
 
-- `apply_region_kernel`: 43.8%
-- `jacobi_update_kernel`: 14.7%
-- `dot_stag_kernel`: 12.5%
-- `dot_stag_batch_kernel`: 8.4%
-- `diff_norm1_stag_kernel`: 4.3%
+### Commands used
 
-Even with reduced output, this run is **still not kernel-dominated**; host
-allocations and memcopies remain the largest contributors.
+Build:
 
-## Nsight Systems profile (std-greenland, 4-year run, single rank)
+```bash
+cmake --build /home/ec2-user/work/build/gpism-codex-opt -j
+```
 
-Config: `-y 4.0` with output interval `4.0` (`/tmp/gpism_std_greenland_4yr.cfg`).
+Targeted tests:
 
-Wall time (no profiler): **10.11 s** (`/usr/bin/time -p`), improved from
-**26.39 s** prior to skipping halo exchange on single-rank MPI runs.
+```bash
+ctest --test-dir /home/ec2-user/work/build/gpism-codex-opt --output-on-failure \
+  -R "gmres|multigrid|ssa-operator|halo-exchange|timestep-device-residency|timestep-io"
+```
 
-### CUDA summary highlights (`cuda_api_gpu_sum`)
+Strict parity gate:
 
-- `cudaMemcpy`: **6.49 s** (5469 calls)
-- `dot_stag_batch_kernel`: **5.60 s** (1819 calls)
-- `apply_kernel`: **0.92 s** (93780 calls)
-- `jacobi_update_kernel`: **0.75 s** (79192 calls)
-- `dot_stag_kernel`: **0.66 s** (2084 calls)
+```bash
+GPISM_BIN=/home/ec2-user/work/build/gpism-codex-opt/gpism \
+PISM_BIN=/home/ec2-user/pism-build-cudaaware-baseline/pism \
+PISM_CONFIG=/home/ec2-user/pism-build-cudaaware-baseline/pism_config.nc \
+INPUT=/home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+COMPARE_STRICT=1 COMPARE_TOL_RMS=0.02 COMPARE_TOL_MAX=0.05 \
+YEARS=0.05 GPISM_DT=0.05 MIN_WALL=0 \
+/home/ec2-user/work/src/pism-gpism/gpism/scripts/compare_pism_gpism.sh
+```
 
-Memcopy volume dropped dramatically (from ~47 GB total to ~17 MB total):
+Short benchmark gate:
 
-- D2H: **8.4 MB** over 4229 calls
-- H2D: **8.6 MB** over 3644 calls
+```bash
+GPISM_BIN=/home/ec2-user/work/build/gpism-codex-opt/gpism \
+PISM_BIN=/home/ec2-user/pism-build-cudaaware-baseline/pism \
+PISM_CONFIG=/home/ec2-user/pism-build-cudaaware-baseline/pism_config.nc \
+INPUT=/home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+MIN_WALL=20 YEARS=0.05 GPISM_DT=0.05 \
+/home/ec2-user/work/src/pism-gpism/gpism/scripts/benchmark_pism_gpism.sh
+```
 
-Kernels now account for a large share of runtime, but `cudaMemcpy` still shows
-up prominently in the CUDA API breakdown (likely sync points around scalar
-reductions and GMRES orthogonalization).
+Nsight Systems (short pass):
 
-## Fused SSA apply+residual (MG `compute_residual`)
+```bash
+nsys profile --force-overwrite true --sample=none --trace=cuda \
+  -o /home/ec2-user/work/runs/nsys_phase1b_20260212_114333/gpism_nsys \
+  /home/ec2-user/work/build/gpism-codex-opt/gpism \
+  -i /home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+  -o /home/ec2-user/work/runs/nsys_phase1b_20260212_114333/gpism_out.nc \
+  -y 0.4
+nsys stats --report cuda_api_sum,cuda_gpu_kern_sum \
+  /home/ec2-user/work/runs/nsys_phase1b_20260212_114333/gpism_nsys.nsys-rep \
+  > /home/ec2-user/work/runs/nsys_phase1b_20260212_114333/nsys_stats.txt
+```
 
-Goal: reduce memory traffic by fusing the SSA apply and residual computation.
-Result: **reverted** (no clear win).
+### Artifacts
 
-### Kernel mix (Nsight Systems `cuda_gpu_kern_sum`)
+- Strict parity: `/tmp/gpism_pism_compare_20260212_114059`
+- Short benchmark: `/tmp/gpism_pism_bench_20260212_114151`
+- Nsight short profile:
+  - Baseline: `/home/ec2-user/work/runs/nsys_codex_now_20260212_112109/nsys_stats.txt`
+  - Phase 1: `/home/ec2-user/work/runs/nsys_phase1b_20260212_114333/nsys_stats.txt`
 
-- **Before (a58e129a6)**:
-  - `apply_region_kernel`: 48.0%
-  - `residual_kernel`: 0.8%
-- **After (current)**:
-  - `apply_region_kernel`: 42.1%
-  - `apply_residual_region_kernel`: 6.5%
+### Measured results
 
-### Wall time (single rank, same config)
+- Targeted ctest subset: pass (13/13).
+- Strict parity: pass (`u_ssa`/`v_ssa` within strict tolerances).
+- Short benchmark (`MIN_WALL=20`):
+  - `gpism`: `0.59869` years/sec
+  - `pism`: `0.00112057` years/sec
+  - speedup (`gpism/pism`): `534.273x`
 
-- **Before:** 0.98 s
-- **After:** 1.00 s
+- Corrected long benchmark (`MIN_WALL=120`, `PISM_MAX_DT=0.05`):
+  - artifact: `/tmp/gpism_pism_bench_20260212_120941`
+  - `gpism`: `0.584141` years/sec
+  - `pism`: `0.0411629` years/sec
+  - speedup (`gpism/pism`): `14.191x`
 
-Result: no clear win; within noise (slightly slower). Keep monitoring before
-expanding the fusion to other hot paths.
+Notes:
+- A prior long benchmark without `PISM_MAX_DT` let PISM take very large timesteps
+  at long horizons, producing non-comparable throughput numbers.
 
-### Memcopy counts (Nsight Systems `cuda_gpu_mem_time_sum`)
+### Profile delta (baseline -> phase 1)
 
-- **Before:** D2H 556, H2D 551
-- **After:**  D2H 558, H2D 551
+- CUDA API:
+  - `cudaStreamSynchronize`: dominant at `68.0%` in baseline, removed from top calls in phase 1 path.
+  - `cudaMemcpy`: `12.5%` (`3278` calls) -> `79.3%` (`4911` calls), now dominant due batched blocking scalar reads.
+  - `cudaLaunchKernel` calls: `413,262` -> `365,534` (~`11.5%` lower).
+- Kernel summary:
+  - `jacobi_fused_kernel` instances: `170,088` -> `149,720` (~`12.0%` lower).
 
-No material change in transfer counts.
+## Phase 1C micro-optimization log (2026-02-12)
 
-## Async/double-buffered output
+Change:
+- GMRES GPU orthogonalization now uses the fused norm term emitted by
+  `orthogonalize_stag_cuda`; removed the extra `dot(z, z)` launch in the Arnoldi
+  inner loop.
 
-Single-rank runs now stage output into a reusable host-side double buffer and
-write asynchronously. Multi-rank runs remain synchronous (NetCDF parallel).
+Commands used (AWS `i-056a5fcf119ae85ad`, Tesla T4):
 
-## Fused thickness update (flux + update)
+```bash
+cmake --build /home/ec2-user/work/build/gpism-codex-opt -j
 
-Goal: reduce temporaries by computing fluxes on the fly during the thickness
-update. Result: **reverted** (no measurable improvement; within noise).
+ctest --test-dir /home/ec2-user/work/build/gpism-codex-opt --output-on-failure \
+  -R "gmres|multigrid|ssa-operator|halo-exchange|timestep-device-residency|timestep-io"
 
-## Scaling (single GPU proxy)
+GPISM_BIN=/home/ec2-user/work/build/gpism-codex-opt/gpism \
+PISM_BIN=/home/ec2-user/pism-build-cudaaware-baseline/pism \
+PISM_CONFIG=/home/ec2-user/pism-build-cudaaware-baseline/pism_config.nc \
+INPUT=/home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+COMPARE_STRICT=1 COMPARE_TOL_RMS=0.02 COMPARE_TOL_MAX=0.05 \
+YEARS=0.05 GPISM_DT=0.05 MIN_WALL=0 \
+/home/ec2-user/work/src/pism-gpism/gpism/scripts/compare_pism_gpism.sh
 
-**Strong scaling (same full dataset, single GPU):**
+GPISM_BIN=/home/ec2-user/work/build/gpism-codex-opt/gpism \
+PISM_BIN=/home/ec2-user/pism-build-cudaaware-baseline/pism \
+PISM_CONFIG=/home/ec2-user/pism-build-cudaaware-baseline/pism_config.nc \
+INPUT=/home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+MIN_WALL=20 YEARS=0.05 GPISM_DT=0.05 PISM_MAX_DT=0.05 \
+/home/ec2-user/work/src/pism-gpism/gpism/scripts/benchmark_pism_gpism.sh
 
-- 1 MPI rank: 1.00 s
-- 2 MPI ranks (same GPU, `GPISM_CUDA_AWARE_MPI=0`): 3.60 s
+GPISM_BIN=/home/ec2-user/work/build/gpism-codex-opt/gpism \
+PISM_BIN=/home/ec2-user/pism-build-cudaaware-baseline/pism \
+PISM_CONFIG=/home/ec2-user/pism-build-cudaaware-baseline/pism_config.nc \
+INPUT=/home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+MIN_WALL=120 YEARS=0.05 GPISM_DT=0.05 PISM_MAX_DT=0.05 \
+/home/ec2-user/work/src/pism-gpism/gpism/scripts/benchmark_pism_gpism.sh
 
-**Weak scaling proxy:**
+nsys profile --force-overwrite=true --sample=none --trace=cuda,nvtx,osrt \
+  -o /home/ec2-user/work/runs/nsys_phase1d_y04_default_20260212_130057/gpism_nsys \
+  /home/ec2-user/work/build/gpism-codex-opt/gpism \
+  -i /home/ec2-user/pism-gpu-5/examples/std-greenland/pism_Greenland_5km_v1.1.nc \
+  -o /home/ec2-user/work/runs/nsys_phase1d_y04_default_20260212_130057/gpism_out.nc \
+  -y 0.4
+nsys stats --report cuda_api_sum,cuda_gpu_kern_sum \
+  /home/ec2-user/work/runs/nsys_phase1d_y04_default_20260212_130057/gpism_nsys.nsys-rep \
+  > /home/ec2-user/work/runs/nsys_phase1d_y04_default_20260212_130057/nsys_stats.txt
+```
 
-- 1 rank on synthetic half-size input (150×561): 0.59 s
-- 2 ranks on full input (301×561, same GPU): 3.60 s
+Artifacts:
+- Strict parity: `/tmp/gpism_pism_compare_20260212_124012`
+- Short benchmark: `/tmp/gpism_pism_bench_20260212_124105`
+- Long benchmark: `/tmp/gpism_pism_bench_20260212_124331`
+- Nsight (default `-y 0.4`):
+  - previous reference: `/home/ec2-user/work/runs/nsys_phase1b_20260212_114333/nsys_stats.txt`
+  - current: `/home/ec2-user/work/runs/nsys_phase1d_y04_default_20260212_130057/nsys_stats.txt`
 
-### Notes / limitations
+Measured results:
+- Targeted ctest subset: pass (13/13).
+- Strict parity: pass (`u_ssa`/`v_ssa` within strict tolerances).
+- Short benchmark (`MIN_WALL=20`, `PISM_MAX_DT=0.05`):
+  - `gpism`: `0.582878` years/sec
+  - `pism`: `0.00112259` years/sec
+  - speedup (`gpism/pism`): `519.226x`
+- Long benchmark (`MIN_WALL=120`, `PISM_MAX_DT=0.05`):
+  - `gpism`: `0.569934` years/sec
+  - `pism`: `0.0410783` years/sec
+  - speedup (`gpism/pism`): `13.8743x`
+  - vs prior locked long-run gpism (`0.584141` y/s): `-2.43%` (within the
+    current 5% non-regression threshold).
 
-- This host has **one GPU**, so multi-GPU scaling is not yet measured.
-- Two MPI ranks share a single GPU, which is expected to be slower; treat these
-  numbers as **MPI overhead indicators**, not true multi-GPU scaling.
-- `GPISM_CUDA_AWARE_MPI=0` was required to avoid hangs in this environment.
+Profile delta (phase1b -> phase1d, same default `-y 0.4` command family):
+- CUDA API:
+  - `cudaLaunchKernel` calls: `365,534` -> `362,237` (`-0.9%`).
+  - `cudaMemcpy` calls: unchanged at `4,911` (dominant API time remains transfer-bound).
+- GMRES-related kernels:
+  - `dot_stag_kernel` instances: `5,543` -> `2,246` (`-59.5%`).
+  - `dot_stag_batch_kernel` instances: `3,297` -> `3,297` (unchanged).
+  - `orthogonalize_stag_kernel` instances: `3,297` -> `3,297` (unchanged).

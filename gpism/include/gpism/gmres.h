@@ -37,6 +37,7 @@ struct GMRESOptions {
   // only ||r0||. This avoids over-tightening the solve when the initial guess
   // is already close (||r0|| << ||b||), which can stall GMRES.
   bool tol_relative_to_rhs = false;
+  int residual_check_interval = 1;
   bool verbose = false;
   bool precond_diagnostic = false;
   const Context* context = nullptr;

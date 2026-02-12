@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -33,13 +34,26 @@ bool parse_line(const std::string& line, std::string* key, std::string* value) {
   return !key->empty();
 }
 
+bool is_removed_override_key(const std::string& key) {
+  static const std::set<std::string> removed = {
+      "device.enabled",
+      "device.halo_mode",
+      "ssa.force_host_convergence",
+      "ssa.max_speed",
+  };
+  return removed.find(key) != removed.end();
+}
+
 }  // namespace
 
 RuntimeConfig::RuntimeConfig() { load_defaults(); }
 
 void RuntimeConfig::load_defaults() {
   values_.clear();
-  values_["device.enabled"] = "1";
+  values_["device.enforce_hotloop_residency"] = "1";
+  values_["device.require_cuda_aware_mpi"] = "1";
+  values_["device.cuda_graphs"] = "1";
+  values_["device.compute_streams"] = "2";
   values_["grid.Mx"] = "100";
   values_["grid.My"] = "100";
   values_["grid.Mz"] = "20";
@@ -66,6 +80,8 @@ void RuntimeConfig::load_defaults() {
   // Greenland-like test problems; small values can lock into a low-velocity
   // solution and diverge massively from PISM.
   values_["ssa.max_picard"] = "80";
+  values_["ssa.picard.convergence_check_interval"] = "1";
+  values_["ssa.device_metrics_batch"] = "1";
   values_["ssa.gmres_max_iter"] = "200";
   values_["ssa.tol_nuH"] = "1e-6";
   values_["ssa.tol_vel"] = "1e-6";
@@ -73,9 +89,9 @@ void RuntimeConfig::load_defaults() {
   // SSAFD parity and avoids over-solving on large domains.
   values_["ssa.gmres_tol"] = "1e-5";
   values_["ssa.gmres_tol_relative_to_rhs"] = "0";
+  values_["ssa.gmres.residual_check_interval"] = "5";
   values_["ssa.vel_relax"] = "1.0";
   values_["ssa.nuH_relax"] = "1.0";
-  values_["ssa.max_speed"] = "0.0";
   values_["ssa.fail_fast"] = "1";
   values_["ssa.fail_fast_require_converged"] = "0";
   values_["ssa.fail_fast_residual_max"] = "0.0";
@@ -83,7 +99,6 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.initial_guess_speed"] = "0.01";
   values_["ssa.diagnostic"] = "0";
   values_["ssa.gmres_verbose"] = "0";
-  values_["ssa.force_host_convergence"] = "0";
   values_["ssa.enforce_ice_free_bc"] = "0";
   values_["stress_balance.ssa.flow_law"] = "isothermal_glen";
   values_["stress_balance.ssa.Glen_exponent"] = "3.0";
@@ -117,6 +132,7 @@ void RuntimeConfig::load_defaults() {
   values_["ssa.mg.chebyshev.estimate_iters"] = "5";
   values_["ssa.mg.chebyshev.estimate_min_factor"] = "0.1";
   values_["ssa.mg.chebyshev.estimate_max_factor"] = "1.1";
+  values_["ssa.mg.jacobi_sweeps_per_launch"] = "2";
   values_["ssa.tauc_default"] = "2e5";
   values_["ssa.tauc_floor"] = "0.0";
   values_["basal_resistance.pseudo_plastic.enabled"] = "0";
@@ -128,13 +144,18 @@ void RuntimeConfig::load_defaults() {
   values_["basal_resistance.beta_lateral_margin"] = "1e19";
   values_["ssa.mg.diagnostic"] = "0";
   values_["ssa.gmres.precond_diagnostic"] = "0";
+  values_["ssa.precond_precision"] = "fp32";
+  values_["linear_algebra.reduction_backend"] = "cub";
   values_["io.format"] = "netcdf";
   values_["io.size"] = "small";
   values_["io.time_index"] = "-1";
   values_["io.async_output"] = "1";
+  values_["io.output.device_ring_depth"] = "3";
+  values_["io.output.async_stage_from_device"] = "1";
 }
 
 bool RuntimeConfig::load_file(const std::string& path, bool replace) {
+  last_error_.clear();
   if (replace) {
     values_.clear();
   }
@@ -149,6 +170,10 @@ bool RuntimeConfig::load_file(const std::string& path, bool replace) {
     std::string value;
     if (!parse_line(line, &key, &value)) {
       continue;
+    }
+    if (!replace && is_removed_override_key(key)) {
+      last_error_ = "Unsupported config key in override file: " + key;
+      return false;
     }
     values_[key] = value;
   }
@@ -189,6 +214,8 @@ bool RuntimeConfig::get_bool(const std::string& key) const {
   }
   throw std::runtime_error("Invalid boolean config value for " + key);
 }
+
+const std::string& RuntimeConfig::last_error() const { return last_error_; }
 
 void RuntimeConfig::set(const std::string& key, const std::string& value) {
   values_[key] = value;

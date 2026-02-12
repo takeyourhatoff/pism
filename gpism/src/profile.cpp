@@ -128,7 +128,6 @@ ScopedTimer::~ScopedTimer() {
   Profiler::add(name_, delta.count());
 }
 
-#if GPISM_HAVE_CUDA
 CudaEventTimer::CudaEventTimer(const char* name)
     : name_(name), active_(Profiler::enabled()), start_{}, stop_{} {
   if (!active_) {
@@ -151,6 +150,5 @@ CudaEventTimer::~CudaEventTimer() {
   cudaEventDestroy(start_);
   cudaEventDestroy(stop_);
 }
-#endif
 
 }  // namespace gpism

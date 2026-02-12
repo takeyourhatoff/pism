@@ -6,17 +6,18 @@
 #include <vector>
 
 #include "gpism/context.h"
-#include "gpism/device_policy.h"
+#include "gpism/execution_context.h"
 #include "gpism/field_sync.h"
+#include "gpism/linear_algebra.h"
 #include "gpism/runtime_config.h"
+#include "gpism/sync_audit.h"
+#include "gpism/sync_stats.h"
 #include "gpism/time_manager.h"
 #include "gpism/config.h"
 #include "gpism/version.h"
 
-#if GPISM_HAVE_NETCDF
 #include "gpism/async_output.h"
 #include "gpism/netcdf_io.h"
-#endif
 #include "gpism/geometry.h"
 #include "gpism/halo_exchange.h"
 #include "gpism/ssa_solver.h"
@@ -24,9 +25,7 @@
 #include "gpism/thermodynamics.h"
 #include "gpism/viscosity.h"
 
-#if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
-#endif
 
 namespace {
 
@@ -135,9 +134,7 @@ void log_rank0(const gpism::Context& context, const std::string& message) {
 
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
-#if GPISM_HAVE_CUDA
   cudaSetDevice(context.device_id());
-#endif
   Options options;
   try {
     if (!parse_args(argc, argv, &options)) {
@@ -151,15 +148,22 @@ int main(int argc, char** argv) {
   gpism::RuntimeConfig config;
   if (!options.config_path.empty()) {
     if (!config.load_file(options.config_path, true)) {
-      std::cerr << "Error: failed to read config file " << options.config_path
-                << '\n';
+      std::cerr << "Error: failed to read config file " << options.config_path;
+      if (!config.last_error().empty()) {
+        std::cerr << ": " << config.last_error();
+      }
+      std::cerr << '\n';
       return 2;
     }
   }
   if (!options.config_override_path.empty()) {
     if (!config.apply_override(options.config_override_path)) {
       std::cerr << "Error: failed to read override config file "
-                << options.config_override_path << '\n';
+                << options.config_override_path;
+      if (!config.last_error().empty()) {
+        std::cerr << ": " << config.last_error();
+      }
+      std::cerr << '\n';
       return 2;
     }
   }
@@ -167,9 +171,27 @@ int main(int argc, char** argv) {
     config.set("time.years", options.run_years);
   }
 
-  // Allow forcing the host code path even in CUDA builds. This is useful for
-  // debugging (e.g. parity checks vs CPU kernels).
-  gpism::set_device_enabled(config.get_bool("device.enabled"));
+  const bool enforce_hotloop_residency =
+      config.get_bool("device.enforce_hotloop_residency");
+  const bool enable_cuda_graphs = config.get_bool("device.cuda_graphs");
+  const int compute_streams = config.get_int("device.compute_streams");
+  const std::string reduction_backend =
+      config.get_string("linear_algebra.reduction_backend");
+  if (reduction_backend == "cub") {
+    gpism::set_reduction_backend(gpism::ReductionBackend::CUB);
+  } else if (reduction_backend == "cublas") {
+    gpism::set_reduction_backend(gpism::ReductionBackend::CUBLAS);
+  } else {
+    throw std::runtime_error("Invalid linear_algebra.reduction_backend value: " +
+                             reduction_backend);
+  }
+  gpism::ExecutionContext::instance().configure(enable_cuda_graphs,
+                                                compute_streams);
+  gpism::SyncAudit::enable(enforce_hotloop_residency);
+  gpism::SyncAudit::set_fail_fast(enforce_hotloop_residency);
+  gpism::SyncAudit::reset();
+  gpism::SyncStats::enable(enforce_hotloop_residency);
+  gpism::SyncStats::reset();
 
   if (!options.gpism_opts.empty() && context.rank() == 0) {
     std::cout << "Ignoring gpism-only options:";
@@ -186,7 +208,6 @@ int main(int argc, char** argv) {
   }
 
   if (!options.input.empty() && !options.output.empty()) {
-#if GPISM_HAVE_NETCDF
     gpism::Grid2D grid(0, 0, 1.0, 1.0, 1, context.rank(), context.size());
     gpism::IOFields2D fields;
     gpism::NetcdfIO io;
@@ -200,7 +221,11 @@ int main(int argc, char** argv) {
       return 2;
     }
     const bool async_output = config.get_bool("io.async_output");
-    output_writer.configure(grid, fields, async_output);
+    const int output_ring_depth = config.get_int("io.output.device_ring_depth");
+    const bool async_stage_from_device =
+        config.get_bool("io.output.async_stage_from_device");
+    output_writer.configure(grid, fields, async_output, output_ring_depth,
+                            async_stage_from_device);
 
     const double tauc_default = config.get_double("ssa.tauc_default");
     const double tauc_floor = config.get_double("ssa.tauc_floor");
@@ -311,6 +336,14 @@ int main(int argc, char** argv) {
 
     gpism::SSASolverOptions ssa_options;
     ssa_options.max_picard = config.get_int("ssa.max_picard");
+    if (config.has("ssa.picard.convergence_check_interval")) {
+      ssa_options.picard_convergence_check_interval = std::max(
+          1, config.get_int("ssa.picard.convergence_check_interval"));
+    }
+    if (config.has("ssa.device_metrics_batch")) {
+      ssa_options.device_metrics_batch =
+          config.get_bool("ssa.device_metrics_batch");
+    }
     ssa_options.gmres_max_iter = config.get_int("ssa.gmres_max_iter");
     ssa_options.tol_nuH = config.get_double("ssa.tol_nuH");
     ssa_options.tol_vel = config.get_double("ssa.tol_vel");
@@ -319,12 +352,14 @@ int main(int argc, char** argv) {
       ssa_options.gmres_tol_relative_to_rhs =
           config.get_bool("ssa.gmres_tol_relative_to_rhs");
     }
+    if (config.has("ssa.gmres.residual_check_interval")) {
+    ssa_options.gmres_residual_check_interval =
+          std::max(1, config.get_int("ssa.gmres.residual_check_interval"));
+    }
     ssa_options.vel_relax = config.get_double("ssa.vel_relax");
     ssa_options.nuH_relax = config.get_double("ssa.nuH_relax");
-    ssa_options.max_speed = config.get_double("ssa.max_speed");
     ssa_options.gmres_verbose = config.get_bool("ssa.gmres_verbose");
     ssa_options.diagnostic = config.get_bool("ssa.diagnostic");
-    ssa_options.force_host_convergence = config.get_bool("ssa.force_host_convergence");
     // PISM's stress_balance.ssa.epsilon has units Pa*s*m (regularization added to nu*H).
     ssa_options.nuH_regularization = config.get_double("stress_balance.ssa.epsilon");
     ssa_options.use_mg_precond = config.get_bool("ssa.mg.enabled");
@@ -333,6 +368,8 @@ int main(int argc, char** argv) {
     ssa_options.mg_coarse_iters = config.get_int("ssa.mg.coarse_iters");
     ssa_options.mg_omega = config.get_double("ssa.mg.omega");
     ssa_options.mg_min_size = config.get_int("ssa.mg.min_size");
+    ssa_options.mg_jacobi_sweeps_per_launch =
+        std::max(1, config.get_int("ssa.mg.jacobi_sweeps_per_launch"));
     const std::string mg_smoother = config.get_string("ssa.mg.smoother");
     if (mg_smoother == "chebyshev") {
       ssa_options.mg_smoother = gpism::MGSmoother::Chebyshev;
@@ -364,6 +401,16 @@ int main(int argc, char** argv) {
     ssa_options.fail_fast_residual_max = config.get_double("ssa.fail_fast_residual_max");
     ssa_options.fail_fast_dump_prefix = config.get_string("ssa.fail_fast_dump_prefix");
     ssa_options.config_override_path = options.config_override_path;
+    const std::string precond_precision =
+        config.get_string("ssa.precond_precision");
+    if (precond_precision == "fp32") {
+      ssa_options.precond_precision = gpism::SSAPrecondPrecision::FP32;
+    } else if (precond_precision == "fp64") {
+      ssa_options.precond_precision = gpism::SSAPrecondPrecision::FP64;
+    } else {
+      throw std::runtime_error("Invalid ssa.precond_precision value: " +
+                               precond_precision);
+    }
     ssa_options.sea_level = sea_level;
     ssa_options.rho_ice = rho_ice;
     ssa_options.rho_water = rho_water;
@@ -386,6 +433,9 @@ int main(int argc, char** argv) {
           "stress_balance.ssa.strength_extension.min_thickness");
     }
     ssa_options.context = &context;
+    ssa_options.halo_mode = gpism::SSAHaloMode::Device;
+    ssa_options.require_cuda_aware_mpi =
+        config.get_bool("device.require_cuda_aware_mpi");
 
     gpism::BasalResistanceParams basal_params;
     basal_params.q =
@@ -443,68 +493,6 @@ int main(int argc, char** argv) {
 
     gpism::GeometryDiagnostics geometry;
 
-    // If the input file does not provide a velocity field, use a simple heuristic
-    // initial guess aligned with the driving stress direction. This helps Picard
-    // iterations avoid locking into a near-zero-velocity solution when basal drag
-    // is (regularized) plastic.
-    if (!fields.has_ssa_velocity && !fields.has_velocity) {
-      const double guess_speed = std::max(0.0, config.get_double("ssa.initial_guess_speed"));
-      if (guess_speed > 0.0) {
-        // This block intentionally uses host data structures. At this point we
-        // have not synced input fields to the device yet, so CUDA kernels would
-        // read uninitialized device buffers and leave host arrays (used below)
-        // unchanged, resulting in a near-zero initial guess.
-        const bool was_device_enabled = gpism::device_enabled();
-        if (was_device_enabled) {
-          gpism::set_device_enabled(false);
-        }
-
-        gpism::Field2D<int> cell_type_guess(grid.local_mx(), grid.local_my(),
-                                            grid.ghost_width());
-        gpism::Field2D<double> usurf_guess(grid.local_mx(), grid.local_my(),
-                                           grid.ghost_width());
-        gpism::Field2D<double> dhdx_guess(grid.local_mx(), grid.local_my(),
-                                          grid.ghost_width());
-        gpism::Field2D<double> dhdy_guess(grid.local_mx(), grid.local_my(),
-                                          grid.ghost_width());
-        gpism::Field2D<double> u_guess(grid.local_mx(), grid.local_my(),
-                                       grid.ghost_width());
-        gpism::Field2D<double> v_guess(grid.local_mx(), grid.local_my(),
-                                       grid.ghost_width());
-
-        gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level, rho_ice,
-                                 rho_water, ice_free_thickness_standard,
-                                 cell_type_guess);
-        gpism::compute_usurf_flotation(grid, fields.thk, fields.topg,
-                                       cell_type_guess, sea_level, rho_ice,
-                                       rho_water, usurf_guess);
-        gpism::compute_surface_slopes_pism(
-            grid, usurf_guess, cell_type_guess, dhdx_guess, dhdy_guess,
-            ssa_options.surface_gradient_inward, ssa_options.surface_slope_uphill,
-            ssa_options.use_cfbc);
-
-        const double scale = -rho_ice * gravity;
-        const int mx = grid.local_mx();
-        const int my = grid.local_my();
-        for (int j = 0; j < my; ++j) {
-          for (int i = 0; i < mx; ++i) {
-            const double tauc = std::max(1.0, fields.tauc(i, j));
-            const double tau_x = scale * fields.thk(i, j) * dhdx_guess(i, j);
-            const double tau_y = scale * fields.thk(i, j) * dhdy_guess(i, j);
-            u_guess(i, j) = guess_speed * (tau_x / tauc);
-            v_guess(i, j) = guess_speed * (tau_y / tauc);
-          }
-        }
-
-        init_vel_cc_from_center_fields(u_guess, v_guess);
-        log_rank0(context, "Initialized velocity guess from driving stress.");
-
-        if (was_device_enabled) {
-          gpism::set_device_enabled(true);
-        }
-      }
-    }
-
     gpism::sync_host_to_device(fields.thk);
     gpism::sync_host_to_device(fields.topg);
     gpism::sync_host_to_device(fields.tauc);
@@ -517,49 +505,46 @@ int main(int argc, char** argv) {
     }
 
     gpism::HaloExchange2D exchange;
+    const bool require_cuda_aware_mpi = ssa_options.require_cuda_aware_mpi;
     auto exchange_field2d = [&](auto& field) {
       if (!context.mpi_enabled() || context.size() <= 1) {
         return;
       }
-#if GPISM_HAVE_CUDA
-      if (context.cuda_aware_mpi() && field.device_data() != nullptr) {
-        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
-        return;
+      const bool have_device = field.device_data() != nullptr;
+      const bool can_device = context.cuda_aware_mpi() && have_device;
+      if (!can_device && require_cuda_aware_mpi) {
+        throw std::runtime_error(
+            "device.require_cuda_aware_mpi=1 but Field2D exchange cannot use "
+            "device buffers");
       }
-      if (field.device_data() != nullptr) {
-        gpism::sync_device_to_host(field);
-        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
-        gpism::sync_host_to_device(field);
-        return;
+      if (!can_device) {
+        throw std::runtime_error(
+            "Multi-rank run requires CUDA-aware MPI device-buffer exchange");
       }
-#endif
-      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
     };
 
     auto exchange_field_stag = [&](auto& field) {
       if (!context.mpi_enabled() || context.size() <= 1) {
         return;
       }
-#if GPISM_HAVE_CUDA
       const bool have_device =
           field.component(0).device_data() != nullptr &&
           field.component(1).device_data() != nullptr;
-      if (context.cuda_aware_mpi() && have_device) {
-        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
-        return;
+      const bool can_device = context.cuda_aware_mpi() && have_device;
+      if (!can_device && require_cuda_aware_mpi) {
+        throw std::runtime_error(
+            "device.require_cuda_aware_mpi=1 but FieldStag2D exchange cannot "
+            "use device buffers");
       }
-      if (have_device) {
-        gpism::sync_device_to_host(field);
-        exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
-        gpism::sync_host_to_device(field);
-        return;
+      if (!can_device) {
+        throw std::runtime_error(
+            "Multi-rank run requires CUDA-aware MPI device-buffer exchange");
       }
-#endif
-      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Host);
+      exchange.exchange(field, grid, context, gpism::HaloExchange2D::Mode::Device);
     };
 
     auto populate_velocity_diagnostics = [&]() {
-#if GPISM_HAVE_CUDA
       auto copy_field2d_device =
           [&](const gpism::Field2D<double>& src, gpism::Field2D<double>& dst) {
             if (!src.has_device_data() || !dst.has_device_data()) {
@@ -598,7 +583,6 @@ int main(int argc, char** argv) {
       if (copied_on_device) {
         return;
       }
-#endif
       gpism::sync_device_to_host(vel_cc);
       for (int j = 0; j < grid.local_my(); ++j) {
         for (int i = 0; i < grid.local_mx(); ++i) {
@@ -616,9 +600,13 @@ int main(int argc, char** argv) {
       gpism::sync_host_to_device(fields.v_ssa);
     };
 
+    const bool allow_solver_sync_for_diagnostics =
+        ssa_options.diagnostic || ssa_options.gmres_verbose ||
+        ssa_options.mg_diagnostic || ssa_options.gmres_precond_diagnostic;
     double last_output_time = -1.0;
     while (!clock.done()) {
       if (clock.should_output()) {
+        gpism::ScopedSyncAudit output_scope(true, "timestep.output");
         gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
                                  rho_ice, rho_water,
                                  ice_free_thickness_standard, cell_type);
@@ -626,13 +614,6 @@ int main(int argc, char** argv) {
                                        cell_type, sea_level, rho_ice,
                                        rho_water, fields.usurf);
         populate_velocity_diagnostics();
-        // NetCDF writers use host buffers; ensure derived fields computed on the
-        // device are synced before enqueueing asynchronous output.
-        gpism::sync_device_to_host(fields.usurf);
-        gpism::sync_device_to_host(fields.uvel);
-        gpism::sync_device_to_host(fields.vvel);
-        gpism::sync_device_to_host(fields.u_ssa);
-        gpism::sync_device_to_host(fields.v_ssa);
         fields.has_usurf = true;
         fields.has_velocity = true;
         fields.has_ssa_velocity = true;
@@ -647,37 +628,44 @@ int main(int argc, char** argv) {
         last_output_time = clock.time();
       }
 
-      if (run_ssa) {
-        try {
-          solver.solve(fields.thk, fields.topg, fields.tauc,
-                       fields.has_vel_bc ? &fields.u_bc : nullptr,
-                       fields.has_vel_bc ? &fields.v_bc : nullptr,
-                       fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
-                       vel_cc, ssa_options);
-        } catch (const std::exception& exc) {
-          std::cerr << "SSA failure: " << exc.what() << '\n';
-          return 2;
+      {
+        gpism::ScopedSyncAudit compute_scope(
+            !enforce_hotloop_residency, "timestep.compute");
+        if (run_ssa) {
+          try {
+            gpism::ScopedSyncAudit solver_scope(
+                !enforce_hotloop_residency || allow_solver_sync_for_diagnostics,
+                "timestep.ssa");
+            solver.solve(fields.thk, fields.topg, fields.tauc,
+                         fields.has_vel_bc ? &fields.u_bc : nullptr,
+                         fields.has_vel_bc ? &fields.v_bc : nullptr,
+                         fields.has_vel_bc ? &fields.vel_bc_mask : nullptr,
+                         vel_cc, ssa_options);
+          } catch (const std::exception& exc) {
+            std::cerr << "SSA failure: " << exc.what() << '\n';
+            return 2;
+          }
         }
-      }
 
-      if (thermo_enabled) {
-        const int mz = enthalpy.local_mz();
-        gpism::vertical_diffusion_step(enthalpy, mz, dz, clock.dt(), thermo_opts,
-                                       enthalpy_next);
-        std::swap(enthalpy, enthalpy_next);
-      }
+        if (thermo_enabled) {
+          const int mz = enthalpy.local_mz();
+          gpism::vertical_diffusion_step(enthalpy, mz, dz, clock.dt(),
+                                         thermo_opts, enthalpy_next);
+          std::swap(enthalpy, enthalpy_next);
+        }
 
-      if (evolve_thickness) {
-        exchange_field2d(fields.thk);
-        exchange_field_stag(vel_cc);
-        gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
-        exchange_field_stag(vel_face);
-        gpism::compute_face_fluxes(grid, fields.thk, vel_face, flux);
-        gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
-                                fields.thk);
-        gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
-                                 rho_ice, rho_water,
-                                 ice_free_thickness_standard, cell_type);
+        if (evolve_thickness) {
+          exchange_field2d(fields.thk);
+          exchange_field_stag(vel_cc);
+          gpism::compute_face_velocity_from_center(grid, vel_cc, vel_face);
+          exchange_field_stag(vel_face);
+          gpism::compute_face_fluxes(grid, fields.thk, vel_face, flux);
+          gpism::update_thickness(grid, flux, smb, clock.dt(), thickness_opts,
+                                  fields.thk);
+          gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
+                                   rho_ice, rho_water,
+                                   ice_free_thickness_standard, cell_type);
+        }
       }
 
       clock.advance();
@@ -685,6 +673,7 @@ int main(int argc, char** argv) {
 
     if (!options.output.empty() &&
         (last_output_time < clock.time() - 1e-12)) {
+      gpism::ScopedSyncAudit output_scope(true, "timestep.output.final");
       gpism::compute_cell_type(grid, fields.thk, fields.topg, sea_level,
                                rho_ice, rho_water,
                                ice_free_thickness_standard, cell_type);
@@ -692,11 +681,6 @@ int main(int argc, char** argv) {
                                      sea_level, rho_ice, rho_water,
                                      fields.usurf);
       populate_velocity_diagnostics();
-      gpism::sync_device_to_host(fields.usurf);
-      gpism::sync_device_to_host(fields.uvel);
-      gpism::sync_device_to_host(fields.vvel);
-      gpism::sync_device_to_host(fields.u_ssa);
-      gpism::sync_device_to_host(fields.v_ssa);
       fields.has_usurf = true;
       fields.has_velocity = true;
       fields.has_ssa_velocity = true;
@@ -715,11 +699,18 @@ int main(int argc, char** argv) {
       return 2;
     }
 
+    if (enforce_hotloop_residency) {
+      if (gpism::SyncAudit::violations() != 0) {
+        std::cerr << "Error: hot-loop residency audit failed (violations="
+                  << gpism::SyncAudit::violations() << ")\n";
+        return 2;
+      }
+      log_rank0(
+          context,
+          "Hot-loop residency audit passed: no disallowed syncs detected.");
+    }
+
     return 0;
-#else
-    std::cerr << "Error: NetCDF support not enabled in this build.\n";
-    return 2;
-#endif
   }
 
   log_rank0(context, "gpism scaffold: no simulation configured yet.");

@@ -1,12 +1,25 @@
 # Architecture Decisions
 
-This file records gpism technical choices. Update entries as decisions change.
+This file records the active gpism architecture decisions.
 
-## 2026-01-11: Initial stack (provisional)
+## 2026-02-12: GPU-only product contract
 
-- Language: C++
-- GPU portability: Kokkos (preferred), with CUDA/HIP backends
-- Parallelism: MPI with CUDA-aware support when available
-- I/O: NetCDF (netcdf-c + HDF5); add PnetCDF later if needed
+- Build contract:
+  - CUDA toolkit is required at configure time.
+  - NetCDF is required at configure time.
+  - MPI remains optional at build time.
+- Runtime contract:
+  - Production timestep execution is device-resident.
+  - No runtime `device.enabled` switch exists.
+  - No host fallback halo path exists for MPI exchange.
+- MPI contract:
+  - Multi-rank execution uses device buffers only.
+  - If CUDA-aware MPI is unavailable and `size > 1`, startup fails fast.
+- Solver contract:
+  - SSA discretization follows PISM SSAFD semantics (cell-centered `u/v`,
+    staggered `nuH`).
+  - Deterministic host-reduction mode was removed from public linear algebra
+    APIs.
 
-Rationale: aligns with gpism's GPU-first plan while keeping portability and PISM-like I/O.
+Rationale: gpism targets GPU throughput first, with strict parity against the
+original PISM SSAFD behavior as the primary correctness gate.

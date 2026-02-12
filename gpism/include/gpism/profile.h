@@ -2,11 +2,7 @@
 
 #include <chrono>
 
-#include "gpism/config.h"
-
-#if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
-#endif
 
 namespace gpism {
 
@@ -30,7 +26,6 @@ private:
   std::chrono::steady_clock::time_point start_;
 };
 
-#if GPISM_HAVE_CUDA
 class CudaEventTimer {
 public:
   explicit CudaEventTimer(const char* name);
@@ -42,11 +37,5 @@ private:
   cudaEvent_t start_;
   cudaEvent_t stop_;
 };
-#else
-class CudaEventTimer {
-public:
-  explicit CudaEventTimer(const char*) {}
-};
-#endif
 
 }  // namespace gpism

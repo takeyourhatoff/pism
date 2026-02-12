@@ -9,12 +9,12 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "gpism/context.h"
-#include "gpism/device_policy.h"
 #include "gpism/field_sync.h"
 #include "gpism/gmres.h"
 #include "gpism/halo_exchange.h"
@@ -22,19 +22,13 @@
 #include "gpism/mg_preconditioner.h"
 #include "gpism/thickness.h"
 
-#if GPISM_HAVE_CUDA
 #include <cuda_runtime.h>
-#endif
-
-#if GPISM_HAVE_NETCDF
 #include "gpism/netcdf_io.h"
-#endif
 
 #if GPISM_HAVE_MPI
 #include <mpi.h>
 #endif
 
-#if GPISM_HAVE_CUDA
 namespace gpism {
 void ssa_relax_nuH_cuda(int mx, int my, int gw, int stride_u, int stride_v,
                         const double* nuH_prev_u, const double* nuH_prev_v,
@@ -48,7 +42,6 @@ void ssa_extrapolate_velocity_cuda(int mx, int my, int gw, int stride_cell_type,
                                    const int* cell_type,
                                    double* u, double* v);
 }  // namespace gpism
-#endif
 
 namespace gpism {
 namespace {
@@ -56,57 +49,65 @@ namespace {
 template <typename T>
 bool can_use_device_exchange(const FieldStag2D<T>& field,
                              const Context& context) {
-#if GPISM_HAVE_CUDA
   return context.cuda_aware_mpi() &&
          field.component(0).device_data() != nullptr &&
          field.component(1).device_data() != nullptr;
-#else
-  (void)field;
-  (void)context;
-  return false;
-#endif
 }
 
 template <typename T>
 void exchange_for_device(FieldStag2D<T>& field, const Grid2D& grid,
-                         const Context& context) {
-  HaloExchange2D exchange;
-  if (can_use_device_exchange(field, context)) {
-    exchange.exchange(field, grid, context, HaloExchange2D::Mode::Device);
+                         const Context& context, SSAHaloMode mode,
+                         bool require_cuda_aware_mpi) {
+  (void)mode;
+  if (!context.mpi_enabled() || context.size() <= 1) {
     return;
   }
-  sync_device_to_host(field);
-  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Host);
-  sync_host_to_device(field);
+  const bool can_device = can_use_device_exchange(field, context);
+  if (!can_device) {
+    if (require_cuda_aware_mpi) {
+      throw std::runtime_error(
+          "device.require_cuda_aware_mpi=1 but CUDA-aware MPI exchange is "
+          "unavailable for FieldStag2D");
+    }
+    throw std::runtime_error(
+        "Multi-rank run requires CUDA-aware MPI device-buffer exchange "
+        "for FieldStag2D");
+  }
+  HaloExchange2D exchange;
+  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Device);
 }
 
 template <typename T>
 bool can_use_device_exchange(const Field2D<T>& field, const Context& context) {
-#if GPISM_HAVE_CUDA
   return context.cuda_aware_mpi() && field.device_data() != nullptr;
-#else
-  (void)field;
-  (void)context;
-  return false;
-#endif
 }
 
 template <typename T>
 void exchange_for_device(Field2D<T>& field, const Grid2D& grid,
-                         const Context& context) {
-  HaloExchange2D exchange;
-  if (can_use_device_exchange(field, context)) {
-    exchange.exchange(field, grid, context, HaloExchange2D::Mode::Device);
+                         const Context& context, SSAHaloMode mode,
+                         bool require_cuda_aware_mpi) {
+  (void)mode;
+  if (!context.mpi_enabled() || context.size() <= 1) {
     return;
   }
-  sync_device_to_host(field);
-  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Host);
-  sync_host_to_device(field);
+  const bool can_device = can_use_device_exchange(field, context);
+  if (!can_device) {
+    if (require_cuda_aware_mpi) {
+      throw std::runtime_error(
+          "device.require_cuda_aware_mpi=1 but CUDA-aware MPI exchange is "
+          "unavailable for Field2D");
+    }
+    throw std::runtime_error(
+        "Multi-rank run requires CUDA-aware MPI device-buffer exchange "
+        "for Field2D");
+  }
+  HaloExchange2D exchange;
+  exchange.exchange(field, grid, context, HaloExchange2D::Mode::Device);
 }
 
 double global_sum(const Context* context, double local_value) {
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     double global_value = 0.0;
     MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_SUM,
                   MPI_COMM_WORLD);
@@ -118,7 +119,7 @@ double global_sum(const Context* context, double local_value) {
 
 double global_min(const Context* context, double local_value) {
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     double global_value = 0.0;
     MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_MIN,
                   MPI_COMM_WORLD);
@@ -130,7 +131,7 @@ double global_min(const Context* context, double local_value) {
 
 double global_max(const Context* context, double local_value) {
 #if GPISM_HAVE_MPI
-  if (context && context->mpi_enabled()) {
+  if (context && context->mpi_enabled() && context->size() > 1) {
     double global_value = 0.0;
     MPI_Allreduce(&local_value, &global_value, 1, MPI_DOUBLE, MPI_MAX,
                   MPI_COMM_WORLD);
@@ -281,10 +282,6 @@ void log_diag_points(const Grid2D& grid, int iter, const Field2D<int>& cell_type
 
 bool mg_device_ready(const MultigridHierarchy& mg,
                      const SSABoundaryCondition* bc) {
-#if GPISM_HAVE_CUDA
-  if (!device_enabled()) {
-    return false;
-  }
   const bool has_bc = bc && bc->mask;
   const bool has_values = has_bc && bc->values;
   if (has_bc) {
@@ -314,11 +311,6 @@ bool mg_device_ready(const MultigridHierarchy& mg,
     }
   }
   return true;
-#else
-  (void)mg;
-  (void)bc;
-  return false;
-#endif
 }
 
 struct FieldStats {
@@ -430,129 +422,43 @@ FieldStats diag_stats(const Grid2D& grid, FieldStag2D<double>& nuH,
   return stats;
 }
 
-double clamp_value(double value, double min_value, double max_value) {
-  if (max_value > 0.0 && value > max_value) {
-    value = max_value;
-  }
-  if (min_value > 0.0 && value < min_value) {
-    value = min_value;
-  }
-  return value;
-}
-
 void apply_nuH_constraints(FieldStag2D<double>& nuH,
                            const FieldStag2D<double>& nuH_prev, double nuH_min,
                            double nuH_max, double nuH_relax) {
-#if GPISM_HAVE_CUDA
-  if (nuH.component(0).has_device_data() && nuH.component(1).has_device_data() &&
-      nuH_prev.component(0).has_device_data() &&
-      nuH_prev.component(1).has_device_data()) {
-    ssa_relax_nuH_cuda(nuH.local_mx(), nuH.local_my(), nuH.ghost_width(),
-                       nuH.component(0).stride(), nuH.component(1).stride(),
-                       nuH_prev.component(0).device_data(),
-                       nuH_prev.component(1).device_data(),
-                       nuH.component(0).device_data(),
-                       nuH.component(1).device_data(), nuH_min, nuH_max,
-                       nuH_relax);
-    return;
+  if (!(nuH.component(0).has_device_data() &&
+        nuH.component(1).has_device_data() &&
+        nuH_prev.component(0).has_device_data() &&
+        nuH_prev.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "apply_nuH_constraints requires device-resident fields");
   }
-#endif
-  for (int j = 0; j < nuH.local_my(); ++j) {
-    for (int i = 0; i < nuH.local_mx(); ++i) {
-      for (int comp = 0; comp < 2; ++comp) {
-        double value = nuH(i, j, comp);
-        value = clamp_value(value, nuH_min, nuH_max);
-        if (nuH_relax < 1.0) {
-          value =
-              nuH_relax * value + (1.0 - nuH_relax) * nuH_prev(i, j, comp);
-        }
-        nuH(i, j, comp) = value;
-      }
-    }
-  }
+
+  ssa_relax_nuH_cuda(nuH.local_mx(), nuH.local_my(), nuH.ghost_width(),
+                     nuH.component(0).stride(), nuH.component(1).stride(),
+                     nuH_prev.component(0).device_data(),
+                     nuH_prev.component(1).device_data(),
+                     nuH.component(0).device_data(),
+                     nuH.component(1).device_data(), nuH_min, nuH_max,
+                     nuH_relax);
 }
 
 void apply_vel_relax(FieldStag2D<double>& vel,
                      const FieldStag2D<double>& vel_prev,
                      double vel_relax) {
-#if GPISM_HAVE_CUDA
-  if (vel.component(0).has_device_data() && vel.component(1).has_device_data() &&
-      vel_prev.component(0).has_device_data() &&
-      vel_prev.component(1).has_device_data()) {
-    ssa_relax_vel_cuda(vel.local_mx(), vel.local_my(), vel.ghost_width(),
-                       vel.component(0).stride(), vel.component(1).stride(),
-                       vel_prev.component(0).device_data(),
-                       vel_prev.component(1).device_data(),
-                       vel.component(0).device_data(),
-                       vel.component(1).device_data(), vel_relax);
-    return;
+  if (!(vel.component(0).has_device_data() &&
+        vel.component(1).has_device_data() &&
+        vel_prev.component(0).has_device_data() &&
+        vel_prev.component(1).has_device_data())) {
+    throw std::runtime_error(
+        "apply_vel_relax requires device-resident fields");
   }
-#endif
-  for (int j = 0; j < vel.local_my(); ++j) {
-    for (int i = 0; i < vel.local_mx(); ++i) {
-      vel(i, j, 0) = vel_relax * vel(i, j, 0) +
-                     (1.0 - vel_relax) * vel_prev(i, j, 0);
-      vel(i, j, 1) = vel_relax * vel(i, j, 1) +
-                     (1.0 - vel_relax) * vel_prev(i, j, 1);
-    }
-  }
-}
 
-bool is_ice_free_cell(int mask) {
-  return mask == IceFreeBedrock || mask == IceFreeOcean;
-}
-
-bool is_icy_cell(int mask) { return mask == GroundedIce || mask == FloatingIce; }
-
-void extrapolate_velocity_to_margins(const Grid2D& grid,
-                                     const Field2D<int>& cell_type,
-                                     FieldStag2D<double>& vel) {
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  Field2D<double>& u = vel.component(0);
-  Field2D<double>& v = vel.component(1);
-
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      if (!is_ice_free_cell(cell_type(i, j))) {
-        continue;
-      }
-      double sum_u = 0.0;
-      double sum_v = 0.0;
-      int n = 0;
-
-      // North
-      if (j + 1 < my && is_icy_cell(cell_type(i, j + 1))) {
-        sum_u += u(i, j + 1);
-        sum_v += v(i, j + 1);
-        ++n;
-      }
-      // East
-      if (i + 1 < mx && is_icy_cell(cell_type(i + 1, j))) {
-        sum_u += u(i + 1, j);
-        sum_v += v(i + 1, j);
-        ++n;
-      }
-      // South
-      if (j > 0 && is_icy_cell(cell_type(i, j - 1))) {
-        sum_u += u(i, j - 1);
-        sum_v += v(i, j - 1);
-        ++n;
-      }
-      // West
-      if (i > 0 && is_icy_cell(cell_type(i - 1, j))) {
-        sum_u += u(i - 1, j);
-        sum_v += v(i - 1, j);
-        ++n;
-      }
-
-      if (n > 0) {
-        const double inv = 1.0 / static_cast<double>(n);
-        u(i, j) = sum_u * inv;
-        v(i, j) = sum_v * inv;
-      }
-    }
-  }
+  ssa_relax_vel_cuda(vel.local_mx(), vel.local_my(), vel.ghost_width(),
+                     vel.component(0).stride(), vel.component(1).stride(),
+                     vel_prev.component(0).device_data(),
+                     vel_prev.component(1).device_data(),
+                     vel.component(0).device_data(),
+                     vel.component(1).device_data(), vel_relax);
 }
 
 class SSAApplyOperator : public LinearOperator {
@@ -560,24 +466,37 @@ public:
   SSAApplyOperator(const SSAOperator& op, const Grid2D& grid,
                    const FieldStag2D<double>& nuH,
                    const FieldStag2D<double>& beta,
-                   const SSABoundaryCondition* bc, const Context* context)
+                   const SSABoundaryCondition* bc, const Context* context,
+                   SSAHaloMode halo_mode, bool require_cuda_aware_mpi)
       : op_(op),
         grid_(grid),
         nuH_(nuH),
         beta_(beta),
         bc_(bc),
-        context_(context) {}
+        context_(context),
+        halo_mode_(halo_mode),
+        require_cuda_aware_mpi_(require_cuda_aware_mpi) {}
 
   void apply(const FieldStag2D<double>& x,
              FieldStag2D<double>& y) const override {
-    if (context_ && context_->mpi_enabled()) {
+    if (context_ && context_->mpi_enabled() && context_->size() > 1) {
       const int gw = x.ghost_width();
       if (gw > 0) {
         auto& mutable_x = const_cast<FieldStag2D<double>&>(x);
         HaloExchange2D exchange;
-        auto handle =
-            exchange.start_exchange(mutable_x, grid_, *context_,
-                                    HaloExchange2D::Mode::Auto);
+        const bool can_device = can_use_device_exchange(mutable_x, *context_);
+        if (!can_device && require_cuda_aware_mpi_) {
+          throw std::runtime_error(
+              "device.require_cuda_aware_mpi=1 but SSA operator halo "
+              "exchange cannot use device buffers");
+        }
+        if (!can_device) {
+          throw std::runtime_error(
+              "Multi-rank run requires CUDA-aware MPI device-buffer exchange "
+              "for SSA operator halo exchange");
+        }
+        auto handle = exchange.start_exchange(mutable_x, grid_, *context_,
+                                              HaloExchange2D::Mode::Device);
 
         const int mx = grid_.local_mx();
         const int my = grid_.local_my();
@@ -614,6 +533,8 @@ private:
   const FieldStag2D<double>& beta_;
   const SSABoundaryCondition* bc_;
   const Context* context_;
+  SSAHaloMode halo_mode_;
+  bool require_cuda_aware_mpi_;
 };
 
 void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
@@ -658,89 +579,6 @@ void build_bc_stag(const Grid2D& grid, const Field2D<double>* u_bc,
   }
 }
 
-void compute_speed_scale(const Grid2D& grid, const Field2D<double>& u_center,
-                         const Field2D<double>& v_center, double max_speed,
-                         Field2D<double>& speed_scale) {
-  if (max_speed <= 0.0) {
-    speed_scale.fill(1.0);
-    return;
-  }
-#if GPISM_HAVE_CUDA
-  // On the CUDA path, u_center/v_center are often computed on the device.
-  // Make sure we use the up-to-date values when computing the scale factor.
-  if (u_center.has_device_data()) {
-    sync_device_to_host(const_cast<Field2D<double>&>(u_center));
-  }
-  if (v_center.has_device_data()) {
-    sync_device_to_host(const_cast<Field2D<double>&>(v_center));
-  }
-#endif
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      const double u = u_center(i, j);
-      const double v = v_center(i, j);
-      const double s = std::sqrt(u * u + v * v);
-      speed_scale(i, j) = (s > max_speed && s > 0.0) ? (max_speed / s) : 1.0;
-    }
-  }
-}
-
-double max_center_speed(const Grid2D& grid, const Field2D<double>& u_center,
-                        const Field2D<double>& v_center,
-                        const Context* context) {
-#if GPISM_HAVE_CUDA
-  // u_center/v_center are often device-produced; ensure host view is current
-  // before scanning.
-  if (u_center.has_device_data()) {
-    sync_device_to_host(const_cast<Field2D<double>&>(u_center));
-  }
-  if (v_center.has_device_data()) {
-    sync_device_to_host(const_cast<Field2D<double>&>(v_center));
-  }
-#endif
-  double local_max = 0.0;
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      const double u = u_center(i, j);
-      const double v = v_center(i, j);
-      const double s = std::sqrt(u * u + v * v);
-      if (s > local_max) {
-        local_max = s;
-      }
-    }
-  }
-  return global_max(context, local_max);
-}
-
-void apply_speed_scale(const Grid2D& grid, const Field2D<double>& speed_scale,
-                       FieldStag2D<double>& vel) {
-#if GPISM_HAVE_CUDA
-  const bool have_device = vel.component(0).has_device_data() &&
-                           vel.component(1).has_device_data();
-  if (have_device) {
-    sync_device_to_host(vel);
-  }
-#endif
-  const int mx = grid.local_mx();
-  const int my = grid.local_my();
-  for (int j = 0; j < my; ++j) {
-    for (int i = 0; i < mx; ++i) {
-      const double s = speed_scale(i, j);
-      vel(i, j, 0) *= s;
-      vel(i, j, 1) *= s;
-    }
-  }
-#if GPISM_HAVE_CUDA
-  if (have_device) {
-    sync_host_to_device(vel);
-  }
-#endif
-}
-
 }  // namespace
 
 SSASolver::SSASolver(const Grid2D& grid, double rho, double g, double u_threshold,
@@ -759,6 +597,20 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                                  const SSASolverOptions& options) {
   SSASolverResult result{};
   const Context* context = options.context;
+  const SSAHaloMode halo_mode = options.halo_mode;
+  const bool require_cuda_aware_mpi = options.require_cuda_aware_mpi;
+
+  if (require_cuda_aware_mpi && context && context->mpi_enabled() &&
+      context->size() > 1 && !context->cuda_aware_mpi()) {
+    throw std::runtime_error(
+        "device.require_cuda_aware_mpi=1 but CUDA-aware MPI is disabled");
+  }
+
+  if (options.precond_precision == SSAPrecondPrecision::FP32 &&
+      options.use_mg_precond && is_rank0(context) && options.diagnostic) {
+    std::cout
+        << "SSA: mixed preconditioner precision requested (fp32 workspace).\n";
+  }
 
   workspace_.ensure(grid_);
   auto& usurf = workspace_.usurf;
@@ -770,7 +622,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   auto& nuH = workspace_.nuH;
   auto& nuH_prev = workspace_.nuH_prev;
   auto& vel_prev = workspace_.vel_prev;
-  auto& speed_scale = workspace_.speed_scale;
   auto& bc_mask = workspace_.bc_mask;
   auto& bc_values = workspace_.bc_values;
   SSABoundaryCondition bc;
@@ -783,7 +634,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                     options.rho_water, options.ice_free_thickness_standard,
                     cell_type);
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(cell_type, grid_, *context);
+    exchange_for_device(cell_type, grid_, *context, halo_mode,
+                        require_cuda_aware_mpi);
   }
 
   const bool use_bc = options.use_bc || options.enforce_ice_free_bc;
@@ -803,7 +655,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   compute_usurf_flotation(grid_, thk, topg, cell_type, options.sea_level,
                           options.rho_ice, options.rho_water, usurf);
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(usurf, grid_, *context);
+    exchange_for_device(usurf, grid_, *context, halo_mode,
+                        require_cuda_aware_mpi);
   }
 
   compute_surface_slopes_pism(grid_, usurf, cell_type, dhdx, dhdy,
@@ -828,7 +681,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   ssa_.assemble_rhs(grid_, thk, dhdx, dhdy, rhs,
                     use_bc ? &bc : nullptr);
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(rhs, grid_, *context);
+    exchange_for_device(rhs, grid_, *context, halo_mode,
+                        require_cuda_aware_mpi);
   }
 
   // Initialize nuH from the initial velocity guess so that nuH relaxation (if
@@ -836,7 +690,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
   // can slow Picard convergence dramatically and lead to large divergences
   // from PISM on real-world problems.
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(vel, grid_, *context);
+    exchange_for_device(vel, grid_, *context, halo_mode,
+                        require_cuda_aware_mpi);
   }
   viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
                          options.strength_extension_nu,
@@ -850,7 +705,16 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                           options.nuH_relax);
   }
   if (context && context->mpi_enabled() && context->size() > 1) {
-    exchange_for_device(nuH, grid_, *context);
+    exchange_for_device(nuH, grid_, *context, halo_mode,
+                        require_cuda_aware_mpi);
+  }
+
+  const int picard_convergence_check_interval =
+      std::max(1, options.picard_convergence_check_interval);
+  const bool batch_device_metrics = options.device_metrics_batch;
+  DeviceScalarBuffer picard_metrics;
+  if (batch_device_metrics) {
+    picard_metrics.ensure(7);
   }
 
   for (int iter = 0; iter < options.max_picard; ++iter) {
@@ -860,7 +724,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, topg, usurf,
                             cell_type, beta, options.basal_params);
     if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(beta, grid_, *context);
+      exchange_for_device(beta, grid_, *context, halo_mode,
+                          require_cuda_aware_mpi);
     }
 
     if (options.diagnostic && iter == 0) {
@@ -906,7 +771,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
           grid_, nuH, beta, options.use_bc ? &bc : nullptr,
           options.basal_params.beta_ice_free_bedrock);
       if (context && context->mpi_enabled() && context->size() > 1) {
-        exchange_for_device(beta, grid_, *context);
+        exchange_for_device(beta, grid_, *context, halo_mode,
+                            require_cuda_aware_mpi);
       }
     }
 
@@ -934,9 +800,13 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                       options.mg_cheby_estimate_iters,
                       options.mg_cheby_estimate_min_factor,
                       options.mg_cheby_estimate_max_factor,
+                      options.mg_jacobi_sweeps_per_launch,
                       options.use_bc ? &bc : nullptr, context,
                       options.mg_diagnostic && iter == 0,
-                      options.basal_params.beta_ice_free_bedrock);
+                      options.basal_params.beta_ice_free_bedrock,
+                      options.precond_precision == SSAPrecondPrecision::FP32
+                          ? MGPrecondPrecision::FP32
+                          : MGPrecondPrecision::FP64);
       precond_ptr = &(*precond);
       if (options.mg_diagnostic && iter == 0) {
         auto& fine = mg.level(0);
@@ -1002,13 +872,15 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     gmres_opts.tol = options.gmres_tol;
     gmres_opts.tol_relative = options.gmres_tol_relative;
     gmres_opts.tol_relative_to_rhs = options.gmres_tol_relative_to_rhs;
+    gmres_opts.residual_check_interval =
+        std::max(1, options.gmres_residual_check_interval);
     gmres_opts.verbose = options.gmres_verbose;
     gmres_opts.precond_diagnostic =
         options.gmres_precond_diagnostic && (iter == 0);
     gmres_opts.context = context;
 
     SSAApplyOperator op(ssa_, grid_, nuH, beta, use_bc ? &bc : nullptr,
-                        context);
+                        context, halo_mode, require_cuda_aware_mpi);
     GMRESResult gmres_result = gmres_solve(op, rhs, vel, gmres_opts, precond_ptr);
     result.linear_iters = gmres_result.iterations;
     result.linear_residual = gmres_result.residual;
@@ -1026,9 +898,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       } else if (options.fail_fast_require_converged && !gmres_result.converged) {
         ok = false;
         reason = "GMRES did not converge";
-      } else if (!std::isfinite(norm1(vel))) {
-        ok = false;
-        reason = "SSA velocity contains non-finite values";
       }
 
       if (!ok) {
@@ -1038,7 +907,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                     << " residual=" << gmres_result.residual << ")\n";
         }
 
-#if GPISM_HAVE_NETCDF
         if (!options.fail_fast_dump_prefix.empty()) {
           try {
             std::filesystem::path base(options.fail_fast_dump_prefix);
@@ -1079,7 +947,6 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
             }
           }
         }
-#endif
         throw std::runtime_error("SSA fail-fast: " + reason);
       }
     }
@@ -1088,29 +955,11 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
       apply_vel_relax(vel, vel_prev, options.vel_relax);
     }
 
-    if (options.max_speed > 0.0) {
-      compute_speed_scale(grid_, u_center, v_center, options.max_speed,
-                          speed_scale);
-      apply_speed_scale(grid_, speed_scale, vel);
-
-      // Enforce a strict cap by checking the resulting cell-center speed and
-      // applying a global rescale if needed.
-      const double smax = max_center_speed(grid_, u_center, v_center, context);
-      if (smax > options.max_speed * (1.0 + 1e-12) && smax > 0.0) {
-        const double factor = options.max_speed / smax;
-        scal(factor, vel);
-        if (options.diagnostic && is_rank0(context)) {
-          std::cout << "SSA: max_speed fallback rescale applied (smax=" << smax
-                    << " max_speed=" << options.max_speed
-                    << " factor=" << factor << ")\n";
-        }
-      }
-    }
-
     // Update viscosity using the new velocity iterate and check nonlinear
     // convergence based on nuH changes (PISM SSAFD semantics).
     if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(vel, grid_, *context);
+      exchange_for_device(vel, grid_, *context, halo_mode,
+                          require_cuda_aware_mpi);
     }
     viscosity_.compute_nuH(grid_, thk, vel, nuH, options.nuH_regularization,
                            options.strength_extension_nu,
@@ -1128,83 +977,94 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                             nuH_relax);
     }
     if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(nuH, grid_, *context);
+      exchange_for_device(nuH, grid_, *context, halo_mode,
+                          require_cuda_aware_mpi);
     }
 
-    // PISM SSAFD convergence uses an L1-based norm for nuH.
-    double nuH_norm1_u_local = 0.0;
-    double nuH_norm1_v_local = 0.0;
-    double nuH_diff_norm1_u_local = 0.0;
-    double nuH_diff_norm1_v_local = 0.0;
-    double vel_diff_norm2_sq_local = 0.0;
-    double vel_norm2_sq_local = 0.0;
-    if (options.force_host_convergence) {
-      const bool was_device = device_enabled();
-      if (was_device) {
-        sync_device_to_host(nuH);
-        sync_device_to_host(nuH_prev);
-        sync_device_to_host(vel);
-        sync_device_to_host(vel_prev);
-        set_device_enabled(false);
-      }
-      nuH_norm1_u_local = norm1(nuH.component(0));
-      nuH_norm1_v_local = norm1(nuH.component(1));
-      nuH_diff_norm1_u_local =
-          diff_norm1(nuH.component(0), nuH_prev.component(0));
-      nuH_diff_norm1_v_local =
-          diff_norm1(nuH.component(1), nuH_prev.component(1));
+    const bool do_convergence_check =
+        (((iter + 1) % picard_convergence_check_interval) == 0) ||
+        (iter + 1 == options.max_picard);
+    if (do_convergence_check) {
+      // PISM SSAFD convergence uses an L1-based norm for nuH.
+      double nuH_norm1_u_local = 0.0;
+      double nuH_norm1_v_local = 0.0;
+      double nuH_diff_norm1_u_local = 0.0;
+      double nuH_diff_norm1_v_local = 0.0;
+      double vel_diff_norm2_sq_local = 0.0;
+      double vel_norm2_sq_local = 0.0;
 
-      const double vel_prev_norm2_sq = dot(vel_prev, vel_prev);
-      const double vel_norm2_sq = dot(vel, vel);
-      const double vel_cross = dot(vel, vel_prev);
-      vel_diff_norm2_sq_local =
-          vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
-      vel_norm2_sq_local = vel_norm2_sq;
-      if (was_device) {
-        set_device_enabled(true);
-      }
-    } else {
-      nuH_norm1_u_local = norm1(nuH.component(0));
-      nuH_norm1_v_local = norm1(nuH.component(1));
-      nuH_diff_norm1_u_local =
-          diff_norm1(nuH.component(0), nuH_prev.component(0));
-      nuH_diff_norm1_v_local =
-          diff_norm1(nuH.component(1), nuH_prev.component(1));
+      if (batch_device_metrics) {
+        norm1_device_async(nuH.component(0), picard_metrics, 0);
+        norm1_device_async(nuH.component(1), picard_metrics, 1);
+        diff_norm1_device_async(nuH.component(0), nuH_prev.component(0),
+                                picard_metrics, 2);
+        diff_norm1_device_async(nuH.component(1), nuH_prev.component(1),
+                                picard_metrics, 3);
+        dot_device_async(vel_prev, vel_prev, picard_metrics, 4);
+        dot_device_async(vel, vel, picard_metrics, 5);
+        dot_device_async(vel, vel_prev, picard_metrics, 6);
+        copy_device_scalars_to_host(picard_metrics, 7);
+        const double* metrics = picard_metrics.host_data();
+        nuH_norm1_u_local = metrics[0];
+        nuH_norm1_v_local = metrics[1];
+        nuH_diff_norm1_u_local = metrics[2];
+        nuH_diff_norm1_v_local = metrics[3];
+        const double vel_prev_norm2_sq = metrics[4];
+        const double vel_norm2_sq = metrics[5];
+        const double vel_cross = metrics[6];
+        vel_diff_norm2_sq_local =
+            vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
+        vel_norm2_sq_local = vel_norm2_sq;
+      } else {
+        nuH_norm1_u_local = norm1(nuH.component(0));
+        nuH_norm1_v_local = norm1(nuH.component(1));
+        nuH_diff_norm1_u_local =
+            diff_norm1(nuH.component(0), nuH_prev.component(0));
+        nuH_diff_norm1_v_local =
+            diff_norm1(nuH.component(1), nuH_prev.component(1));
 
-      const double vel_prev_norm2_sq = dot(vel_prev, vel_prev);
-      const double vel_norm2_sq = dot(vel, vel);
-      const double vel_cross = dot(vel, vel_prev);
-      vel_diff_norm2_sq_local =
-          vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
-      vel_norm2_sq_local = vel_norm2_sq;
+        const double vel_prev_norm2_sq = dot(vel_prev, vel_prev);
+        const double vel_norm2_sq = dot(vel, vel);
+        const double vel_cross = dot(vel, vel_prev);
+        vel_diff_norm2_sq_local =
+            vel_norm2_sq + vel_prev_norm2_sq - 2.0 * vel_cross;
+        vel_norm2_sq_local = vel_norm2_sq;
+      }
+
+      const double nuH_norm1_u =
+          std::max(0.0, global_sum(context, nuH_norm1_u_local));
+      const double nuH_norm1_v =
+          std::max(0.0, global_sum(context, nuH_norm1_v_local));
+      const double nuH_diff_norm1_u =
+          std::max(0.0, global_sum(context, nuH_diff_norm1_u_local));
+      const double nuH_diff_norm1_v =
+          std::max(0.0, global_sum(context, nuH_diff_norm1_v_local));
+
+      const double nuH_norm =
+          std::sqrt(nuH_norm1_u * nuH_norm1_u + nuH_norm1_v * nuH_norm1_v);
+      const double nuH_norm_change =
+          std::sqrt(nuH_diff_norm1_u * nuH_diff_norm1_u +
+                    nuH_diff_norm1_v * nuH_diff_norm1_v);
+      result.nuH_change = nuH_norm_change / std::max(nuH_norm, 1e-24);
+
+      const double vel_diff_norm2_sq =
+          std::max(0.0, global_sum(context, vel_diff_norm2_sq_local));
+      const double vel_norm2_sq_global =
+          std::max(global_sum(context, vel_norm2_sq_local), 1e-24);
+      result.vel_change = std::sqrt(vel_diff_norm2_sq / vel_norm2_sq_global);
     }
-
-    const double nuH_norm1_u =
-        std::max(0.0, global_sum(context, nuH_norm1_u_local));
-    const double nuH_norm1_v =
-        std::max(0.0, global_sum(context, nuH_norm1_v_local));
-    const double nuH_diff_norm1_u =
-        std::max(0.0, global_sum(context, nuH_diff_norm1_u_local));
-    const double nuH_diff_norm1_v =
-        std::max(0.0, global_sum(context, nuH_diff_norm1_v_local));
-
-    const double nuH_norm =
-        std::sqrt(nuH_norm1_u * nuH_norm1_u + nuH_norm1_v * nuH_norm1_v);
-    const double nuH_norm_change =
-        std::sqrt(nuH_diff_norm1_u * nuH_diff_norm1_u +
-                  nuH_diff_norm1_v * nuH_diff_norm1_v);
-    result.nuH_change = nuH_norm_change / std::max(nuH_norm, 1e-24);
-
-    const double vel_diff_norm2_sq =
-        std::max(0.0, global_sum(context, vel_diff_norm2_sq_local));
-    const double vel_norm2_sq =
-        std::max(global_sum(context, vel_norm2_sq_local), 1e-24);
-    result.vel_change = std::sqrt(vel_diff_norm2_sq / vel_norm2_sq);
 
     const bool vel_convergence_enabled = options.tol_vel > 0.0;
-    const bool converged = result.nuH_change <= options.tol_nuH &&
+    const bool converged = do_convergence_check &&
+                           result.nuH_change <= options.tol_nuH &&
                            (!vel_convergence_enabled ||
                             result.vel_change <= options.tol_vel);
+    if (options.fail_fast && do_convergence_check &&
+        (!std::isfinite(result.nuH_change) ||
+         !std::isfinite(result.vel_change))) {
+      throw std::runtime_error(
+          "SSA fail-fast: Picard convergence metrics are non-finite");
+    }
     if (options.diagnostic && is_rank0(context)) {
       std::cout << "SSA Picard iter " << iter
                 << ": GMRES iters=" << gmres_result.iterations
@@ -1212,6 +1072,8 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
                 << " nuH_change=" << result.nuH_change
                 << " vel_change=" << result.vel_change
                 << " vel_check=" << (vel_convergence_enabled ? "on" : "off")
+                << " check="
+                << (do_convergence_check ? "on" : "skip")
                 << " converged=" << (converged ? "yes" : "no") << '\n';
     }
 
@@ -1230,47 +1092,35 @@ SSASolverResult SSASolver::solve(const Field2D<double>& thk,
     ssa_.compute_basal_drag(grid_, tauc, u_center, v_center, topg, usurf,
                             cell_type, beta, options.basal_params);
     if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(beta, grid_, *context);
+      exchange_for_device(beta, grid_, *context, halo_mode,
+                          require_cuda_aware_mpi);
     }
     log_diag_points(grid_, result.picard_iters, cell_type, thk, topg, usurf,
                     dhdx, dhdy, u_center, v_center, nuH, beta, rhs, context);
   }
 
   if (options.extrapolate_at_margins && result.converged) {
-#if GPISM_HAVE_CUDA
-    if (cell_type.has_device_data() && u_center.has_device_data() &&
-        v_center.has_device_data()) {
-      ssa_extrapolate_velocity_cuda(
-          grid_.local_mx(), grid_.local_my(), grid_.ghost_width(),
-          cell_type.stride(), u_center.stride(), v_center.stride(),
-          cell_type.device_data(), u_center.device_data(),
-          v_center.device_data());
-      cudaError_t err = cudaGetLastError();
-      if (err != cudaSuccess && is_rank0(context)) {
-        std::cerr << "ssa_extrapolate_velocity_cuda launch failed: "
-                  << cudaGetErrorString(err) << "\n";
-      }
-    } else
-#endif
-    {
-      const bool have_device =
-          vel.component(0).has_device_data() && vel.component(1).has_device_data();
-      if (have_device) {
-        sync_device_to_host(vel);
-      }
-      if (cell_type.has_device_data()) {
-        sync_device_to_host(cell_type);
-      }
-      extrapolate_velocity_to_margins(grid_, cell_type, vel);
-#if GPISM_HAVE_CUDA
-      if (have_device) {
-        sync_host_to_device(vel);
-      }
-#endif
+    if (!(cell_type.has_device_data() && u_center.has_device_data() &&
+          v_center.has_device_data())) {
+      throw std::runtime_error(
+          "ssa.extrapolate_at_margins requires device-resident fields");
+    }
+
+    ssa_extrapolate_velocity_cuda(grid_.local_mx(), grid_.local_my(),
+                                  grid_.ghost_width(), cell_type.stride(),
+                                  u_center.stride(), v_center.stride(),
+                                  cell_type.device_data(), u_center.device_data(),
+                                  v_center.device_data());
+    const cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+      throw std::runtime_error(std::string("ssa_extrapolate_velocity_cuda launch "
+                                           "failed: ") +
+                               cudaGetErrorString(err));
     }
 
     if (context && context->mpi_enabled() && context->size() > 1) {
-      exchange_for_device(vel, grid_, *context);
+      exchange_for_device(vel, grid_, *context, halo_mode,
+                          require_cuda_aware_mpi);
     }
   }
 

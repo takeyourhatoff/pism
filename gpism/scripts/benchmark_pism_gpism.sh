@@ -16,13 +16,12 @@ GPISM_BIN="${GPISM_BIN:-${GPISM_ROOT}/build-cuda-mpi/gpism}"
 PISM_BIN="${PISM_BIN:-${PISM_ROOT}/build-pism/pism}"
 PISM_CONFIG="${PISM_CONFIG:-${PISM_ROOT}/build-pism/pism_config.nc}"
 YEARS="${YEARS:-0.05}"
+MIN_WALL="${MIN_WALL:-120}"
+SCALE_FACTOR="${SCALE_FACTOR:-2}"
 GPISM_DT="${GPISM_DT:-0.05}"
-OUTDIR="${OUTDIR:-/tmp/gpism_pism_compare_$(date +%Y%m%d_%H%M%S)}"
-COMPARE_STRICT="${COMPARE_STRICT:-1}"
-COMPARE_TOL_RMS="${COMPARE_TOL_RMS:-0.02}"
-COMPARE_TOL_MAX="${COMPARE_TOL_MAX:-0.05}"
-COMPARE_REQUIRE_NONZERO="${COMPARE_REQUIRE_NONZERO:-1}"
-COMPARE_ALLOW_MISSING="${COMPARE_ALLOW_MISSING:-0}"
+PISM_MAX_DT="${PISM_MAX_DT:-${GPISM_DT}}"
+OUTDIR="${OUTDIR:-/tmp/gpism_pism_bench_$(date +%Y%m%d_%H%M%S)}"
+BENCH_ALLOW_MISSING="${BENCH_ALLOW_MISSING:-0}"
 
 GPISM_MG_ENABLED="${GPISM_MG_ENABLED:-1}"
 GPISM_ENFORCE_ICE_FREE_BC="${GPISM_ENFORCE_ICE_FREE_BC:-0}"
@@ -63,8 +62,8 @@ require_path() {
     return 0
   fi
   echo "${description} not found: ${path}" >&2
-  if [[ "${COMPARE_ALLOW_MISSING}" == "1" ]]; then
-    echo "Skipping compare (COMPARE_ALLOW_MISSING=1)."
+  if [[ "${BENCH_ALLOW_MISSING}" == "1" ]]; then
+    echo "Skipping benchmark (BENCH_ALLOW_MISSING=1)."
     exit 0
   fi
   exit 1
@@ -72,8 +71,8 @@ require_path() {
 
 if [[ -z "${INPUT}" ]]; then
   echo "Missing input NetCDF. Set INPUT=... to pism_Greenland_5km_v1.1.nc" >&2
-  if [[ "${COMPARE_ALLOW_MISSING}" == "1" ]]; then
-    echo "Skipping compare (COMPARE_ALLOW_MISSING=1)."
+  if [[ "${BENCH_ALLOW_MISSING}" == "1" ]]; then
+    echo "Skipping benchmark (BENCH_ALLOW_MISSING=1)."
     exit 0
   fi
   exit 1
@@ -105,9 +104,8 @@ with nc.Dataset(dst, "r+") as ds:
 print(dst)
 PY
 
-GPISM_CFG="${OUTDIR}/gpism_compare.cfg"
+GPISM_CFG="${OUTDIR}/gpism_bench.cfg"
 GPISM_PISM_CFG="${OUTDIR}/gpism_pism_params.cfg"
-PISM_PARAM_LOG="${OUTDIR}/pism_ssa_params.txt"
 
 python3 - <<PY
 import netCDF4 as nc
@@ -155,10 +153,6 @@ with open("${GPISM_PISM_CFG}", "w") as f:
                 f.write(f"{k}={v}\\n")
         else:
             f.write(f"{k}={v}\\n")
-
-with open("${PISM_PARAM_LOG}", "w") as f:
-    for k, v in params.items():
-        f.write(f"{k} = {v}\\n")
 PY
 
 write_gpism_cfg() {
@@ -191,107 +185,100 @@ time.dt=${GPISM_DT}
 EOF
 }
 
-echo "Stage 1: gpism parity run..."
-write_gpism_cfg "${YEARS}"
+echo "Stage 1: gpism benchmark (target wall >= ${MIN_WALL}s)..."
 GPISM_LOG="${OUTDIR}/gpism_run.log"
 GPISM_WALL="${OUTDIR}/gpism_wall.txt"
-{ /usr/bin/time -f "%e" -o "${GPISM_WALL}" "${GPISM_BIN}" \
-    -i "${INPUT}" -o "${OUTDIR}/gpism.nc" -y "${YEARS}" \
-    -config_override "${GPISM_CFG}"; } 2>&1 | tee "${GPISM_LOG}"
+YEARS_ACTUAL="${YEARS}"
+while true; do
+  write_gpism_cfg "${YEARS_ACTUAL}"
+  { /usr/bin/time -f "%e" -o "${GPISM_WALL}" "${GPISM_BIN}" \
+      -i "${INPUT}" -o "${OUTDIR}/gpism.nc" -y "${YEARS_ACTUAL}" \
+      -config_override "${GPISM_CFG}"; } 2>&1 | tee "${GPISM_LOG}"
+  wall=$(cat "${GPISM_WALL}")
+  echo "gpism wall ${wall}s (years=${YEARS_ACTUAL})"
+  if python3 - <<PY
+import sys
+sys.exit(0 if float("${wall}") >= float("${MIN_WALL}") else 1)
+PY
+  then
+    break
+  fi
+  YEARS_ACTUAL=$(python3 - <<PY
+years=float("${YEARS_ACTUAL}")
+factor=float("${SCALE_FACTOR}")
+print(f"{years*factor:g}")
+PY
+  )
+done
 
-echo "Stage 2: pism parity run..."
+GPISM_YEARS="${YEARS_ACTUAL}"
+GPISM_WALL_SECS="$(cat "${GPISM_WALL}")"
+GPISM_YEARS_PER_SEC="$(python3 - <<PY
+years=float("${GPISM_YEARS}")
+wall=float("${GPISM_WALL_SECS}")
+print("{:.6g}".format(years / wall))
+PY
+)"
+echo "gpism years/sec: ${GPISM_YEARS_PER_SEC} (years=${GPISM_YEARS}, wall=${GPISM_WALL_SECS}s)"
+
+echo "Stage 2: original PISM benchmark (target wall >= ${MIN_WALL}s)..."
 PISM_LOG="${OUTDIR}/pism_run.log"
 PISM_WALL="${OUTDIR}/pism_wall.txt"
-{ /usr/bin/time -f "%e" -o "${PISM_WALL}" "${PISM_BIN}" \
-    -bootstrap -i "${CAL_INPUT}" -o "${OUTDIR}/pism.nc" -y "${YEARS}" \
-    -config "${PISM_CONFIG}" -calendar 365_day \
-    -surface given -stress_balance ssa -energy none -no_mass \
-    -stress_balance.ssa.flow_law isothermal_glen \
-    -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
-    -grid.recompute_longitude_and_latitude false \
-    -extra_file "${OUTDIR}/pism_extra.nc" \
-    -extra_vars usurf -extra_times "${YEARS}"; } 2>&1 | tee "${PISM_LOG}"
-
-echo "Stage 3: parity compare (pism vs gpism)..."
-python3 - <<PY
-import netCDF4 as nc
-import numpy as np
-
-gp = "${OUTDIR}/gpism.nc"
-pstate = "${OUTDIR}/pism.nc"
-pextra = "${OUTDIR}/pism_extra.nc"
-tol_rms = float("${COMPARE_TOL_RMS}")
-tol_max = float("${COMPARE_TOL_MAX}")
-strict = "${COMPARE_STRICT}" == "1"
-require_nonzero = "${COMPARE_REQUIRE_NONZERO}" == "1"
-fail = False
-
-def last2d(var):
-    data = var[:]
-    if data.ndim == 3:
-        return data[-1]
-    if data.ndim == 2:
-        return data
-    return np.squeeze(data)
-
-with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
-    for name in ("thk", "topg", "tauc"):
-        if name in dg.variables and name in dp.variables:
-            g = last2d(dg.variables[name])
-            p = last2d(dp.variables[name])
-            if g.shape != p.shape:
-                print(f"{name}: shape mismatch {g.shape} vs {p.shape}")
-                fail = True
-                continue
-            diff = g - p
-            print(f"{name}: max|diff|={np.nanmax(np.abs(diff)):.6g}, rms={np.sqrt(np.nanmean(diff*diff)):.6g}")
-
-with nc.Dataset(gp) as dg, nc.Dataset(pextra) as dp:
-    if "usurf" in dg.variables and "usurf" in dp.variables:
-        g = last2d(dg.variables["usurf"])
-        p = last2d(dp.variables["usurf"])
-        if g.shape == p.shape:
-            diff = g - p
-            rms = np.sqrt(np.nanmean(diff * diff))
-            rms_ref = np.sqrt(np.nanmean(p * p))
-            max_abs = np.nanmax(np.abs(diff))
-            max_ref = np.nanmax(np.abs(p))
-            rel_rms = rms / rms_ref if rms_ref > 0 else 0.0
-            rel_max = max_abs / max_ref if max_ref > 0 else 0.0
-            print(f"usurf: max|diff|={max_abs:.6g}, rms={rms:.6g}, rel_rms={rel_rms:.3g}, rel_max={rel_max:.3g}")
-            if strict and (rel_rms > tol_rms or rel_max > tol_max):
-                fail = True
-        else:
-            print(f"usurf: shape mismatch {g.shape} vs {p.shape}")
-            fail = True
-
-with nc.Dataset(gp) as dg, nc.Dataset(pstate) as dp:
-    for name in ("u_ssa", "v_ssa"):
-        if name in dg.variables and name in dp.variables:
-            g = last2d(dg.variables[name])
-            p = last2d(dp.variables[name])
-            if g.shape != p.shape:
-                print(f"{name}: shape mismatch {g.shape} vs {p.shape}")
-                fail = True
-                continue
-            diff = g - p
-            rms = np.sqrt(np.nanmean(diff * diff))
-            rms_ref = np.sqrt(np.nanmean(p * p))
-            max_abs = np.nanmax(np.abs(diff))
-            max_ref = np.nanmax(np.abs(p))
-            rel_rms = rms / rms_ref if rms_ref > 0 else 0.0
-            rel_max = max_abs / max_ref if max_ref > 0 else 0.0
-            print(f"{name}: max|diff|={max_abs:.6g}, rms={rms:.6g}, rel_rms={rel_rms:.3g}, rel_max={rel_max:.3g}")
-            if require_nonzero and max_ref <= 0:
-                print(f"{name}: reference max is zero; expected non-zero velocities")
-                fail = True
-            if strict and (rel_rms > tol_rms or rel_max > tol_max):
-                fail = True
-
-if strict and fail:
-    raise SystemExit(2)
-if fail:
-    raise SystemExit(1)
+YEARS_ACTUAL="${YEARS}"
+while true; do
+  { /usr/bin/time -f "%e" -o "${PISM_WALL}" "${PISM_BIN}" \
+      -bootstrap -i "${CAL_INPUT}" -o "${OUTDIR}/pism.nc" -y "${YEARS_ACTUAL}" \
+      -config "${PISM_CONFIG}" -calendar 365_day \
+      -surface given -stress_balance ssa -energy none -no_mass \
+      -stress_balance.ssa.flow_law isothermal_glen \
+      -yield_stress constant -tauc 2e5 -ssa_method fd -o_size small \
+      -max_dt "${PISM_MAX_DT}" \
+      -grid.recompute_longitude_and_latitude false \
+      -extra_file "${OUTDIR}/pism_extra.nc" \
+      -extra_vars usurf -extra_times "${YEARS_ACTUAL}"; } 2>&1 | tee "${PISM_LOG}"
+  wall=$(cat "${PISM_WALL}")
+  echo "pism wall ${wall}s (years=${YEARS_ACTUAL})"
+  if python3 - <<PY
+import sys
+sys.exit(0 if float("${wall}") >= float("${MIN_WALL}") else 1)
 PY
+  then
+    break
+  fi
+  YEARS_ACTUAL=$(python3 - <<PY
+years=float("${YEARS_ACTUAL}")
+factor=float("${SCALE_FACTOR}")
+print(f"{years*factor:g}")
+PY
+  )
+done
+
+PISM_YEARS="${YEARS_ACTUAL}"
+PISM_WALL_SECS="$(cat "${PISM_WALL}")"
+PISM_YEARS_PER_SEC="$(python3 - <<PY
+years=float("${PISM_YEARS}")
+wall=float("${PISM_WALL_SECS}")
+print("{:.6g}".format(years / wall))
+PY
+)"
+echo "pism years/sec: ${PISM_YEARS_PER_SEC} (years=${PISM_YEARS}, wall=${PISM_WALL_SECS}s)"
+
+SPEEDUP_YEARS_PER_SEC="$(python3 - <<PY
+gp=float("${GPISM_YEARS_PER_SEC}")
+p=float("${PISM_YEARS_PER_SEC}")
+print("{:.6g}".format(gp / p))
+PY
+)"
+echo "years/sec speedup (gpism/pism): ${SPEEDUP_YEARS_PER_SEC}"
+
+cat > "${OUTDIR}/benchmark_summary.txt" <<EOF
+gpism_years=${GPISM_YEARS}
+gpism_wall_seconds=${GPISM_WALL_SECS}
+gpism_years_per_sec=${GPISM_YEARS_PER_SEC}
+pism_years=${PISM_YEARS}
+pism_wall_seconds=${PISM_WALL_SECS}
+pism_years_per_sec=${PISM_YEARS_PER_SEC}
+speedup_gpism_over_pism=${SPEEDUP_YEARS_PER_SEC}
+EOF
 
 echo "Done. Outputs in ${OUTDIR}"

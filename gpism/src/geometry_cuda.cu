@@ -3,6 +3,7 @@
 #include "gpism/profile.h"
 
 #include <cuda_runtime.h>
+#include <stdexcept>
 
 namespace gpism {
 namespace {
@@ -243,40 +244,41 @@ void compute_surface_slopes_pism_cuda(
 void GeometryDiagnostics::compute_usurf(const Grid2D& grid, const Field2D<double>& thk,
                                         const Field2D<double>& topg,
                                         Field2D<double>& usurf) {
-  if (thk.has_device_data() && topg.has_device_data() && usurf.has_device_data()) {
-    CudaEventTimer timer("geometry_usurf");
-    dim3 block(16, 16);
-    dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
-                  (grid.local_my() + block.y - 1) / block.y);
-    usurf_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
-                                      thk.ghost_width(), thk.stride(),
-                                      thk.device_data(), topg.device_data(),
-                                      nullptr, 0.0, 1.0, 1.0,
-                                      usurf.device_data());
-    return;
+  if (!(thk.has_device_data() && topg.has_device_data() && usurf.has_device_data())) {
+    throw std::runtime_error(
+        "GeometryDiagnostics::compute_usurf requires device-resident "
+        "thk/topg/usurf");
   }
-  GeometryDiagnostics::compute_usurf_cpu(grid, thk, topg, usurf);
+  CudaEventTimer timer("geometry_usurf");
+  dim3 block(16, 16);
+  dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
+                (grid.local_my() + block.y - 1) / block.y);
+  usurf_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
+                                    thk.ghost_width(), thk.stride(),
+                                    thk.device_data(), topg.device_data(),
+                                    nullptr, 0.0, 1.0, 1.0,
+                                    usurf.device_data());
 }
 
 void GeometryDiagnostics::compute_surface_slopes(const Grid2D& grid,
                                                  const Field2D<double>& usurf,
                                                  Field2D<double>& dhdx,
                                                  Field2D<double>& dhdy) {
-  if (usurf.has_device_data() && dhdx.has_device_data() && dhdy.has_device_data()) {
-    CudaEventTimer timer("geometry_slopes");
-    dim3 block(16, 16);
-    dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
-                  (grid.local_my() + block.y - 1) / block.y);
-    const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
-    slope_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
-                                      usurf.ghost_width(), usurf.stride(),
-                                      usurf.device_data(), dhdx.device_data(),
-                                      dhdy.device_data(), nullptr, 0, 0, 0, 0,
-                                      periodic,
-                                      1.0 / grid.dx(), 1.0 / grid.dy());
-    return;
+  if (!(usurf.has_device_data() && dhdx.has_device_data() && dhdy.has_device_data())) {
+    throw std::runtime_error(
+        "GeometryDiagnostics::compute_surface_slopes requires device-resident "
+        "usurf/dhdx/dhdy");
   }
-  GeometryDiagnostics::compute_surface_slopes_cpu(grid, usurf, dhdx, dhdy);
+  CudaEventTimer timer("geometry_slopes");
+  dim3 block(16, 16);
+  dim3 grid_dim((grid.local_mx() + block.x - 1) / block.x,
+                (grid.local_my() + block.y - 1) / block.y);
+  const int periodic = (grid.dims_x() == 1 && grid.dims_y() == 1) ? 1 : 0;
+  slope_kernel<<<grid_dim, block>>>(grid.local_mx(), grid.local_my(),
+                                    usurf.ghost_width(), usurf.stride(),
+                                    usurf.device_data(), dhdx.device_data(),
+                                    dhdy.device_data(), nullptr, 0, 0, 0, 0,
+                                    periodic, 1.0 / grid.dx(), 1.0 / grid.dy());
 }
 
 }  // namespace gpism

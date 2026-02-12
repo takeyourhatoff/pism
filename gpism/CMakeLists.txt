@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(gpism LANGUAGES C CXX)
+project(gpism LANGUAGES C CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,12 +11,10 @@ endif()
 
 set(GPISM_VERSION "0.0.0-dev")
 
-set(GPISM_BACKEND "cpu" CACHE STRING "Backend: cpu, cuda, hip, sycl")
+set(GPISM_BACKEND "cuda")
 set(GPISM_PRECISION "double" CACHE STRING "Precision: double or mixed")
 
-option(GPISM_ENABLE_CUDA "Enable CUDA backend" OFF)
 option(GPISM_ENABLE_MPI "Enable MPI support" ON)
-option(GPISM_ENABLE_NETCDF "Enable NetCDF support" ON)
 option(GPISM_ENABLE_CLANG_TIDY "Enable clang-tidy analysis" OFF)
 option(GPISM_BUILD_TESTS "Build gpism tests" ON)
 
@@ -35,23 +33,16 @@ if(NOT GPISM_GIT_SHA)
 endif()
 
 set(GPISM_MPI "disabled")
-set(GPISM_NETCDF "disabled")
-set(GPISM_HAVE_CUDA 0)
+set(GPISM_NETCDF "enabled")
 set(GPISM_HAVE_MPI 0)
-set(GPISM_HAVE_NETCDF 0)
 
-if(GPISM_ENABLE_CUDA)
-  enable_language(CUDA)
-  find_package(CUDAToolkit REQUIRED)
-  if(NOT CMAKE_CUDA_STANDARD)
-    set(CMAKE_CUDA_STANDARD 14)
-    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-  endif()
-  if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 86)
-  endif()
-  set(GPISM_BACKEND "cuda" CACHE STRING "Backend: cpu, cuda, hip, sycl" FORCE)
-  set(GPISM_HAVE_CUDA 1)
+find_package(CUDAToolkit REQUIRED)
+if(NOT CMAKE_CUDA_STANDARD)
+  set(CMAKE_CUDA_STANDARD 14)
+  set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+endif()
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+  set(CMAKE_CUDA_ARCHITECTURES "75;86;89")
 endif()
 
 if(GPISM_ENABLE_MPI)
@@ -62,24 +53,21 @@ if(GPISM_ENABLE_MPI)
   endif()
 endif()
 
-if(GPISM_ENABLE_NETCDF)
-  find_package(NetCDF QUIET)
-  if(NOT NetCDF_FOUND)
-    find_package(netCDF CONFIG QUIET)
-    if(netCDF_FOUND)
-      set(NetCDF_FOUND TRUE)
-    endif()
+find_package(NetCDF QUIET)
+if(NOT NetCDF_FOUND)
+  find_package(netCDF CONFIG QUIET)
+  if(netCDF_FOUND)
+    set(NetCDF_FOUND TRUE)
   endif()
-  if(NOT NetCDF_FOUND)
-    find_package(PkgConfig QUIET)
-    if(PKG_CONFIG_FOUND)
-      pkg_check_modules(NetCDF IMPORTED_TARGET QUIET netcdf)
-    endif()
+endif()
+if(NOT NetCDF_FOUND)
+  find_package(PkgConfig QUIET)
+  if(PKG_CONFIG_FOUND)
+    pkg_check_modules(NetCDF IMPORTED_TARGET QUIET netcdf)
   endif()
-  if(NetCDF_FOUND)
-    set(GPISM_NETCDF "enabled")
-    set(GPISM_HAVE_NETCDF 1)
-  endif()
+endif()
+if(NOT NetCDF_FOUND)
+  message(FATAL_ERROR "NetCDF is required for gpism GPU-only builds.")
 endif()
 
 if(GPISM_ENABLE_CLANG_TIDY)
@@ -107,12 +95,13 @@ configure_file(
 
 set(GPISM_CORE_SOURCES
   src/context.cpp
-  src/device_policy.cpp
   src/grid2d.cpp
   src/runtime_config.cpp
+  src/execution_context.cpp
   src/time_manager.cpp
   src/profile.cpp
   src/sync_stats.cpp
+  src/sync_audit.cpp
   src/thermodynamics.cpp
   src/geometry.cpp
   src/thickness.cpp
@@ -125,21 +114,16 @@ set(GPISM_CORE_SOURCES
   src/ssa_solver.cpp
 )
 
-if(GPISM_ENABLE_NETCDF)
-  list(APPEND GPISM_CORE_SOURCES src/netcdf_io.cpp src/async_output.cpp)
-endif()
-
-if(GPISM_ENABLE_CUDA)
-  list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
-  list(APPEND GPISM_CORE_SOURCES src/geometry_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/thickness_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/viscosity_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/ssa_solver_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/linear_algebra_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/multigrid_cuda.cu)
-  list(APPEND GPISM_CORE_SOURCES src/thermodynamics_cuda.cu)
-endif()
+list(APPEND GPISM_CORE_SOURCES src/netcdf_io.cpp src/async_output.cpp)
+list(APPEND GPISM_CORE_SOURCES src/gpu_stub.cu)
+list(APPEND GPISM_CORE_SOURCES src/geometry_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/thickness_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/viscosity_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/ssa_operator_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/ssa_solver_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/linear_algebra_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/multigrid_cuda.cu)
+list(APPEND GPISM_CORE_SOURCES src/thermodynamics_cuda.cu)
 
 add_library(gpism-core ${GPISM_CORE_SOURCES})
 
@@ -153,31 +137,27 @@ if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND)
   target_link_libraries(gpism-core PUBLIC MPI::MPI_CXX)
 endif()
 
-if(GPISM_ENABLE_CUDA)
-  target_link_libraries(gpism-core PUBLIC CUDA::cudart)
-  target_include_directories(gpism-core PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
-endif()
+target_link_libraries(gpism-core PUBLIC CUDA::cudart)
+target_include_directories(gpism-core PUBLIC ${CUDAToolkit_INCLUDE_DIRS})
 
-if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
-  if(TARGET NetCDF::NetCDF)
-    target_link_libraries(gpism-core PUBLIC NetCDF::NetCDF)
-  elseif(TARGET netCDF::netcdf)
-    target_link_libraries(gpism-core PUBLIC netCDF::netcdf)
-  elseif(TARGET PkgConfig::NetCDF)
-    target_link_libraries(gpism-core PUBLIC PkgConfig::NetCDF)
-  elseif(NetCDF_LIBRARIES)
-    target_link_libraries(gpism-core PUBLIC ${NetCDF_LIBRARIES})
-    target_include_directories(gpism-core PUBLIC ${NetCDF_INCLUDE_DIRS})
-  endif()
-  if(NetCDF_INCLUDE_DIRS)
-    target_include_directories(gpism-core PUBLIC ${NetCDF_INCLUDE_DIRS})
-  endif()
-  find_package(HDF5 QUIET COMPONENTS C HL)
-  if(HDF5_FOUND)
-    target_link_libraries(gpism-core PUBLIC HDF5::HDF5)
-    if(TARGET HDF5::HL)
-      target_link_libraries(gpism-core PUBLIC HDF5::HL)
-    endif()
+if(TARGET NetCDF::NetCDF)
+  target_link_libraries(gpism-core PUBLIC NetCDF::NetCDF)
+elseif(TARGET netCDF::netcdf)
+  target_link_libraries(gpism-core PUBLIC netCDF::netcdf)
+elseif(TARGET PkgConfig::NetCDF)
+  target_link_libraries(gpism-core PUBLIC PkgConfig::NetCDF)
+elseif(NetCDF_LIBRARIES)
+  target_link_libraries(gpism-core PUBLIC ${NetCDF_LIBRARIES})
+  target_include_directories(gpism-core PUBLIC ${NetCDF_INCLUDE_DIRS})
+endif()
+if(NetCDF_INCLUDE_DIRS)
+  target_include_directories(gpism-core PUBLIC ${NetCDF_INCLUDE_DIRS})
+endif()
+find_package(HDF5 QUIET COMPONENTS C HL)
+if(HDF5_FOUND)
+  target_link_libraries(gpism-core PUBLIC HDF5::HDF5)
+  if(TARGET HDF5::HL)
+    target_link_libraries(gpism-core PUBLIC HDF5::HL)
   endif()
 endif()
 
@@ -214,217 +194,80 @@ if(GPISM_BUILD_TESTS)
     set(GPISM_MPIEXEC_PREFLAGS ${MPIEXEC_PREFLAGS})
     list(APPEND GPISM_MPIEXEC_PREFLAGS "--oversubscribe")
   endif()
-  add_executable(gpism-field-smoke tests/field_smoke.cpp)
-  target_link_libraries(gpism-field-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-field-smoke COMMAND gpism-field-smoke)
+
+  function(gpism_add_smoke name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE gpism-core)
+    add_test(NAME ${name} COMMAND ${name})
+  endfunction()
+
+  gpism_add_smoke(gpism-field-smoke tests/field_smoke.cpp)
+  gpism_add_smoke(gpism-io-smoke tests/io_smoke.cpp)
+  gpism_add_smoke(gpism-io-legacy-dims-smoke tests/io_legacy_dims_smoke.cpp)
+  gpism_add_smoke(gpism-timestep-io-smoke tests/timestep_io_smoke.cpp)
+  gpism_add_smoke(gpism-ssa-operator-smoke tests/ssa_operator_smoke.cpp)
+  gpism_add_smoke(gpism-ssa-rhs-centered-smoke tests/ssa_rhs_centered_smoke.cpp)
+  gpism_add_smoke(gpism-ssa-beta-centered-smoke tests/ssa_beta_centered_smoke.cpp)
+  gpism_add_smoke(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
+  gpism_add_smoke(gpism-thickness-smoke tests/thickness_smoke.cpp)
+  gpism_add_smoke(gpism-timestep-gpu-smoke tests/timestep_gpu_smoke.cpp)
+  gpism_add_smoke(gpism-timestep-device-residency-smoke
+                  tests/timestep_device_residency_smoke.cpp)
+  gpism_add_smoke(gpism-gmres-device-orthogonalization-smoke
+                  tests/gmres_device_orthogonalization_smoke.cpp)
+  gpism_add_smoke(gpism-mg-mixed-precision-parity-smoke
+                  tests/mg_mixed_precision_parity_smoke.cpp)
+  gpism_add_smoke(gpism-gmres-smoke tests/gmres_smoke.cpp)
+  gpism_add_smoke(gpism-gmres-givens-smoke tests/gmres_givens_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-levels-smoke tests/multigrid_levels_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-transfer-smoke tests/multigrid_transfer_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-jacobi-smoke tests/multigrid_jacobi_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-chebyshev-smoke tests/multigrid_chebyshev_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-vcycle-smoke tests/multigrid_vcycle_smoke.cpp)
+  gpism_add_smoke(gpism-mg-preconditioner-smoke tests/mg_preconditioner_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-coeff-smoke tests/multigrid_coeff_smoke.cpp)
+  gpism_add_smoke(gpism-multigrid-scaling-smoke tests/multigrid_scaling_smoke.cpp)
+  gpism_add_smoke(gpism-ssa-picard-smoke tests/ssa_picard_smoke.cpp)
+  gpism_add_smoke(gpism-ssa-picard-nontrivial-smoke tests/ssa_picard_nontrivial_smoke.cpp)
+
   if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
     add_test(
       NAME gpism-field-smoke-mpi
       COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-field-smoke> ${MPIEXEC_POSTFLAGS}
     )
-  endif()
-
-  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
-    add_executable(gpism-gmres-mpi-smoke tests/gmres_mpi_smoke.cpp)
-    target_link_libraries(gpism-gmres-mpi-smoke PRIVATE gpism-core)
     add_test(
-      NAME gpism-gmres-mpi-smoke-1
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${GPISM_MPIEXEC_PREFLAGS}
-              $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
-    )
-    add_test(
-      NAME gpism-gmres-mpi-smoke-2
+      NAME gpism-io-smoke-mpi
       COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
-              $<TARGET_FILE:gpism-gmres-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+              $<TARGET_FILE:gpism-io-smoke> ${MPIEXEC_POSTFLAGS}
     )
-  endif()
-
-  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
-    add_executable(gpism-ssa-picard-mpi-smoke tests/ssa_picard_mpi_smoke.cpp)
-    target_link_libraries(gpism-ssa-picard-mpi-smoke PRIVATE gpism-core)
+    gpism_add_smoke(gpism-ssa-operator-mpi-smoke tests/ssa_operator_mpi_smoke.cpp)
     add_test(
-      NAME gpism-ssa-picard-mpi-smoke-1
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 1 ${GPISM_MPIEXEC_PREFLAGS}
-              $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
-    )
-    add_test(
-      NAME gpism-ssa-picard-mpi-smoke-2
-      COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
-              $<TARGET_FILE:gpism-ssa-picard-mpi-smoke> ${MPIEXEC_POSTFLAGS}
-    )
-  endif()
-
-  if(NOT GPISM_ENABLE_CUDA)
-    add_executable(gpism-gmres-mg-compare-smoke tests/gmres_mg_compare_smoke.cpp)
-    target_link_libraries(gpism-gmres-mg-compare-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-gmres-mg-compare-smoke COMMAND gpism-gmres-mg-compare-smoke)
-  endif()
-
-  if(GPISM_ENABLE_NETCDF AND NetCDF_FOUND)
-    add_executable(gpism-io-smoke tests/io_smoke.cpp)
-    target_link_libraries(gpism-io-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-io-smoke COMMAND gpism-io-smoke)
-    add_executable(gpism-io-legacy-dims-smoke tests/io_legacy_dims_smoke.cpp)
-    target_link_libraries(gpism-io-legacy-dims-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-io-legacy-dims-smoke COMMAND gpism-io-legacy-dims-smoke)
-    if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
-      add_test(
-        NAME gpism-io-smoke-mpi
-        COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
-                $<TARGET_FILE:gpism-io-smoke> ${MPIEXEC_POSTFLAGS}
-      )
-    endif()
-    add_executable(gpism-timestep-io-smoke tests/timestep_io_smoke.cpp)
-    target_link_libraries(gpism-timestep-io-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-timestep-io-smoke COMMAND gpism-timestep-io-smoke)
-
-    add_test(
-      NAME gpism-pism-ssa-compare
-      COMMAND ${CMAKE_COMMAND} -E env
-              GPISM_BIN=$<TARGET_FILE:gpism>
-              COMPARE_STRICT=1
-              COMPARE_TOL_RMS=0.02
-              COMPARE_TOL_MAX=0.05
-              COMPARE_REQUIRE_NONZERO=1
-              COMPARE_ALLOW_MISSING=1
-              MIN_WALL=0
-              YEARS=0.05
-              GPISM_DT=0.05
-              ${CMAKE_CURRENT_SOURCE_DIR}/scripts/compare_pism_gpism.sh
-    )
-  endif()
-
-  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE AND GPISM_ENABLE_CUDA)
-    add_executable(gpism-ssa-operator-mpi-smoke tests/ssa_operator_mpi_smoke.cpp)
-    target_link_libraries(gpism-ssa-operator-mpi-smoke PRIVATE gpism-core)
-    add_test(
-      NAME gpism-ssa-operator-mpi-smoke
+      NAME gpism-ssa-operator-mpi-smoke-2
       COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
               $<TARGET_FILE:gpism-ssa-operator-mpi-smoke> ${MPIEXEC_POSTFLAGS}
     )
-  endif()
-
-  add_executable(gpism-ssa-operator-smoke tests/ssa_operator_smoke.cpp)
-  target_link_libraries(gpism-ssa-operator-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-operator-smoke COMMAND gpism-ssa-operator-smoke)
-
-  add_executable(gpism-ssa-rhs-centered-smoke tests/ssa_rhs_centered_smoke.cpp)
-  target_link_libraries(gpism-ssa-rhs-centered-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-rhs-centered-smoke COMMAND gpism-ssa-rhs-centered-smoke)
-
-  add_executable(gpism-ssa-beta-centered-smoke tests/ssa_beta_centered_smoke.cpp)
-  target_link_libraries(gpism-ssa-beta-centered-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-beta-centered-smoke COMMAND gpism-ssa-beta-centered-smoke)
-
-  add_executable(gpism-linear-algebra-smoke tests/linear_algebra_smoke.cpp)
-  target_link_libraries(gpism-linear-algebra-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-linear-algebra-smoke COMMAND gpism-linear-algebra-smoke)
-
-  add_executable(gpism-thickness-smoke tests/thickness_smoke.cpp)
-  target_link_libraries(gpism-thickness-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-thickness-smoke COMMAND gpism-thickness-smoke)
-
-  add_executable(gpism-vertical-diffusion-smoke tests/vertical_diffusion_smoke.cpp)
-  target_link_libraries(gpism-vertical-diffusion-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-vertical-diffusion-smoke COMMAND gpism-vertical-diffusion-smoke)
-
-  add_executable(gpism-thermo-scale-smoke tests/thermo_scale_smoke.cpp)
-  target_link_libraries(gpism-thermo-scale-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-thermo-scale-smoke COMMAND gpism-thermo-scale-smoke)
-
-  if(GPISM_ENABLE_CUDA)
-    add_executable(gpism-timestep-gpu-smoke tests/timestep_gpu_smoke.cpp)
-    target_link_libraries(gpism-timestep-gpu-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-timestep-gpu-smoke COMMAND gpism-timestep-gpu-smoke)
-  endif()
-
-  add_executable(gpism-viscosity-temperature-smoke tests/viscosity_temperature_smoke.cpp)
-  target_link_libraries(gpism-viscosity-temperature-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-viscosity-temperature-smoke COMMAND gpism-viscosity-temperature-smoke)
-
-  add_executable(gpism-ssa-temperature-response-smoke tests/ssa_temperature_response_smoke.cpp)
-  target_link_libraries(gpism-ssa-temperature-response-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-temperature-response-smoke COMMAND gpism-ssa-temperature-response-smoke)
-
-  add_executable(gpism-ssa-timestep-smoke tests/ssa_timestep_smoke.cpp)
-  target_link_libraries(gpism-ssa-timestep-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-timestep-smoke COMMAND gpism-ssa-timestep-smoke)
-
-  add_executable(gpism-gmres-smoke tests/gmres_smoke.cpp)
-  target_link_libraries(gpism-gmres-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-gmres-smoke COMMAND gpism-gmres-smoke)
-
-  add_executable(gpism-gmres-givens-smoke tests/gmres_givens_smoke.cpp)
-  target_link_libraries(gpism-gmres-givens-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-gmres-givens-smoke COMMAND gpism-gmres-givens-smoke)
-
-  add_executable(gpism-multigrid-levels-smoke tests/multigrid_levels_smoke.cpp)
-  target_link_libraries(gpism-multigrid-levels-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-levels-smoke COMMAND gpism-multigrid-levels-smoke)
-
-  add_executable(gpism-multigrid-transfer-smoke tests/multigrid_transfer_smoke.cpp)
-  target_link_libraries(gpism-multigrid-transfer-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-transfer-smoke COMMAND gpism-multigrid-transfer-smoke)
-
-  add_executable(gpism-multigrid-jacobi-smoke tests/multigrid_jacobi_smoke.cpp)
-  target_link_libraries(gpism-multigrid-jacobi-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-jacobi-smoke COMMAND gpism-multigrid-jacobi-smoke)
-
-  add_executable(gpism-multigrid-chebyshev-smoke tests/multigrid_chebyshev_smoke.cpp)
-  target_link_libraries(gpism-multigrid-chebyshev-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-chebyshev-smoke COMMAND gpism-multigrid-chebyshev-smoke)
-
-  add_executable(gpism-multigrid-vcycle-smoke tests/multigrid_vcycle_smoke.cpp)
-  target_link_libraries(gpism-multigrid-vcycle-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-vcycle-smoke COMMAND gpism-multigrid-vcycle-smoke)
-
-  add_executable(gpism-mg-preconditioner-smoke tests/mg_preconditioner_smoke.cpp)
-  target_link_libraries(gpism-mg-preconditioner-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-mg-preconditioner-smoke COMMAND gpism-mg-preconditioner-smoke)
-
-  add_executable(gpism-mg-preconditioner-effectiveness-smoke
-                 tests/mg_preconditioner_effectiveness_smoke.cpp)
-  target_link_libraries(gpism-mg-preconditioner-effectiveness-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-mg-preconditioner-effectiveness-smoke
-           COMMAND gpism-mg-preconditioner-effectiveness-smoke)
-
-  add_executable(gpism-mg-preconditioner-effectiveness-bc-mpi-smoke
-                 tests/mg_preconditioner_effectiveness_bc_mpi_smoke.cpp)
-  target_link_libraries(gpism-mg-preconditioner-effectiveness-bc-mpi-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-mg-preconditioner-effectiveness-bc-mpi-smoke
-           COMMAND gpism-mg-preconditioner-effectiveness-bc-mpi-smoke)
-  if(GPISM_ENABLE_MPI AND MPI_CXX_FOUND AND MPIEXEC_EXECUTABLE)
+    gpism_add_smoke(gpism-halo-exchange-device-persistent-smoke
+                    tests/halo_exchange_device_persistent_smoke.cpp)
     add_test(
-      NAME gpism-mg-preconditioner-effectiveness-bc-mpi-smoke-2
+      NAME gpism-halo-exchange-device-persistent-smoke-2
       COMMAND ${MPIEXEC_EXECUTABLE} ${MPIEXEC_NUMPROC_FLAG} 2 ${GPISM_MPIEXEC_PREFLAGS}
-              $<TARGET_FILE:gpism-mg-preconditioner-effectiveness-bc-mpi-smoke> ${MPIEXEC_POSTFLAGS}
+              $<TARGET_FILE:gpism-halo-exchange-device-persistent-smoke> ${MPIEXEC_POSTFLAGS}
     )
   endif()
 
-  add_executable(gpism-multigrid-coeff-smoke tests/multigrid_coeff_smoke.cpp)
-  target_link_libraries(gpism-multigrid-coeff-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-coeff-smoke COMMAND gpism-multigrid-coeff-smoke)
-
-  add_executable(gpism-multigrid-scaling-smoke tests/multigrid_scaling_smoke.cpp)
-  target_link_libraries(gpism-multigrid-scaling-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-multigrid-scaling-smoke COMMAND gpism-multigrid-scaling-smoke)
-
-  add_executable(gpism-ssa-picard-smoke tests/ssa_picard_smoke.cpp)
-  target_link_libraries(gpism-ssa-picard-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-picard-smoke COMMAND gpism-ssa-picard-smoke)
-
-  add_executable(gpism-ssa-picard-nontrivial-smoke tests/ssa_picard_nontrivial_smoke.cpp)
-  target_link_libraries(gpism-ssa-picard-nontrivial-smoke PRIVATE gpism-core)
-  add_test(NAME gpism-ssa-picard-nontrivial-smoke COMMAND gpism-ssa-picard-nontrivial-smoke)
-
-  if(GPISM_ENABLE_CUDA)
-    add_executable(gpism-ssa-operator-cuda-smoke tests/ssa_operator_cuda_smoke.cpp)
-    target_link_libraries(gpism-ssa-operator-cuda-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-ssa-operator-cuda-smoke COMMAND gpism-ssa-operator-cuda-smoke)
-
-    add_executable(gpism-ssa-picard-parity-smoke tests/ssa_picard_parity_smoke.cpp)
-    target_link_libraries(gpism-ssa-picard-parity-smoke PRIVATE gpism-core)
-    add_test(NAME gpism-ssa-picard-parity-smoke COMMAND gpism-ssa-picard-parity-smoke)
-  endif()
+  add_test(
+    NAME gpism-pism-ssa-compare
+    COMMAND ${CMAKE_COMMAND} -E env
+            GPISM_BIN=$<TARGET_FILE:gpism>
+            COMPARE_STRICT=1
+            COMPARE_TOL_RMS=0.02
+            COMPARE_TOL_MAX=0.05
+            COMPARE_REQUIRE_NONZERO=1
+            COMPARE_ALLOW_MISSING=1
+            MIN_WALL=0
+            YEARS=0.05
+            GPISM_DT=0.05
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/compare_pism_gpism.sh
+  )
 endif()

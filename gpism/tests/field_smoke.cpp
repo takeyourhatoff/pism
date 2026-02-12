@@ -108,6 +108,15 @@ bool check_ghosts(const gpism::Field2D<double>& field, const gpism::Grid2D& grid
 int main(int argc, char** argv) {
   gpism::Context context(&argc, &argv);
 
+#if GPISM_HAVE_MPI
+  if (context.mpi_enabled() && context.size() > 1 && !context.cuda_aware_mpi()) {
+    if (context.rank() == 0) {
+      std::cout << "Halo exchange smoke test: SKIPPED (MPI is not CUDA-aware)\n";
+    }
+    return 0;
+  }
+#endif
+
   gpism::Grid2D grid(8, 8, 1.0, 1.0, 1, context.rank(), context.size());
   gpism::Field2D<double> field(grid.local_mx(), grid.local_my(), grid.ghost_width());
   gpism::FieldStag2D<double> stag(grid.local_mx(), grid.local_my(), grid.ghost_width());

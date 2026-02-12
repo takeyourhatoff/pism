@@ -1,4 +1,6 @@
 #include "gpism/config.h"
+#include "gpism/async_output.h"
+#include "gpism/context.h"
 #include "gpism/field_sync.h"
 #include "gpism/geometry.h"
 #include "gpism/netcdf_io.h"
@@ -12,15 +14,13 @@
 #include <cstdlib>
 #include <iostream>
 
-#if GPISM_HAVE_NETCDF
 #include <netcdf.h>
-#endif
 
 int main() {
-#if !GPISM_HAVE_NETCDF
-  std::cout << "timestep_io_smoke skipped (NetCDF disabled)\n";
-  return 0;
-#else
+  int argc = 0;
+  char** argv = nullptr;
+  gpism::Context context(&argc, &argv);
+
   const int mx = 4;
   const int my = 4;
   const int gw = 1;
@@ -86,7 +86,8 @@ int main() {
     }
   }
 
-  gpism::NetcdfIO io;
+  gpism::AsyncOutputWriter output_writer(true);
+  output_writer.configure(grid, fields, true, 3, true);
   const std::string path = "gpism_timestep_io_smoke.nc";
   std::remove(path.c_str());
   gpism::TimeManager clock(0.0, 0.1, 1.0, 0.5);
@@ -117,11 +118,7 @@ int main() {
     fields.has_velocity = true;
 
     if (clock.should_output()) {
-      gpism::sync_device_to_host(fields.thk);
-      gpism::sync_device_to_host(fields.usurf);
-      gpism::sync_device_to_host(fields.uvel);
-      gpism::sync_device_to_host(fields.vvel);
-      if (!io.write_output_append(path, grid, fields, clock.time())) {
+      if (!output_writer.enqueue(path, context, grid, fields, clock.time())) {
         std::cerr << "failed to write output\n";
         return 1;
       }
@@ -134,6 +131,11 @@ int main() {
 
   if (outputs < 2) {
     std::cerr << "expected multiple outputs, got " << outputs << "\n";
+    return 1;
+  }
+
+  if (!output_writer.flush()) {
+    std::cerr << "failed to flush output\n";
     return 1;
   }
 
@@ -160,5 +162,4 @@ int main() {
 
   std::cout << "timestep_io_smoke passed\n";
   return 0;
-#endif
 }
